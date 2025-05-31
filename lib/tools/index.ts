@@ -19,10 +19,15 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
   console.log(`Building VAPI tools for ${tools.length} registered tools`);
   
   return tools.map(t => {
+    // Generate JSON schema and remove $schema property that VAPI doesn't accept
+    const schema = zodToJsonSchema(t.schema, { target: "jsonSchema7", $refStrategy: "none" });
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { $schema, ...schemaWithoutDollarSchema } = schema;
+    
     const vapiToolFunction: VapiToolFunction = {
       name: t.name,
       description: t.description,
-      parameters: zodToJsonSchema(t.schema, { target: "jsonSchema7", $refStrategy: "none" }),
+      parameters: schemaWithoutDollarSchema,
     };
     
     const vapiTool: VapiToolSchema = {
