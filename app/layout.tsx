@@ -42,6 +42,12 @@ async function Header() {
               >
                 Practice Config
               </a>
+              <a 
+                href="/laine" 
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Laine Assistant
+              </a>
               <UserButton afterSignOutUrl="/" />
             </div>
           ) : (

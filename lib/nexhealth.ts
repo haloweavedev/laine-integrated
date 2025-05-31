@@ -121,7 +121,8 @@ export async function getNexhealthBearerToken(): Promise<string> {
   }
 }
 
-async function fetchNexhealthAPI(
+// Export the generic API function for use in tools and other modules
+export async function fetchNexhealthAPI(
   path: string, // e.g., "/appointment_types"
   subdomain: string, // Practice-specific subdomain
   params?: Record<string, string | number | string[]>,
