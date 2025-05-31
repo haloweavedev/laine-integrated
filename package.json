@@ -14,7 +14,10 @@
     "db:seed": "prisma db seed",
     "webhook:setup": "node scripts/manage-nexhealth-webhooks.js setup-global-endpoint",
     "webhook:subscribe": "node scripts/manage-nexhealth-webhooks.js subscribe-practice",
-    "webhook:list": "node scripts/manage-nexhealth-webhooks.js list-subscriptions"
+    "webhook:list": "node scripts/manage-nexhealth-webhooks.js list-subscriptions",
+    "db:list": "node scripts/clean-database.js list",
+    "db:clean": "node scripts/clean-database.js clean-test",
+    "db:clean-all": "node scripts/clean-database.js clean-all-confirmed"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.20.2",

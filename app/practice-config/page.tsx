@@ -141,7 +141,19 @@ export default async function PracticeConfigPage() {
     include: {
       appointmentTypes: true,
       providers: true,
+      nexhealthWebhookSubscriptions: {
+        where: { isActive: true },
+        orderBy: [
+          { resourceType: 'asc' },
+          { eventName: 'asc' }
+        ]
+      }
     }
+  });
+
+  // Check if global webhook endpoint is configured
+  const globalWebhookEndpoint = await prisma.globalNexhealthWebhookEndpoint.findUnique({
+    where: { id: "singleton" }
   });
 
   return (
@@ -212,17 +224,56 @@ export default async function PracticeConfigPage() {
             {/* Webhook Management Section */}
             <div className="bg-white rounded-lg shadow p-6 mb-6">
               <h2 className="text-lg font-semibold mb-4">Webhook Integration</h2>
-              <div className="flex items-center gap-4 mb-4">
-                <div className="flex-1">
-                  <p className="text-sm text-gray-600 mb-2">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600 mb-3">
                     Webhooks allow Laine to receive real-time updates from NexHealth when appointments are created, 
                     updated, or when patients are modified.
                   </p>
-                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-                    <p className="text-sm text-blue-800">
-                      ℹ️ Webhook management is available via CLI commands. Use <code className="bg-blue-100 px-1 rounded">pnpm webhook:subscribe {practice.nexhealthSubdomain}</code> to enable webhooks for this practice.
-                    </p>
-                  </div>
+                  
+                  {!globalWebhookEndpoint ? (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                      <p className="text-sm text-yellow-800">
+                        ⚠️ Global webhook endpoint not configured. Contact support to enable webhook functionality.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <h3 className="font-medium text-gray-900 mb-3">Subscription Status</h3>
+                      {practice.nexhealthWebhookSubscriptions && practice.nexhealthWebhookSubscriptions.length > 0 ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {practice.nexhealthWebhookSubscriptions.map((sub) => (
+                              <div key={`${sub.resourceType}-${sub.eventName}`} className="flex items-center gap-2 text-sm bg-green-50 border border-green-200 rounded-md p-2">
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                <span className="text-gray-700 font-medium">
+                                  {sub.resourceType}.{sub.eventName}
+                                </span>
+                                <span className="text-xs text-gray-500 ml-auto">
+                                  ID: {sub.nexhealthSubscriptionId}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="bg-green-50 border border-green-200 rounded-md p-3">
+                            <p className="text-sm text-green-800">
+                              ✅ {practice.nexhealthWebhookSubscriptions.length} webhook subscription(s) active. 
+                              Laine will receive real-time updates from NexHealth.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                          <p className="text-sm text-blue-800">
+                            ℹ️ No webhook subscriptions found. Use the command below to enable webhooks:
+                          </p>
+                          <code className="block mt-2 bg-blue-100 px-2 py-1 rounded text-sm">
+                            pnpm webhook:subscribe {practice.nexhealthSubdomain}
+                          </code>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </div>

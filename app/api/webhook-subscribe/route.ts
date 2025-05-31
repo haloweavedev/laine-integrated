@@ -77,8 +77,6 @@ export async function POST() {
       { resourceType: "Patient", eventName: "patient_updated" },
       { resourceType: "Appointment", eventName: "appointment_created" },
       { resourceType: "Appointment", eventName: "appointment_updated" },
-      { resourceType: "Appointment", eventName: "appointment_insertion.complete" },
-      { resourceType: "Appointment", eventName: "appointment_insertion.failed" },
       { resourceType: "SyncStatus", eventName: "sync_status_read_change" },
       { resourceType: "SyncStatus", eventName: "sync_status_write_change" },
     ];
@@ -114,7 +112,7 @@ export async function POST() {
           }
         );
 
-        const nexhealthSubscriptionId = String(subscriptionResponse.data.id);
+        const nexhealthSubscriptionId = String(subscriptionResponse.data.data.id);
 
         await prisma.nexhealthWebhookSubscription.upsert({
           where: {

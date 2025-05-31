@@ -189,11 +189,9 @@ async function subscribePractice(practiceSubdomain) {
       { resourceType: "Patient", eventName: "patient_created" },
       { resourceType: "Patient", eventName: "patient_updated" },
       
-      // Appointment events
+      // Appointment events  
       { resourceType: "Appointment", eventName: "appointment_created" },
       { resourceType: "Appointment", eventName: "appointment_updated" },
-      { resourceType: "Appointment", eventName: "appointment_insertion.complete" },
-      { resourceType: "Appointment", eventName: "appointment_insertion.failed" },
       
       // Sync status events (for system monitoring)
       { resourceType: "SyncStatus", eventName: "sync_status_read_change" },
@@ -229,10 +227,11 @@ async function subscribePractice(practiceSubdomain) {
           {
             method: 'POST',
             body: { resource_type: event.resourceType, event: event.eventName, active: true },
-            params: { subdomain: practiceSubdomain } // NexHealth API uses subdomain as a query parameter here
+            params: { subdomain: practice.nexhealthSubdomain }
           }
         );
-        const nexhealthSubscriptionId = String(subscriptionResponse.data.id);
+
+        const nexhealthSubscriptionId = String(subscriptionResponse.data.data.id);
 
         // Store subscription in our DB
         await prisma.nexhealthWebhookSubscription.upsert({
