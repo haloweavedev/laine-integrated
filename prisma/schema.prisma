@@ -66,3 +66,11 @@ model Provider {
 
   @@unique([practiceId, nexhealthProviderId])
 }
+
+model NexhealthTokenCache {
+  id          String   @id @default("singleton") // Fixed ID for single token entry
+  accessToken String   @db.Text // The bearer token can be long
+  expiresAt   DateTime // Timestamp when the token expires
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
