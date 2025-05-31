@@ -34,10 +34,9 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
       type: "function",
       async: t.async ?? false,
       function: vapiToolFunction,
-      // This server URL points to a single generic handler for all tools
-      // VAPI will POST to this URL with the tool name and arguments in the payload
+      // Tool-specific URL for VAPI to call this specific tool
       server: { 
-        url: `${appBaseUrl}/api/vapi/tool-handler`,
+        url: `${appBaseUrl}/api/tools/${t.name}`,
         // secret: process.env.VAPI_TOOL_WEBHOOK_SECRET // Add if VAPI supports per-tool secrets
       },
     };

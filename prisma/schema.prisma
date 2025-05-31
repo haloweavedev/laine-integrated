@@ -30,6 +30,7 @@ model Practice {
   appointmentTypes AppointmentType[]
   providers        Provider[]
   callLogs         CallLog[] // For VAPI call logging
+  toolLogs         ToolLog[] // For tool execution logging
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -109,8 +110,40 @@ model CallLog {
   nexhealthPatientId            String?   // If patient identified/created
   bookedAppointmentNexhealthId  String?   // If appointment booked
 
+  // Enhanced fields as per refactoring plan
+  assistantId                   String?   // VAPI assistant ID
+  endedReason                   String?   // From end-of-call-report
+  callDurationSeconds           Int?      // Duration in seconds
+  cost                          Decimal?  // Call cost if available
+
+  toolLogs                      ToolLog[] // One-to-many relationship
+
   createdAt                     DateTime  @default(now())
   updatedAt                     DateTime  @updatedAt
+}
+
+// New model for tracking individual tool executions
+model ToolLog {
+  id                String    @id @default(cuid())
+  practiceId        String
+  practice          Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  vapiCallId        String?   // Optional - tools might be called outside of calls
+  callLog           CallLog?  @relation(fields: [vapiCallId], references: [vapiCallId], onDelete: Cascade)
+  
+  toolName          String    // Name of the tool executed
+  toolCallId        String    // VAPI tool call ID
+  arguments         String?   @db.Text // JSON string of (redacted) arguments
+  result            String?   @db.Text // JSON string of result
+  success           Boolean   // Whether execution succeeded
+  error             String?   // Error message if failed
+  executionTimeMs   Int?      // Execution time in milliseconds
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([practiceId, toolName])
+  @@index([vapiCallId])
 }
 
 model AppointmentType {

@@ -48,12 +48,13 @@ async function createPracticeAssistant() {
       tools
     },
     voice: {
-      provider: "11labs" as const,
-      voiceId: "burt"
+      provider: "vapi" as const,
+      voiceId: "Elliot"
     },
     firstMessage: "Hello! This is Laine from your dental office. How can I help you today?",
-    serverUrl: `${appBaseUrl}/api/vapi/tool-handler`,
-    serverMessages: ["tool-calls", "end-of-call-report", "status-update", "transcript"],
+    // General assistant webhooks (status updates, call reports, transcripts)
+    serverUrl: `${appBaseUrl}/api/vapi/webhook`,
+    serverMessages: ["end-of-call-report", "status-update", "transcript"],
     silenceTimeoutSeconds: 30,
     maxDurationSeconds: 600, // 10 minutes
     backgroundSound: "office" as const,
@@ -72,8 +73,8 @@ async function createPracticeAssistant() {
       create: {
         practiceId: practice.id,
         vapiAssistantId: vapiAssistant.id,
-        voiceProvider: "11labs",
-        voiceId: "burt",
+        voiceProvider: "vapi",
+        voiceId: "Elliot",
         systemPrompt: "You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient.",
         firstMessage: "Hello! This is Laine from your dental office. How can I help you today?"
       },
@@ -218,9 +219,10 @@ export default async function LainePage() {
                 <select
                   id="voiceProvider"
                   name="voiceProvider"
-                  defaultValue={practice.assistantConfig?.voiceProvider}
+                  defaultValue={practice.assistantConfig?.voiceProvider || "vapi"}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
+                  <option value="vapi">VAPI (Recommended)</option>
                   <option value="11labs">ElevenLabs</option>
                   <option value="openai">OpenAI</option>
                   <option value="playht">PlayHT</option>
@@ -235,12 +237,14 @@ export default async function LainePage() {
                   type="text"
                   id="voiceId"
                   name="voiceId"
-                  defaultValue={practice.assistantConfig?.voiceId}
-                  placeholder="e.g., burt, alloy"
+                  defaultValue={practice.assistantConfig?.voiceId || "Elliot"}
+                  placeholder="e.g., Elliot, Kylie (VAPI), burt (ElevenLabs), alloy (OpenAI)"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-sm text-gray-500 mt-1">
-                  Voice ID specific to the selected provider (e.g., &quot;burt&quot; for ElevenLabs, &quot;alloy&quot; for OpenAI)
+                  <strong>VAPI:</strong> Elliot, Kylie &nbsp;|&nbsp; 
+                  <strong>ElevenLabs:</strong> burt &nbsp;|&nbsp; 
+                  <strong>OpenAI:</strong> alloy, echo, fable, onyx, nova, shimmer
                 </p>
               </div>
 

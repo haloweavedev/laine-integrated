@@ -22,7 +22,7 @@ export interface VapiModel {
 }
 
 export interface VapiVoice {
-  provider: "11labs" | "openai" | "playht" | "lmnt" | "neets" | "rime";
+  provider: "11labs" | "openai" | "playht" | "lmnt" | "neets" | "rime" | "vapi";
   voiceId: string; // Provider-specific voice ID
   speed?: number;
   stability?: number;
