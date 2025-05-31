@@ -16,28 +16,43 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Laine AI Voice Assistant",
-  description: "Barebones testbed for VAPI & NexHealth integration",
+  description: "Advanced voice assistant for healthcare practices with seamless NexHealth integration",
 };
 
 async function Header() {
   const { userId } = await auth();
   
   return (
-    <header className="border-b bg-white px-4 py-3">
-      <div className="flex items-center justify-between max-w-6xl mx-auto">
-        <h1 className="text-xl font-semibold">Laine AI</h1>
+    <header className="fixed top-0 left-0 right-0 bg-white/10 backdrop-blur-md border-b border-slate-200/30 z-50">
+      <div className="flex items-center justify-between max-w-6xl mx-auto px-6 py-4">
+        <div className="flex items-center">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-slate-900">Laine AI</h1>
+        </div>
         <div className="flex items-center gap-4">
           {userId ? (
-            <UserButton afterSignOutUrl="/" />
+            <div className="flex items-center gap-4">
+              <a 
+                href="/practice-config" 
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Practice Config
+              </a>
+              <UserButton afterSignOutUrl="/" />
+            </div>
           ) : (
             <>
               <SignInButton mode="modal">
-                <button className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50">
+                <button className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
                   Sign In
                 </button>
               </SignInButton>
               <SignUpButton mode="modal">
-                <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                <button className="px-4 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                   Sign Up
                 </button>
               </SignUpButton>
@@ -58,10 +73,10 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}
+          className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-50`}
         >
           <Header />
-          <main className="min-h-screen">
+          <main>
             {children}
           </main>
         </body>
