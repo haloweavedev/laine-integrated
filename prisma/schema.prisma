@@ -1,0 +1,68 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Practice {
+  id                      String @id @default(cuid())
+  clerkUserId             String @unique // Links to Clerk User ID
+  name                    String?       // Optional practice name entered by user
+
+  // NexHealth specific identifiers for this practice instance
+  nexhealthSubdomain      String?       // User-provided NexHealth subdomain
+  nexhealthLocationId     String?       // User-provided NexHealth Location ID
+
+  vapiAssistantId         String?       // For future VAPI integration
+
+  appointmentTypes AppointmentType[]
+  providers        Provider[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A practice is uniquely identified by its Clerk user for our app's purposes.
+  // Subdomain + LocationID identify it for NexHealth API calls.
+  // If a user could manage multiple NexHealth locations, this model would need adjustment.
+  // For now, one Clerk user maps to one set of NexHealth subdomain/locationId.
+}
+
+model AppointmentType {
+  id                          String @id @default(cuid())
+  practiceId                  String
+  practice                    Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthAppointmentTypeId  String // ID from NexHealth
+  name                        String
+  duration                    Int    // Duration in minutes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([practiceId, nexhealthAppointmentTypeId])
+}
+
+model Provider {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthProviderId String // ID from NexHealth
+  firstName           String?
+  lastName            String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([practiceId, nexhealthProviderId])
+}
