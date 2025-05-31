@@ -22,7 +22,7 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
     const vapiToolFunction: VapiToolFunction = {
       name: t.name,
       description: t.description,
-      parameters: zodToJsonSchema(t.schema, t.name),
+      parameters: zodToJsonSchema(t.schema, { target: "jsonSchema7", $refStrategy: "none" }),
     };
     
     const vapiTool: VapiToolSchema = {

@@ -65,15 +65,40 @@ export async function POST(req: NextRequest) {
   }
 
   // --- Handle specific events ---
-  // For Phase 2, we'll just log. Actual data processing (e.g., updating local DB) will be in later phases.
-  if (resource_type === "Appointment" && event_name === "appointment_insertion.complete") {
-    console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion complete for appt ID ${data?.appointment?.id} in NexHealth.`);
-    // TODO: In future, upsert this appointment data into a local Appointment table if needed for Laine's state.
-  } else if (resource_type === "Patient" && event_name === "patient_created") {
-    console.log(`NexHealth Webhook: Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
-    // TODO: Upsert patient data.
+  // For Phase 2, we'll log events. Actual data processing (e.g., updating local DB) will be in later phases.
+  
+  if (resource_type === "Patient") {
+    if (event_name === "patient_created") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+      // TODO: Upsert patient data into local Patient table
+    } else if (event_name === "patient_updated") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Patient updated in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+      // TODO: Update local patient data
+    }
+  } else if (resource_type === "Appointment") {
+    if (event_name === "appointment_created") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment created in EHR. Appointment ID: ${data?.appointment?.id}`);
+      // TODO: Sync new appointment to local database
+    } else if (event_name === "appointment_updated") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment updated in EHR. Appointment ID: ${data?.appointment?.id}`);
+      // TODO: Update local appointment data
+    } else if (event_name === "appointment_insertion.complete") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion complete (Laine booking succeeded). Appointment ID: ${data?.appointment?.id}`);
+      // TODO: Mark appointment as confirmed in local DB
+    } else if (event_name === "appointment_insertion.failed") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion failed (Laine booking failed). Error: ${data?.error}`);
+      // TODO: Handle booking failure, notify practice or retry
+    }
+  } else if (resource_type === "SyncStatus") {
+    if (event_name === "sync_status_read_change") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - EHR read functionality came back online. Status: ${data?.read_status}`);
+      // TODO: Update system monitoring, resume read operations if needed
+    } else if (event_name === "sync_status_write_change") {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - EHR write functionality came back online. Status: ${data?.write_status}`);
+      // TODO: Update system monitoring, resume write operations if needed
+    }
   } else {
-    console.log(`NexHealth Webhook: Practice ${practice.id} - Received unhandled event: ${resource_type} - ${event_name}`);
+    console.log(`NexHealth Webhook: Practice ${practice.id} - Received unhandled event: ${resource_type}.${event_name}`);
   }
 
   return NextResponse.json({ message: "Webhook received successfully" }, { status: 200 });

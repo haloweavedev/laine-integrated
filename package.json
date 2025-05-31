@@ -11,12 +11,16 @@
     "vercel-build": "prisma generate && next build",
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "webhook:setup": "node scripts/manage-nexhealth-webhooks.js setup-global-endpoint",
+    "webhook:subscribe": "node scripts/manage-nexhealth-webhooks.js subscribe-practice",
+    "webhook:list": "node scripts/manage-nexhealth-webhooks.js list-subscriptions"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.20.2",
     "@prisma/client": "^6.8.2",
     "date-fns": "^4.1.0",
+    "dotenv": "^16.5.0",
     "fast-glob": "^3.3.3",
     "next": "15.3.3",
     "react": "^19.0.0",

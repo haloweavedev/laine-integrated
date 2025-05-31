@@ -208,58 +208,79 @@ export default async function PracticeConfigPage() {
         </div>
 
         {practice?.nexhealthSubdomain && practice?.nexhealthLocationId && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">NexHealth Data</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
-                <p className="text-sm text-gray-600 mb-3">
-                  {practice.appointmentTypes.length} synced
-                </p>
-                {practice.appointmentTypes.length > 0 && (
-                  <ul className="text-sm space-y-1">
-                    {practice.appointmentTypes.slice(0, 5).map((type) => (
-                      <li key={type.id} className="text-gray-700">
-                        {type.name} ({type.duration} min)
-                      </li>
-                    ))}
-                    {practice.appointmentTypes.length > 5 && (
-                      <li className="text-gray-500">
-                        ... and {practice.appointmentTypes.length - 5} more
-                      </li>
-                    )}
-                  </ul>
-                )}
+          <>
+            {/* Webhook Management Section */}
+            <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <h2 className="text-lg font-semibold mb-4">Webhook Integration</h2>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex-1">
+                  <p className="text-sm text-gray-600 mb-2">
+                    Webhooks allow Laine to receive real-time updates from NexHealth when appointments are created, 
+                    updated, or when patients are modified.
+                  </p>
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                    <p className="text-sm text-blue-800">
+                      ℹ️ Webhook management is available via CLI commands. Use <code className="bg-blue-100 px-1 rounded">pnpm webhook:subscribe {practice.nexhealthSubdomain}</code> to enable webhooks for this practice.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Existing NexHealth Data Section */}
+            <div className="bg-white rounded-lg shadow p-6">
+              <h2 className="text-lg font-semibold mb-4">NexHealth Data</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {practice.appointmentTypes.length} synced
+                  </p>
+                  {practice.appointmentTypes.length > 0 && (
+                    <ul className="text-sm space-y-1">
+                      {practice.appointmentTypes.slice(0, 5).map((type) => (
+                        <li key={type.id} className="text-gray-700">
+                          {type.name} ({type.duration} min)
+                        </li>
+                      ))}
+                      {practice.appointmentTypes.length > 5 && (
+                        <li className="text-gray-500">
+                          ... and {practice.appointmentTypes.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+                
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {practice.providers.length} synced
+                  </p>
+                  {practice.providers.length > 0 && (
+                    <ul className="text-sm space-y-1">
+                      {practice.providers.slice(0, 5).map((provider) => (
+                        <li key={provider.id} className="text-gray-700">
+                          {provider.firstName} {provider.lastName}
+                        </li>
+                      ))}
+                      {practice.providers.length > 5 && (
+                        <li className="text-gray-500">
+                          ... and {practice.providers.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
               </div>
               
-              <div>
-                <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
-                <p className="text-sm text-gray-600 mb-3">
-                  {practice.providers.length} synced
-                </p>
-                {practice.providers.length > 0 && (
-                  <ul className="text-sm space-y-1">
-                    {practice.providers.slice(0, 5).map((provider) => (
-                      <li key={provider.id} className="text-gray-700">
-                        {provider.firstName} {provider.lastName}
-                      </li>
-                    ))}
-                    {practice.providers.length > 5 && (
-                      <li className="text-gray-500">
-                        ... and {practice.providers.length - 5} more
-                      </li>
-                    )}
-                  </ul>
-                )}
+              <div className="mt-6">
+                <SyncForm action={syncNexhealthData}>
+                  <SyncDataButton />
+                </SyncForm>
               </div>
             </div>
-            
-            <div className="mt-6">
-              <SyncForm action={syncNexhealthData}>
-                <SyncDataButton />
-              </SyncForm>
-            </div>
-          </div>
+          </>
         )}
       </div>
     </>

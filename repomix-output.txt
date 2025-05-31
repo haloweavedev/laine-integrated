@@ -1,0 +1,2634 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+app/
+  (auth)/
+    sign-in/
+      [[...sign-in]]/
+        page.tsx
+    sign-up/
+      [[...sign-up]]/
+        page.tsx
+  api/
+    nexhealth-webhook/
+      route.ts
+    sync-nexhealth/
+      route.ts
+    vapi/
+      tool-handler/
+        route.ts
+  laine/
+    page.tsx
+  practice-config/
+    client-components.tsx
+    page.tsx
+  globals.css
+  layout.tsx
+  page.tsx
+lib/
+  tools/
+    findPatient.ts
+    index.ts
+    types.ts
+  nexhealth.ts
+  prisma.ts
+  vapi.ts
+prisma/
+  schema.prisma
+.gitignore
+eslint.config.mjs
+middleware.ts
+next.config.ts
+package.json
+postcss.config.mjs
+README.md
+tsconfig.json
+
+================================================================
+Files
+================================================================
+
+================
+File: app/(auth)/sign-in/[[...sign-in]]/page.tsx
+================
+import { SignIn } from '@clerk/nextjs';
+
+export default function SignInPage() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <SignIn />
+    </div>
+  );
+}
+
+================
+File: app/(auth)/sign-up/[[...sign-up]]/page.tsx
+================
+import { SignUp } from '@clerk/nextjs';
+
+export default function SignUpPage() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <SignUp />
+    </div>
+  );
+}
+
+================
+File: app/api/nexhealth-webhook/route.ts
+================
+import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+import { prisma } from "@/lib/prisma";
+
+async function getRawBody(req: NextRequest): Promise<Buffer> {
+  const reader = req.body?.getReader();
+  if (!reader) return Buffer.from('');
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function POST(req: NextRequest) {
+  console.log("NexHealth Webhook: Received request");
+  const rawBody = await getRawBody(req);
+  const signature = req.headers.get("x-nexhealth-signature");
+
+  // Fetch the global webhook secret from DB (or env, but DB allows dynamic updates if secret changes)
+  const globalWebhookConfig = await prisma.globalNexhealthWebhookEndpoint.findUnique({
+    where: { id: "singleton" }, // Assuming you use a fixed ID for the global config
+  });
+
+  if (!globalWebhookConfig || !globalWebhookConfig.secretKey) {
+    console.error("NexHealth Webhook: Secret key not configured in the database.");
+    return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 });
+  }
+  const NEXHEALTH_WEBHOOK_SECRET = globalWebhookConfig.secretKey;
+
+  if (!signature) {
+    console.warn("NexHealth Webhook: Signature missing");
+    return NextResponse.json({ error: "Signature missing" }, { status: 400 });
+  }
+
+  const expectedSignature = crypto
+    .createHmac("sha256", NEXHEALTH_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest("hex");
+
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+    console.error("NexHealth Webhook: Invalid signature.");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  const event = JSON.parse(rawBody.toString());
+  console.log("NexHealth Webhook: Signature VERIFIED. Event:", JSON.stringify(event, null, 2));
+
+  const { resource_type, event_name, subdomain, institution_id, data } = event;
+
+  // Find the practice associated with this subdomain/institution_id
+  // Note: A practice might have a subdomain but events might come with institution_id.
+  // Ensure your Practice model can be looked up by either, or that you store institution_id.
+  // For now, assuming subdomain is the primary link from webhook to your Practice model.
+  const practice = await prisma.practice.findFirst({
+    where: { nexhealthSubdomain: subdomain }, // Or use institution_id if that's more reliable
+  });
+
+  if (!practice) {
+    console.warn(`NexHealth Webhook: Received event for unknown subdomain/institution: ${subdomain}/${institution_id}`);
+    // Still return 200 to NexHealth to acknowledge receipt and prevent retries for unknown practices.
+    return NextResponse.json({ message: "Received, but practice not found." }, { status: 200 });
+  }
+
+  // --- Handle specific events ---
+  // For Phase 2, we'll just log. Actual data processing (e.g., updating local DB) will be in later phases.
+  if (resource_type === "Appointment" && event_name === "appointment_insertion.complete") {
+    console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion complete for appt ID ${data?.appointment?.id} in NexHealth.`);
+    // TODO: In future, upsert this appointment data into a local Appointment table if needed for Laine's state.
+  } else if (resource_type === "Patient" && event_name === "patient_created") {
+    console.log(`NexHealth Webhook: Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+    // TODO: Upsert patient data.
+  } else {
+    console.log(`NexHealth Webhook: Practice ${practice.id} - Received unhandled event: ${resource_type} - ${event_name}`);
+  }
+
+  return NextResponse.json({ message: "Webhook received successfully" }, { status: 200 });
+}
+
+================
+File: app/api/vapi/tool-handler/route.ts
+================
+import { NextRequest, NextResponse } from "next/server";
+import { getToolByName } from "@/lib/tools";
+import { prisma } from "@/lib/prisma";
+import { Practice } from "@prisma/client";
+import { z } from "zod";
+// import { verifyVapiRequest } from "@/lib/vapi"; // Implement if VAPI provides signing for tool webhooks
+
+// Define the expected payload structures from VAPI for different webhook types
+interface VapiBasePayload {
+  call: {
+    id: string; // VAPI Call ID
+    orgId?: string;
+    assistantId?: string;
+    // ... other call details
+  };
+}
+
+interface VapiToolCallPayload extends VapiBasePayload {
+  type: "tool-calls";
+  toolCalls: Array<{
+    toolCallId: string;
+    name: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    arguments: Record<string, any> | string; // VAPI might send stringified JSON
+  }>;
+}
+
+interface VapiEndOfCallReportPayload extends VapiBasePayload {
+  type: "end-of-call-report";
+  endOfCallReport: {
+    summary?: string;
+    transcript?: string;
+    recordingUrl?: string;
+    // ... other fields
+  };
+}
+
+interface VapiStatusUpdatePayload extends VapiBasePayload {
+  type: "status-update";
+  status: string; // e.g., "started", "ended", "forwarding", etc.
+  timestamp?: string;
+}
+
+interface VapiTranscriptPayload extends VapiBasePayload {
+  type: "transcript";
+  transcript: {
+    text: string;
+    role: "user" | "assistant";
+    timestamp?: string;
+  };
+}
+
+type VapiWebhookPayload = VapiToolCallPayload | VapiEndOfCallReportPayload | VapiStatusUpdatePayload | VapiTranscriptPayload;
+
+async function findPracticeByAssistantId(assistantId?: string): Promise<Practice | null> {
+  if (!assistantId) return null;
+  
+  const assistantConfig = await prisma.practiceAssistantConfig.findUnique({
+    where: { vapiAssistantId: assistantId },
+    include: { practice: true }
+  });
+  
+  return assistantConfig?.practice || null;
+}
+
+async function handleToolCalls(payload: VapiToolCallPayload, practice: Practice): Promise<NextResponse> {
+  const vapiCallId = payload.call.id;
+
+  // Upsert CallLog entry at the start of tool processing for this call
+  try {
+    await prisma.callLog.upsert({
+      where: { vapiCallId },
+      create: { 
+        vapiCallId, 
+        practiceId: practice.id, 
+        callStatus: "TOOL_IN_PROGRESS", 
+        callTimestampStart: new Date() 
+      },
+      update: { 
+        callStatus: "TOOL_IN_PROGRESS", 
+        updatedAt: new Date() 
+      },
+    });
+  } catch (dbError) {
+    console.error(`VAPI tool-handler: Error upserting CallLog for ${vapiCallId}:`, dbError);
+  }
+
+  const results = [];
+  for (const toolCall of payload.toolCalls) {
+    const tool = getToolByName(toolCall.name);
+    if (!tool) {
+      console.error(`VAPI tool-handler: Unknown tool requested: ${toolCall.name}`);
+      results.push({
+        toolCallId: toolCall.toolCallId,
+        result: JSON.stringify({ 
+          success: false, 
+          error_code: "UNKNOWN_TOOL", 
+          message_to_patient: `I don't know how to do that.` 
+        }),
+      });
+      continue;
+    }
+
+    try {
+      // VAPI might send arguments as a stringified JSON or an object.
+      const parsedArgs = typeof toolCall.arguments === 'string' 
+        ? JSON.parse(toolCall.arguments) 
+        : toolCall.arguments;
+      
+      const validatedArgs = tool.schema.parse(parsedArgs);
+      const startTime = Date.now();
+      
+      console.log(`Executing tool: ${tool.name} for practice ${practice.id} with args:`, JSON.stringify(validatedArgs));
+      const toolResult = await tool.run({ args: validatedArgs, practice, vapiCallId });
+      const durationMs = Date.now() - startTime;
+
+      console.log(`Tool ${tool.name} executed in ${durationMs}ms. Result:`, JSON.stringify(toolResult));
+
+      results.push({
+        toolCallId: toolCall.toolCallId,
+        result: JSON.stringify(toolResult),
+      });
+
+    } catch (error: unknown) {
+      console.error(`VAPI tool-handler: Error executing tool ${tool.name}:`, error);
+      let userMessage = "I encountered an unexpected issue while trying to help with that.";
+      if (error instanceof z.ZodError) {
+        userMessage = "I received some unexpected information for that request. Could you try phrasing it differently?";
+        console.error("Zod validation error:", error.errors);
+      }
+      results.push({
+        toolCallId: toolCall.toolCallId,
+        result: JSON.stringify({ 
+          success: false, 
+          error_code: "TOOL_EXECUTION_ERROR", 
+          message_to_patient: userMessage, 
+          details: error instanceof Error ? error.message : 'Unknown error'
+        }),
+      });
+    }
+  }
+  
+  console.log("VAPI tool-handler: Sending tool call results back to VAPI:", JSON.stringify({ results }));
+  return NextResponse.json({ results });
+}
+
+async function handleEndOfCallReport(payload: VapiEndOfCallReportPayload, practice: Practice): Promise<NextResponse> {
+  const vapiCallId = payload.call.id;
+  const { summary, transcript, recordingUrl } = payload.endOfCallReport;
+
+  console.log(`VAPI end-of-call-report: Practice ${practice.id}, Call ${vapiCallId}`);
+
+  try {
+    await prisma.callLog.upsert({
+      where: { vapiCallId },
+      create: {
+        vapiCallId,
+        practiceId: practice.id,
+        callStatus: "ENDED",
+        callTimestampStart: new Date(),
+        summary: summary || null,
+        transcriptText: transcript || null,
+        vapiTranscriptUrl: recordingUrl || null,
+      },
+      update: {
+        callStatus: "ENDED",
+        summary: summary || undefined,
+        transcriptText: transcript || undefined,
+        vapiTranscriptUrl: recordingUrl || undefined,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(`VAPI end-of-call-report: Updated CallLog for ${vapiCallId}`);
+  } catch (dbError) {
+    console.error(`VAPI end-of-call-report: Error updating CallLog for ${vapiCallId}:`, dbError);
+  }
+
+  return NextResponse.json({ message: "End of call report received" });
+}
+
+async function handleStatusUpdate(payload: VapiStatusUpdatePayload, practice: Practice): Promise<NextResponse> {
+  const vapiCallId = payload.call.id;
+  const { status } = payload;
+
+  console.log(`VAPI status-update: Practice ${practice.id}, Call ${vapiCallId}, Status: ${status}`);
+
+  try {
+    // Map VAPI statuses to our CallLog statuses
+    let callStatus = status.toUpperCase();
+    if (status === "started") callStatus = "INITIATED";
+    if (status === "ended") callStatus = "ENDED";
+    if (status === "forwarding") callStatus = "FORWARDING";
+
+    await prisma.callLog.upsert({
+      where: { vapiCallId },
+      create: {
+        vapiCallId,
+        practiceId: practice.id,
+        callStatus,
+        callTimestampStart: new Date(),
+      },
+      update: {
+        callStatus,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(`VAPI status-update: Updated CallLog status to ${callStatus} for ${vapiCallId}`);
+  } catch (dbError) {
+    console.error(`VAPI status-update: Error updating CallLog for ${vapiCallId}:`, dbError);
+  }
+
+  return NextResponse.json({ message: "Status update received" });
+}
+
+async function handleTranscript(payload: VapiTranscriptPayload, practice: Practice): Promise<NextResponse> {
+  const vapiCallId = payload.call.id;
+  const { text, role } = payload.transcript;
+
+  console.log(`VAPI transcript: Practice ${practice.id}, Call ${vapiCallId}, Role: ${role}, Text: ${text.substring(0, 100)}...`);
+
+  try {
+    // For transcript updates, we'll append to existing transcript text
+    const existingCallLog = await prisma.callLog.findUnique({
+      where: { vapiCallId },
+    });
+
+    const newTranscriptText = existingCallLog?.transcriptText 
+      ? `${existingCallLog.transcriptText}\n[${role}]: ${text}`
+      : `[${role}]: ${text}`;
+
+    await prisma.callLog.upsert({
+      where: { vapiCallId },
+      create: {
+        vapiCallId,
+        practiceId: practice.id,
+        callStatus: "IN_PROGRESS",
+        callTimestampStart: new Date(),
+        transcriptText: newTranscriptText,
+      },
+      update: {
+        transcriptText: newTranscriptText,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(`VAPI transcript: Updated transcript for ${vapiCallId}`);
+  } catch (dbError) {
+    console.error(`VAPI transcript: Error updating CallLog for ${vapiCallId}:`, dbError);
+  }
+
+  return NextResponse.json({ message: "Transcript received" });
+}
+
+export async function POST(req: NextRequest) {
+  let payload: VapiWebhookPayload;
+  try {
+    payload = await req.json();
+    console.log(`VAPI webhook received: ${payload.type}`, JSON.stringify(payload, null, 2));
+  } catch (e) {
+    console.error("Failed to parse VAPI webhook request body:", e);
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  // TODO: Implement request verification if VAPI provides a signing secret
+  // const { verified, error } = await verifyVapiRequest(req, process.env.VAPI_WEBHOOK_SIGNING_SECRET);
+  // if (!verified) {
+  //   console.error("VAPI webhook request verification failed:", error);
+  //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // }
+
+  // Identify the practice by assistant ID
+  const practice = await findPracticeByAssistantId(payload.call.assistantId);
+  
+  if (!practice) {
+    console.error(`VAPI webhook: Could not find practice for assistantId ${payload.call.assistantId}`);
+    if (payload.type === "tool-calls") {
+      // For tool calls, we need to return error results
+      const errorResults = (payload as VapiToolCallPayload).toolCalls.map(tc => ({
+        toolCallId: tc.toolCallId,
+        result: JSON.stringify({ 
+          success: false, 
+          error_code: "PRACTICE_NOT_FOUND", 
+          message_to_patient: "I'm having trouble identifying the practice settings." 
+        })
+      }));
+      return NextResponse.json({ results: errorResults });
+    } else {
+      // For other webhook types, just return success to avoid retries
+      return NextResponse.json({ message: "Received, but practice not found" });
+    }
+  }
+
+  // Route to appropriate handler based on webhook type
+  switch (payload.type) {
+    case "tool-calls":
+      return handleToolCalls(payload as VapiToolCallPayload, practice);
+    
+    case "end-of-call-report":
+      return handleEndOfCallReport(payload as VapiEndOfCallReportPayload, practice);
+    
+    case "status-update":
+      return handleStatusUpdate(payload as VapiStatusUpdatePayload, practice);
+    
+    case "transcript":
+      return handleTranscript(payload as VapiTranscriptPayload, practice);
+    
+    default:
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      console.warn(`VAPI webhook: Unknown webhook type: ${(payload as any).type}`);
+      return NextResponse.json({ message: "Unknown webhook type" }, { status: 400 });
+  }
+}
+
+================
+File: app/laine/page.tsx
+================
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+import { revalidatePath } from "next/cache";
+import { createVapiAssistant, updateVapiAssistant } from "@/lib/vapi";
+import { buildVapiTools } from "@/lib/tools";
+
+async function createPracticeAssistant() {
+  "use server";
+  
+  const { userId } = await auth();
+  if (!userId) {
+    throw new Error("Not authenticated");
+  }
+
+  // Get the practice
+  const practice = await prisma.practice.findUnique({
+    where: { clerkUserId: userId },
+    include: { assistantConfig: true }
+  });
+
+  if (!practice) {
+    throw new Error("Practice not found");
+  }
+
+  if (practice.assistantConfig?.vapiAssistantId) {
+    throw new Error("Assistant already exists for this practice");
+  }
+
+  const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  
+  // Build tools for the assistant
+  const tools = buildVapiTools(appBaseUrl);
+  
+  // Create default assistant configuration
+  const assistantConfig = {
+    name: `${practice.name || 'Practice'} - Laine Assistant`,
+    model: {
+      provider: "openai" as const,
+      model: "gpt-3.5-turbo",
+      temperature: 0.7,
+      messages: [
+        {
+          role: "system" as const,
+          content: "You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient."
+        }
+      ],
+      tools
+    },
+    voice: {
+      provider: "11labs" as const,
+      voiceId: "burt"
+    },
+    firstMessage: "Hello! This is Laine from your dental office. How can I help you today?",
+    serverUrl: `${appBaseUrl}/api/vapi/tool-handler`,
+    serverMessages: ["tool-calls", "end-of-call-report", "status-update", "transcript"],
+    silenceTimeoutSeconds: 30,
+    maxDurationSeconds: 600, // 10 minutes
+    backgroundSound: "office" as const,
+    backchannelingEnabled: true,
+    backgroundDenoisingEnabled: true,
+    modelOutputInMessagesEnabled: true
+  };
+
+  try {
+    console.log("Creating VAPI assistant for practice:", practice.id);
+    const vapiAssistant = await createVapiAssistant(assistantConfig);
+    
+    // Create or update the assistant config in our database
+    await prisma.practiceAssistantConfig.upsert({
+      where: { practiceId: practice.id },
+      create: {
+        practiceId: practice.id,
+        vapiAssistantId: vapiAssistant.id,
+        voiceProvider: "11labs",
+        voiceId: "burt",
+        systemPrompt: "You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient.",
+        firstMessage: "Hello! This is Laine from your dental office. How can I help you today?"
+      },
+      update: {
+        vapiAssistantId: vapiAssistant.id,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log(`Successfully created VAPI assistant ${vapiAssistant.id} for practice ${practice.id}`);
+  } catch (error) {
+    console.error("Error creating VAPI assistant:", error);
+    throw new Error(`Failed to create assistant: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+
+  revalidatePath("/laine");
+}
+
+async function updatePracticeAssistantConfig(formData: FormData) {
+  "use server";
+  
+  const { userId } = await auth();
+  if (!userId) {
+    throw new Error("Not authenticated");
+  }
+
+  const voiceProvider = formData.get("voiceProvider") as string;
+  const voiceId = formData.get("voiceId") as string;
+  const systemPrompt = formData.get("systemPrompt") as string;
+  const firstMessage = formData.get("firstMessage") as string;
+
+  // Get the practice with assistant config
+  const practice = await prisma.practice.findUnique({
+    where: { clerkUserId: userId },
+    include: { assistantConfig: true }
+  });
+
+  if (!practice || !practice.assistantConfig?.vapiAssistantId) {
+    throw new Error("Practice or assistant not found");
+  }
+
+  const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const tools = buildVapiTools(appBaseUrl);
+  
+  // Update VAPI assistant with new configuration
+  const updateConfig = {
+    model: {
+      provider: "openai" as const,
+      model: "gpt-3.5-turbo",
+      temperature: 0.7,
+      messages: [
+        {
+          role: "system" as const,
+          content: systemPrompt
+        }
+      ],
+      tools
+    },
+    voice: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      provider: voiceProvider as any,
+      voiceId: voiceId
+    },
+    firstMessage: firstMessage
+  };
+
+  try {
+    console.log("Updating VAPI assistant:", practice.assistantConfig.vapiAssistantId);
+    await updateVapiAssistant(practice.assistantConfig.vapiAssistantId, updateConfig);
+    
+    // Update our database
+    await prisma.practiceAssistantConfig.update({
+      where: { practiceId: practice.id },
+      data: {
+        voiceProvider,
+        voiceId,
+        systemPrompt,
+        firstMessage,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log(`Successfully updated VAPI assistant for practice ${practice.id}`);
+  } catch (error) {
+    console.error("Error updating VAPI assistant:", error);
+    throw new Error(`Failed to update assistant: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+
+  revalidatePath("/laine");
+}
+
+export default async function LainePage() {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    redirect("/sign-in");
+  }
+
+  // Get the practice with assistant configuration
+  const practice = await prisma.practice.findUnique({
+    where: { clerkUserId: userId },
+    include: { assistantConfig: true }
+  });
+
+  if (!practice) {
+    redirect("/practice-config");
+  }
+
+  const hasAssistant = practice.assistantConfig?.vapiAssistantId;
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6">Laine AI Assistant Configuration</h1>
+        
+        {!hasAssistant ? (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-semibold mb-4">Create Your AI Assistant</h2>
+            <p className="text-gray-600 mb-6">
+              Create a personalized AI assistant for your practice. Laine will help patients with basic inquiries,
+              patient lookups, and appointment scheduling.
+            </p>
+            
+            <form action={createPracticeAssistant}>
+              <button
+                type="submit"
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              >
+                Create Laine Assistant
+              </button>
+            </form>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-xl font-semibold mb-6">Configure Your AI Assistant</h2>
+            
+            <form action={updatePracticeAssistantConfig} className="space-y-6">
+              <div>
+                <label htmlFor="voiceProvider" className="block text-sm font-medium text-gray-700 mb-2">
+                  Voice Provider
+                </label>
+                <select
+                  id="voiceProvider"
+                  name="voiceProvider"
+                  defaultValue={practice.assistantConfig?.voiceProvider}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="11labs">ElevenLabs</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="playht">PlayHT</option>
+                </select>
+              </div>
+
+              <div>
+                <label htmlFor="voiceId" className="block text-sm font-medium text-gray-700 mb-2">
+                  Voice ID
+                </label>
+                <input
+                  type="text"
+                  id="voiceId"
+                  name="voiceId"
+                  defaultValue={practice.assistantConfig?.voiceId}
+                  placeholder="e.g., burt, alloy"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  Voice ID specific to the selected provider (e.g., &quot;burt&quot; for ElevenLabs, &quot;alloy&quot; for OpenAI)
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="systemPrompt" className="block text-sm font-medium text-gray-700 mb-2">
+                  System Prompt
+                </label>
+                <textarea
+                  id="systemPrompt"
+                  name="systemPrompt"
+                  rows={4}
+                  defaultValue={practice.assistantConfig?.systemPrompt}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Instructions that define how the AI should behave..."
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  Define how Laine should behave and what it should know about your practice
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="firstMessage" className="block text-sm font-medium text-gray-700 mb-2">
+                  First Message
+                </label>
+                <input
+                  type="text"
+                  id="firstMessage"
+                  name="firstMessage"
+                  defaultValue={practice.assistantConfig?.firstMessage}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Hello! This is Laine from your dental office..."
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  The first thing Laine says when answering a call
+                </p>
+              </div>
+
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-500">
+                  Assistant ID: {practice.assistantConfig?.vapiAssistantId}
+                </div>
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Update Configuration
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+              <h3 className="font-medium text-gray-900 mb-2">Available Tools</h3>
+              <ul className="text-sm text-gray-600 space-y-1">
+                <li>• Patient Search - Find patients by name and date of birth</li>
+                <li>• More tools will be added in future updates</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+================
+File: app/practice-config/client-components.tsx
+================
+"use client";
+
+import { toast } from "sonner";
+import { useFormStatus } from "react-dom";
+
+export function SaveConfigButton() {
+  const { pending } = useFormStatus();
+  
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {pending ? "Saving..." : "Save Configuration"}
+    </button>
+  );
+}
+
+export function SyncDataButton() {
+  const { pending } = useFormStatus();
+  
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {pending ? "Syncing..." : "Sync NexHealth Data"}
+    </button>
+  );
+}
+
+export function ConfigForm({ children, action }: { children: React.ReactNode; action: (formData: FormData) => Promise<void> }) {
+  const handleSubmit = async (formData: FormData) => {
+    try {
+      await action(formData);
+      toast.success("Configuration saved successfully!");
+    } catch {
+      toast.error("Failed to save configuration. Please try again.");
+    }
+  };
+
+  return (
+    <form action={handleSubmit} className="space-y-4">
+      {children}
+    </form>
+  );
+}
+
+export function SyncForm({ children, action }: { children: React.ReactNode; action: () => Promise<void> }) {
+  const handleSubmit = async () => {
+    try {
+      await action();
+      toast.success("NexHealth data synced successfully!");
+    } catch {
+      toast.error("Failed to sync data. Please check your configuration and try again.");
+    }
+  };
+
+  return (
+    <form action={handleSubmit}>
+      {children}
+    </form>
+  );
+}
+
+================
+File: lib/tools/findPatient.ts
+================
+// lib/tools/findPatient.ts
+import { z } from "zod";
+import { ToolDefinition } from "./types";
+import { fetchNexhealthAPI } from "@/lib/nexhealth";
+import { prisma } from "@/lib/prisma";
+
+// Schema for the arguments the LLM will provide
+export const schema = z.object({
+  firstName: z.string().describe("The first name of the patient."),
+  lastName: z.string().describe("The last name of the patient."),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date of birth must be YYYY-MM-DD").describe("The patient's date of birth in YYYY-MM-DD format."),
+});
+
+const tool: ToolDefinition<typeof schema> = {
+  name: "find_patient_in_ehr",
+  description: "Searches for an existing patient in the Electronic Health Record (EHR) using their first name, last name, and date of birth. Confirms with the caller if a match is found.",
+  schema,
+  async run({ args, practice, vapiCallId }) {
+    if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+      return { 
+        success: false, 
+        error_code: "PRACTICE_CONFIG_MISSING", 
+        message_to_patient: "I'm sorry, I can't access patient records right now as the practice configuration is incomplete." 
+      };
+    }
+
+    try {
+      const patientName = `${args.firstName} ${args.lastName}`;
+      // NexHealth GET /patients uses a single 'name' param and 'date_of_birth'
+      const params = {
+        location_id: practice.nexhealthLocationId,
+        name: patientName,
+        date_of_birth: args.dateOfBirth,
+        inactive: 'false', // Only search active patients
+        non_patient: 'false', // Exclude non-patients if applicable
+        page: '1',
+        per_page: '5' // Limit results
+      };
+
+      console.log(`[Tool:find_patient_in_ehr] Searching for patient: ${patientName}, DOB: ${args.dateOfBirth}`);
+      
+      const searchResults = await fetchNexhealthAPI(
+        '/patients',
+        practice.nexhealthSubdomain,
+        params
+      );
+      
+      // Handle different possible response structures from NexHealth
+      let patients = [];
+      if (Array.isArray(searchResults)) {
+        patients = searchResults;
+      } else if (searchResults?.data?.patients && Array.isArray(searchResults.data.patients)) {
+        patients = searchResults.data.patients;
+      } else if (searchResults?.patients && Array.isArray(searchResults.patients)) {
+        patients = searchResults.patients;
+      } else if (searchResults?.data && Array.isArray(searchResults.data)) {
+        patients = searchResults.data;
+      } else {
+        console.warn("[Tool:find_patient_in_ehr] Unexpected response structure:", searchResults);
+      }
+
+      console.log(`[Tool:find_patient_in_ehr] Found ${patients.length} potential matches`);
+
+      if (patients.length === 0) {
+        return { 
+          success: true, 
+          found_patients: [], 
+          message_to_patient: `I couldn't find anyone named ${args.firstName} ${args.lastName} with that date of birth. Would you like to try spelling the name differently or provide different details?` 
+        };
+      } else if (patients.length === 1) {
+        const patient = patients[0];
+        
+        // Store patient ID in CallLog for context if we have a call ID
+        if (vapiCallId) {
+          try {
+            await prisma.callLog.upsert({
+              where: { vapiCallId },
+              create: { 
+                vapiCallId, 
+                practiceId: practice.id, 
+                callStatus: "TOOL_IN_PROGRESS",
+                nexhealthPatientId: String(patient.id),
+                callTimestampStart: new Date() 
+              },
+              update: { 
+                nexhealthPatientId: String(patient.id),
+                updatedAt: new Date() 
+              },
+            });
+          } catch (dbError) {
+            console.error(`[Tool:find_patient_in_ehr] Error updating CallLog:`, dbError);
+          }
+        }
+        
+        return { 
+          success: true, 
+          found_patients: [{ 
+            id: patient.id, 
+            firstName: patient.first_name, 
+            lastName: patient.last_name, 
+            dob: patient.bio?.date_of_birth || patient.date_of_birth 
+          }],
+          message_to_patient: `Great! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}. Is that the correct patient?` 
+        };
+      } else {
+        // Handle multiple matches - take the first one and confirm, or list options
+        const firstPatient = patients[0];
+        const patientList = patients.slice(0, 3).map((p: { 
+          id: number; 
+          first_name?: string; 
+          last_name?: string; 
+          bio?: { date_of_birth?: string }; 
+          date_of_birth?: string; 
+        }) => ({ 
+          id: p.id, 
+          firstName: p.first_name, 
+          lastName: p.last_name, 
+          dob: p.bio?.date_of_birth || p.date_of_birth 
+        }));
+        
+        return { 
+          success: true, 
+          found_patients: patientList,
+          message_to_patient: `I found a few people with that name. Are you ${firstPatient.first_name || args.firstName} ${firstPatient.last_name || args.lastName} born on ${firstPatient.bio?.date_of_birth || firstPatient.date_of_birth || args.dateOfBirth}?`
+        };
+      }
+    } catch (error: unknown) {
+      console.error(`[Tool:find_patient_in_ehr] Error for practice ${practice.id}:`, error);
+      let userMessage = "I encountered an issue trying to find the patient record. Please try again in a moment.";
+      if (error instanceof Error && error.message?.includes("401")) {
+        userMessage = "There was an authentication issue with the patient system. Please contact support.";
+      } else if (error instanceof Error && error.message?.includes("403")) {
+        userMessage = "I don't have permission to access patient records. Please contact support.";
+      }
+      return { 
+        success: false, 
+        error_code: "NEXHEALTH_API_ERROR", 
+        message_to_patient: userMessage,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  },
+  // VAPI specific messages for tool call lifecycle
+  messages: {
+    start: "Let me look up that patient record for you...",
+    success: "Found the patient information.",
+    fail: "I'm having trouble accessing patient records at the moment.",
+  },
+};
+
+export default tool;
+
+================
+File: lib/tools/index.ts
+================
+import { ToolDefinition, VapiToolSchema, VapiToolFunction } from "./types";
+import { zodToJsonSchema } from "zod-to-json-schema";
+
+// Manually import tools for now to avoid file system dependencies in edge runtime
+import findPatientTool from "./findPatient";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const tools: ToolDefinition<any>[] = [
+  findPatientTool,
+];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getToolByName(name: string): ToolDefinition<any> | undefined {
+  return tools.find(t => t.name === name);
+}
+
+// This function builds the array for VAPI's `model.tools[]`
+export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
+  console.log(`Building VAPI tools for ${tools.length} registered tools`);
+  
+  return tools.map(t => {
+    const vapiToolFunction: VapiToolFunction = {
+      name: t.name,
+      description: t.description,
+      parameters: zodToJsonSchema(t.schema, t.name),
+    };
+    
+    const vapiTool: VapiToolSchema = {
+      type: "function",
+      async: t.async ?? false,
+      function: vapiToolFunction,
+      // This server URL points to a single generic handler for all tools
+      // VAPI will POST to this URL with the tool name and arguments in the payload
+      server: { 
+        url: `${appBaseUrl}/api/vapi/tool-handler`,
+        // secret: process.env.VAPI_TOOL_WEBHOOK_SECRET // Add if VAPI supports per-tool secrets
+      },
+    };
+
+    if (t.messages) {
+      vapiTool.messages = [
+        t.messages.start ? { type: "request-start", content: t.messages.start } : null,
+        t.messages.delay ? { type: "request-response-delayed", content: t.messages.delay, timingMilliseconds: 2000 } : null,
+        t.messages.success ? { type: "request-complete", content: t.messages.success } : null,
+        t.messages.fail ? { type: "request-failed", content: t.messages.fail } : null,
+      ].filter(Boolean) as VapiToolSchema["messages"];
+    }
+    
+    console.log(`Built VAPI tool: ${t.name}`);
+    return vapiTool;
+  });
+}
+
+================
+File: lib/tools/types.ts
+================
+// lib/tools/types.ts
+import { z } from "zod";
+import { Practice } from "@prisma/client"; // Assuming your Practice model
+
+// For VAPI tool definition
+export interface VapiToolFunction {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>; // JSON schema object - we'll use Zod's shape directly
+}
+
+export interface VapiToolSchema {
+  type: "function";
+  async?: boolean;
+  function: VapiToolFunction;
+  server: {
+    url: string; // URL to your generic tool handler or specific tool endpoint
+    secret?: string; // Optional secret for verifying VAPI requests to this tool
+  };
+  messages?: Array<{ // Optional messages for VAPI to speak during tool call
+    type: "request-start" | "request-response-delayed" | "request-complete" | "request-failed";
+    content?: string;
+    timingMilliseconds?: number;
+  }>;
+}
+
+// Internal tool definition structure
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface ToolDefinition<T extends z.ZodType<any, any>> {
+  name: string;
+  description: string;
+  schema: T; // Zod schema for arguments
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  run: (params: { args: z.infer<T>; practice: Practice; vapiCallId?: string }) => Promise<any>; // Tool execution logic
+  messages?: { // Optional messages for VAPI
+    start?: string;
+    delay?: string;
+    success?: string;
+    fail?: string;
+  };
+  async?: boolean; // If VAPI should handle this as an async tool
+}
+
+================
+File: lib/prisma.ts
+================
+import { PrismaClient } from '@prisma/client';
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+================
+File: lib/vapi.ts
+================
+// VAPI API Client for managing assistants and calls
+// Docs: https://docs.vapi.ai
+
+const VAPI_API_BASE_URL = "https://api.vapi.ai";
+const VAPI_API_KEY = process.env.VAPI_API_KEY;
+
+if (!VAPI_API_KEY) {
+  console.warn("VAPI_API_KEY not configured - VAPI features will not work");
+}
+
+// Basic VAPI types based on their API documentation
+export interface VapiModel {
+  provider: "openai" | "groq" | "anthropic" | "anyscale" | "togetherai";
+  model: string; // e.g., "gpt-3.5-turbo", "gpt-4", etc.
+  temperature?: number;
+  maxTokens?: number;
+  messages: Array<{
+    role: "system" | "user" | "assistant" | "function";
+    content: string;
+  }>;
+  tools?: VapiTool[];
+}
+
+export interface VapiVoice {
+  provider: "11labs" | "openai" | "playht" | "lmnt" | "neets" | "rime";
+  voiceId: string; // Provider-specific voice ID
+  speed?: number;
+  stability?: number;
+  similarityBoost?: number;
+  style?: number;
+  useSpeakerBoost?: boolean;
+}
+
+export interface VapiTool {
+  type: "function";
+  async?: boolean;
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>; // JSON Schema object
+  };
+  server: {
+    url: string;
+    secret?: string;
+  };
+  messages?: Array<{
+    type: "request-start" | "request-response-delayed" | "request-complete" | "request-failed";
+    content?: string;
+    timingMilliseconds?: number;
+  }>;
+}
+
+export interface VapiAssistant {
+  id: string;
+  name: string;
+  model: VapiModel;
+  voice: VapiVoice;
+  firstMessage?: string;
+  serverUrl?: string;
+  serverMessages?: string[];
+  silenceTimeoutSeconds?: number;
+  maxDurationSeconds?: number;
+  backgroundSound?: "off" | "office";
+  backchannelingEnabled?: boolean;
+  backgroundDenoisingEnabled?: boolean;
+  modelOutputInMessagesEnabled?: boolean;
+  transportConfigurations?: Record<string, unknown>[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateAssistantDTO {
+  name: string;
+  model: VapiModel;
+  voice: VapiVoice;
+  firstMessage?: string;
+  serverUrl?: string;
+  serverMessages?: string[];
+  silenceTimeoutSeconds?: number;
+  maxDurationSeconds?: number;
+  backgroundSound?: "off" | "office";
+  backchannelingEnabled?: boolean;
+  backgroundDenoisingEnabled?: boolean;
+  modelOutputInMessagesEnabled?: boolean;
+  transportConfigurations?: Record<string, unknown>[];
+}
+
+export interface UpdateAssistantDTO extends Partial<CreateAssistantDTO> {
+  // All fields from CreateAssistantDTO are optional for updates
+  // This interface extends Partial<CreateAssistantDTO> to allow partial updates
+  _placeholder?: never; // Placeholder to avoid empty interface error
+}
+
+async function vapiRequest(
+  endpoint: string,
+  method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
+  body?: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (!VAPI_API_KEY) {
+    throw new Error("VAPI_API_KEY is not configured");
+  }
+
+  const url = `${VAPI_API_BASE_URL}${endpoint}`;
+  
+  const options: RequestInit = {
+    method,
+    headers: {
+      "Authorization": `Bearer ${VAPI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  };
+
+  if (body && method !== "GET") {
+    options.body = JSON.stringify(body);
+  }
+
+  console.log(`VAPI API: ${method} ${url}`);
+  if (body) {
+    console.log("VAPI API body:", JSON.stringify(body, null, 2));
+  }
+
+  try {
+    const response = await fetch(url, options);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`VAPI API error (${response.status}):`, errorText);
+      throw new Error(`VAPI API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`VAPI API response:`, JSON.stringify(data, null, 2));
+    return data as Record<string, unknown>;
+  } catch (error) {
+    console.error("VAPI API request failed:", error);
+    throw error;
+  }
+}
+
+export async function createVapiAssistant(assistantConfig: CreateAssistantDTO): Promise<VapiAssistant> {
+  console.log("Creating VAPI assistant:", assistantConfig.name);
+  const result = await vapiRequest("/assistant", "POST", assistantConfig as unknown as Record<string, unknown>);
+  return result as unknown as VapiAssistant;
+}
+
+export async function updateVapiAssistant(
+  assistantId: string, 
+  assistantConfig: UpdateAssistantDTO
+): Promise<VapiAssistant> {
+  console.log(`Updating VAPI assistant ${assistantId}`);
+  const result = await vapiRequest(`/assistant/${assistantId}`, "PATCH", assistantConfig as unknown as Record<string, unknown>);
+  return result as unknown as VapiAssistant;
+}
+
+export async function getVapiAssistant(assistantId: string): Promise<VapiAssistant | null> {
+  try {
+    console.log(`Getting VAPI assistant ${assistantId}`);
+    const result = await vapiRequest(`/assistant/${assistantId}`, "GET");
+    return result as unknown as VapiAssistant;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.includes("404")) {
+      console.log(`VAPI assistant ${assistantId} not found`);
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function deleteVapiAssistant(assistantId: string): Promise<void> {
+  console.log(`Deleting VAPI assistant ${assistantId}`);
+  await vapiRequest(`/assistant/${assistantId}`, "DELETE");
+}
+
+// Function to verify VAPI webhook requests (if VAPI provides signing)
+export async function verifyVapiRequest(): Promise<{ verified: boolean; error?: string }> {
+  // TODO: Implement if VAPI provides request signing
+  // For now, return true as a placeholder
+  console.log("VAPI request verification - not yet implemented");
+  return { verified: true };
+}
+
+================
+File: eslint.config.mjs
+================
+import { dirname } from "path";
+import { fileURLToPath } from "url";
+import { FlatCompat } from "@eslint/eslintrc";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const compat = new FlatCompat({
+  baseDirectory: __dirname,
+});
+
+const eslintConfig = [
+  ...compat.extends("next/core-web-vitals", "next/typescript"),
+];
+
+export default eslintConfig;
+
+================
+File: middleware.ts
+================
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isProtectedRoute = createRouteMatcher([
+  '/practice-config(.*)',
+  // Add '/laine(.*)' for future phase
+]);
+
+export default clerkMiddleware(async (auth, req) => {
+  if (isProtectedRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: [
+    // Skip Next.js internals and all static files, unless found in search params
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Always run for API routes
+    '/(api|trpc)(.*)',
+  ],
+};
+
+================
+File: next.config.ts
+================
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+
+================
+File: postcss.config.mjs
+================
+const config = {
+  plugins: ["@tailwindcss/postcss"],
+};
+
+export default config;
+
+================
+File: tsconfig.json
+================
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+
+================
+File: app/api/sync-nexhealth/route.ts
+================
+import { auth } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getAppointmentTypes, getProviders } from "@/lib/nexhealth";
+
+interface NexHealthAppointmentType {
+  id: number;
+  name: string;
+  minutes: number;
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
+}
+
+interface NexHealthProvider {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
+}
+
+export async function POST() {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Get the practice for this user
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+      return NextResponse.json(
+        { error: "NexHealth configuration missing. Please configure your subdomain and location ID first." },
+        { status: 400 }
+      );
+    }
+
+    // Fetch data from NexHealth
+    const [appointmentTypes, providers] = await Promise.all([
+      getAppointmentTypes(practice.nexhealthSubdomain, practice.nexhealthLocationId),
+      getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
+    ]);
+
+    // Sync appointment types - use 'minutes' from NexHealth API
+    const appointmentTypePromises = appointmentTypes.map((type: NexHealthAppointmentType) =>
+      prisma.appointmentType.upsert({
+        where: {
+          practiceId_nexhealthAppointmentTypeId: {
+            practiceId: practice.id,
+            nexhealthAppointmentTypeId: type.id.toString(),
+          },
+        },
+        update: {
+          name: type.name,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
+        },
+        create: {
+          practiceId: practice.id,
+          nexhealthAppointmentTypeId: type.id.toString(),
+          name: type.name,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
+        },
+      })
+    );
+
+    // Sync providers
+    const providerPromises = providers.map((provider: NexHealthProvider) =>
+      prisma.provider.upsert({
+        where: {
+          practiceId_nexhealthProviderId: {
+            practiceId: practice.id,
+            nexhealthProviderId: provider.id.toString(),
+          },
+        },
+        update: {
+          firstName: provider.first_name || null,
+          lastName: provider.last_name || provider.name || "Unknown",
+        },
+        create: {
+          practiceId: practice.id,
+          nexhealthProviderId: provider.id.toString(),
+          firstName: provider.first_name || null,
+          lastName: provider.last_name || provider.name || "Unknown",
+        },
+      })
+    );
+
+    // Execute all upserts
+    await Promise.all([...appointmentTypePromises, ...providerPromises]);
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully synced ${appointmentTypes.length} appointment types and ${providers.length} providers.`,
+      data: {
+        appointmentTypesCount: appointmentTypes.length,
+        providersCount: providers.length,
+      },
+    });
+  } catch (error) {
+    console.error("Error syncing NexHealth data:", error);
+    return NextResponse.json(
+      { error: "Failed to sync NexHealth data. Please check your configuration and try again." },
+      { status: 500 }
+    );
+  }
+}
+
+================
+File: app/practice-config/page.tsx
+================
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { getAppointmentTypes, getProviders } from "@/lib/nexhealth";
+import { Toaster } from "sonner";
+import { SaveConfigButton, SyncDataButton, ConfigForm, SyncForm } from "./client-components";
+
+interface NexHealthAppointmentType {
+  id: number;
+  name: string;
+  minutes: number;
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
+}
+
+interface NexHealthProvider {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
+}
+
+async function savePracticeConfig(formData: FormData) {
+  "use server";
+  const { userId } = await auth();
+  if (!userId) redirect("/sign-in");
+
+  const name = formData.get("practiceName") as string | null;
+  const subdomain = formData.get("nexhealthSubdomain") as string;
+  const locationId = formData.get("nexhealthLocationId") as string;
+
+  if (!subdomain || !locationId) {
+    throw new Error("Subdomain and Location ID are required.");
+  }
+
+  try {
+    await prisma.practice.upsert({
+      where: { clerkUserId: userId },
+      update: { name, nexhealthSubdomain: subdomain, nexhealthLocationId: locationId },
+      create: { clerkUserId: userId, name, nexhealthSubdomain: subdomain, nexhealthLocationId: locationId },
+    });
+    revalidatePath("/practice-config");
+  } catch (error) {
+    console.error("Error saving practice config:", error);
+    throw new Error("Failed to save configuration.");
+  }
+}
+
+async function syncNexhealthData() {
+  "use server";
+  const { userId } = await auth();
+  if (!userId) redirect("/sign-in");
+
+  try {
+    // Get the practice for this user
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (!practice) {
+      throw new Error("Practice not found.");
+    }
+
+    if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+      throw new Error("NexHealth configuration missing. Please configure your subdomain and location ID first.");
+    }
+
+    // Fetch data from NexHealth
+    const [appointmentTypes, providers] = await Promise.all([
+      getAppointmentTypes(practice.nexhealthSubdomain, practice.nexhealthLocationId),
+      getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
+    ]);
+
+    // Sync appointment types - fix the mapping to use 'minutes' instead of 'duration'
+    const appointmentTypePromises = appointmentTypes.map((type: NexHealthAppointmentType) =>
+      prisma.appointmentType.upsert({
+        where: {
+          practiceId_nexhealthAppointmentTypeId: {
+            practiceId: practice.id,
+            nexhealthAppointmentTypeId: type.id.toString(),
+          },
+        },
+        update: {
+          name: type.name,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
+        },
+        create: {
+          practiceId: practice.id,
+          nexhealthAppointmentTypeId: type.id.toString(),
+          name: type.name,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
+        },
+      })
+    );
+
+    // Sync providers
+    const providerPromises = providers.map((provider: NexHealthProvider) =>
+      prisma.provider.upsert({
+        where: {
+          practiceId_nexhealthProviderId: {
+            practiceId: practice.id,
+            nexhealthProviderId: provider.id.toString(),
+          },
+        },
+        update: {
+          firstName: provider.first_name || null,
+          lastName: provider.last_name || provider.name || "Unknown",
+        },
+        create: {
+          practiceId: practice.id,
+          nexhealthProviderId: provider.id.toString(),
+          firstName: provider.first_name || null,
+          lastName: provider.last_name || provider.name || "Unknown",
+        },
+      })
+    );
+
+    // Execute all upserts
+    await Promise.all([...appointmentTypePromises, ...providerPromises]);
+
+    revalidatePath("/practice-config");
+  } catch (error) {
+    console.error("Error syncing NexHealth data:", error);
+    throw new Error("Failed to sync NexHealth data. Please check your configuration and try again.");
+  }
+}
+
+export default async function PracticeConfigPage() {
+  const { userId } = await auth();
+  if (!userId) redirect("/sign-in");
+
+  const practice = await prisma.practice.findUnique({ 
+    where: { clerkUserId: userId },
+    include: {
+      appointmentTypes: true,
+      providers: true,
+    }
+  });
+
+  return (
+    <>
+      <Toaster position="top-right" />
+      <div className="max-w-4xl mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">Practice Configuration</h1>
+        
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Basic Information</h2>
+          <ConfigForm action={savePracticeConfig}>
+            <div>
+              <label htmlFor="practiceName" className="block text-sm font-medium text-gray-700 mb-1">
+                Practice Name (Optional)
+              </label>
+              <input
+                type="text"
+                id="practiceName"
+                name="practiceName"
+                defaultValue={practice?.name || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter your practice name"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="nexhealthSubdomain" className="block text-sm font-medium text-gray-700 mb-1">
+                NexHealth Subdomain *
+              </label>
+              <input
+                type="text"
+                id="nexhealthSubdomain"
+                name="nexhealthSubdomain"
+                defaultValue={practice?.nexhealthSubdomain || ""}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., testdental"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Your NexHealth subdomain (the part before .nexhealth.com)
+              </p>
+            </div>
+            
+            <div>
+              <label htmlFor="nexhealthLocationId" className="block text-sm font-medium text-gray-700 mb-1">
+                NexHealth Location ID *
+              </label>
+              <input
+                type="text"
+                id="nexhealthLocationId"
+                name="nexhealthLocationId"
+                defaultValue={practice?.nexhealthLocationId || ""}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 123"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Your NexHealth Location ID number
+              </p>
+            </div>
+            
+            <SaveConfigButton />
+          </ConfigForm>
+        </div>
+
+        {practice?.nexhealthSubdomain && practice?.nexhealthLocationId && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">NexHealth Data</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  {practice.appointmentTypes.length} synced
+                </p>
+                {practice.appointmentTypes.length > 0 && (
+                  <ul className="text-sm space-y-1">
+                    {practice.appointmentTypes.slice(0, 5).map((type) => (
+                      <li key={type.id} className="text-gray-700">
+                        {type.name} ({type.duration} min)
+                      </li>
+                    ))}
+                    {practice.appointmentTypes.length > 5 && (
+                      <li className="text-gray-500">
+                        ... and {practice.appointmentTypes.length - 5} more
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+              
+              <div>
+                <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  {practice.providers.length} synced
+                </p>
+                {practice.providers.length > 0 && (
+                  <ul className="text-sm space-y-1">
+                    {practice.providers.slice(0, 5).map((provider) => (
+                      <li key={provider.id} className="text-gray-700">
+                        {provider.firstName} {provider.lastName}
+                      </li>
+                    ))}
+                    {practice.providers.length > 5 && (
+                      <li className="text-gray-500">
+                        ... and {practice.providers.length - 5} more
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <SyncForm action={syncNexhealthData}>
+                <SyncDataButton />
+              </SyncForm>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+================
+File: .gitignore
+================
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/app/generated/prisma
+
+================
+File: README.md
+================
+# Laine AI Voice Assistant
+
+Barebones testbed for VAPI & NexHealth integration.
+
+================
+File: app/page.tsx
+================
+import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
+
+export default async function HomePage() {
+  const { userId } = await auth();
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
+      <div className="max-w-6xl mx-auto px-6 py-16">
+        {/* Hero Section */}
+        <div className="text-center max-w-4xl mx-auto mb-20">
+          <div className="mb-6">
+            <span className="inline-block px-4 py-2 bg-blue-50 text-blue-700 text-sm font-medium rounded-full border border-blue-200">
+              Now Available
+            </span>
+          </div>
+          
+          <h1 className="text-5xl md:text-6xl font-bold text-slate-900 mb-6 leading-tight">
+            Laine Voice AI
+          </h1>
+          
+          <p className="text-xl text-slate-600 mb-10 leading-relaxed max-w-2xl mx-auto">
+            Intelligent voice assistant that seamlessly integrates with your EHR system to streamline appointment scheduling and enhance patient communication.
+          </p>
+          
+          {userId ? (
+            <div className="space-y-6">
+              <p className="text-lg text-slate-700">
+                Welcome back! Ready to configure your practice?
+              </p>
+              <Link
+                href="/practice-config"
+                className="inline-flex items-center px-8 py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              >
+                Go to Practice Configuration
+                <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <p className="text-lg text-slate-700">
+                Get started by creating your account to configure your practice.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                <Link
+                  href="/sign-up"
+                  className="inline-flex items-center px-8 py-4 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                >
+                  Get Started
+                  <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+                <Link
+                  href="/sign-in"
+                  className="inline-flex items-center px-8 py-4 bg-white text-slate-700 font-semibold rounded-xl border-2 border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all duration-200"
+                >
+                  Sign In
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Features Grid */}
+        <div className="max-w-4xl mx-auto">
+          {/* Core Features */}
+          <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200 hover:shadow-md transition-shadow duration-200">
+            <div className="flex items-center mb-6">
+              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mr-4">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900">Core Capabilities</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                {[
+                  "Voice-Powered Scheduling",
+                  "EHR System Integration", 
+                  "Natural Language Processing",
+                  "Real-time Appointment Management"
+                ].map((feature, index) => (
+                  <div key={index} className="flex items-center">
+                    <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+                      <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <span className="text-slate-700 font-medium">{feature}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-4">
+                {[
+                  "Automated Patient Communication",
+                  "Practice Workflow Optimization",
+                  "Secure Data Handling",
+                  "24/7 Availability"
+                ].map((feature, index) => (
+                  <div key={index} className="flex items-center">
+                    <div className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+                      <svg className="w-3 h-3 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <span className="text-slate-700 font-medium">{feature}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom CTA */}
+        <div className="text-center mt-20">
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-3xl font-bold text-slate-900 mb-4">
+              Ready to Enhance Your Practice?
+            </h2>
+            <p className="text-lg text-slate-600 mb-8">
+              Transform your appointment scheduling with AI-powered voice assistance that integrates seamlessly with your existing systems.
+            </p>
+            {!userId && (
+              <Link
+                href="/sign-up"
+                className="inline-flex items-center px-8 py-4 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-800 transition-all duration-200 shadow-lg hover:shadow-xl"
+              >
+                Start Your Configuration
+                <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+================
+File: prisma/schema.prisma
+================
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Practice {
+  id                      String @id @default(cuid())
+  clerkUserId             String @unique // Links to Clerk User ID
+  name                    String?       // Optional practice name entered by user
+
+  // NexHealth specific identifiers for this practice instance
+  nexhealthSubdomain      String?       // User-provided NexHealth subdomain
+  nexhealthLocationId     String?       // User-provided NexHealth Location ID
+
+  // VAPI Assistant relationship - moved to separate config table for better modularity
+  assistantConfig   PracticeAssistantConfig? // One-to-one relation
+  nexhealthWebhookSubscriptions NexhealthWebhookSubscription[] // One-to-many
+
+  appointmentTypes AppointmentType[]
+  providers        Provider[]
+  callLogs         CallLog[] // For VAPI call logging
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A practice is uniquely identified by its Clerk user for our app's purposes.
+  // Subdomain + LocationID identify it for NexHealth API calls.
+  // If a user could manage multiple NexHealth locations, this model would need adjustment.
+  // For now, one Clerk user maps to one set of NexHealth subdomain/locationId.
+}
+
+model PracticeAssistantConfig {
+  id                  String @id @default(cuid())
+  practiceId          String @unique
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  vapiAssistantId     String? @unique // The ID of the assistant on VAPI's platform
+  
+  // Customizable fields by practice
+  voiceProvider       String   @default("11labs") // e.g., "11labs", "openai", "playht"
+  voiceId             String   @default("burt")   // e.g., "burt" for 11labs, "alloy" for openai
+  // voiceModel is often tied to provider/voiceId, can be added if needed
+
+  systemPrompt        String   @default("You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient.")
+  firstMessage        String   @default("Hello! This is Laine from your dental office. How can I help you today?")
+
+  // Potentially store other VAPI settings if customization is expanded
+  // serverUrl for tool calls will be derived from NEXT_PUBLIC_APP_URL
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// For storing details about the global NexHealth webhook endpoint managed by the SaaS
+model GlobalNexhealthWebhookEndpoint {
+  id                  String    @id @default("singleton") // Ensures only one record
+  nexhealthEndpointId String    @unique // The ID from NexHealth API after creating the endpoint
+  secretKey           String    // The secret key provided by NexHealth for this endpoint
+  targetUrl           String    // The URL registered with NexHealth (e.g., https://laine-integrated.vercel.app/api/nexhealth-webhook)
+  isEnabled           Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+// For tracking which practices are subscribed to which NexHealth events
+model NexhealthWebhookSubscription {
+  id                          String   @id @default(cuid())
+  practiceId                  String
+  practice                    Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  nexhealthWebhookEndpointId  String   // Foreign key to the global endpoint ID from NexHealth
+  nexhealthSubscriptionId     String   @unique // The ID of this specific subscription from NexHealth API
+  resourceType                String   // e.g., "Appointment", "Patient"
+  eventName                   String   // e.g., "appointment_insertion.complete", "patient_created"
+  isActive                    Boolean  @default(true)
+
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@unique([practiceId, resourceType, eventName]) // A practice should only have one active sub for a specific event
+}
+
+// For VAPI call logging, as per blueprint
+model CallLog {
+  id                            String    @id @default(cuid()) // Or use vapi_call_id as PK if always present early
+  vapiCallId                    String    @unique // From VAPI
+  practiceId                    String
+  practice                      Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  callTimestampStart            DateTime?
+  callStatus                    String?   // e.g., INITIATED, IN_PROGRESS, FORWARDING, ENDED
+  transcriptText                String?   @db.Text
+  summary                       String?   @db.Text // End of call report summary
+  vapiTranscriptUrl             String?   // URL to audio recording
+
+  // Fields for tracking tool usage and outcomes within a call
+  detectedIntent                String?
+  nexhealthPatientId            String?   // If patient identified/created
+  bookedAppointmentNexhealthId  String?   // If appointment booked
+
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+}
+
+model AppointmentType {
+  id                          String @id @default(cuid())
+  practiceId                  String
+  practice                    Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthAppointmentTypeId  String // ID from NexHealth
+  name                        String
+  duration                    Int    // Duration in minutes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([practiceId, nexhealthAppointmentTypeId])
+}
+
+model Provider {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthProviderId String // ID from NexHealth
+  firstName           String?
+  lastName            String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([practiceId, nexhealthProviderId])
+}
+
+model NexhealthTokenCache {
+  id          String   @id @default("singleton") // Fixed ID for single token entry
+  accessToken String   @db.Text // The bearer token can be long
+  expiresAt   DateTime // Timestamp when the token expires
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+================
+File: app/globals.css
+================
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f8fafc;
+}
+
+@layer base {
+  * {
+    @apply border-gray-300;
+  }
+  body {
+    @apply bg-white text-gray-900;
+  }
+}
+
+================
+File: app/layout.tsx
+================
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import { ClerkProvider, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Laine AI Voice Assistant",
+  description: "Advanced voice assistant for healthcare practices with seamless NexHealth integration",
+};
+
+async function Header() {
+  const { userId } = await auth();
+  
+  return (
+    <header className="fixed top-0 left-0 right-0 bg-white/10 backdrop-blur-md border-b border-slate-200/30 z-50">
+      <div className="flex items-center justify-between max-w-6xl mx-auto px-6 py-4">
+        <div className="flex items-center">
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-slate-900">Laine AI</h1>
+        </div>
+        <div className="flex items-center gap-4">
+          {userId ? (
+            <div className="flex items-center gap-4">
+              <a 
+                href="/practice-config" 
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Practice Config
+              </a>
+              <a 
+                href="/laine" 
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Laine Assistant
+              </a>
+              <UserButton afterSignOutUrl="/" />
+            </div>
+          ) : (
+            <>
+              <SignInButton mode="modal">
+                <button className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
+                  Sign In
+                </button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <button className="px-4 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                  Sign Up
+                </button>
+              </SignUpButton>
+            </>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <ClerkProvider>
+      <html lang="en">
+        <body
+          className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-50`}
+        >
+          <Header />
+          <main>
+            {children}
+          </main>
+        </body>
+      </html>
+    </ClerkProvider>
+  );
+}
+
+================
+File: lib/nexhealth.ts
+================
+import { prisma } from "@/lib/prisma";
+import { addSeconds } from 'date-fns';
+
+interface NexHealthAppointmentType {
+  id: number;
+  name: string;
+  minutes: number; // NexHealth uses 'minutes' not 'duration'
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
+}
+
+interface NexHealthProvider {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
+}
+
+const NEXHEALTH_API_BASE_URL = process.env.NEXHEALTH_API_BASE_URL!;
+const MASTER_NEXHEALTH_API_KEY = process.env.NEXHEALTH_API_KEY!; // The master key
+
+const TOKEN_CACHE_ID = "singleton"; // Fixed ID for the single token entry
+const TOKEN_EXPIRY_BUFFER_SECONDS = 300; // 5 minutes buffer
+const DEFAULT_TOKEN_LIFETIME_SECONDS = 55 * 60; // 55 minutes (safe for 1-hour tokens)
+
+async function fetchNewBearerToken(): Promise<{ accessToken: string; expiresAt: Date }> {
+  if (!MASTER_NEXHEALTH_API_KEY) {
+    throw new Error("NEXHEALTH_API_KEY is not configured in environment variables.");
+  }
+
+  const authUrl = `${NEXHEALTH_API_BASE_URL}/authenticates`;
+  console.log("Fetching new NexHealth bearer token...");
+
+  try {
+    const response = await fetch(authUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/vnd.Nexhealth+json;version=2',
+        // NexHealth expects the raw master key for /authenticates endpoint
+        'Authorization': MASTER_NEXHEALTH_API_KEY,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("Failed to fetch NexHealth bearer token:", response.status, errorBody);
+      throw new Error(`NexHealth Authentication failed: ${response.status} - ${errorBody}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.data || !result.data.token) {
+      console.error("NexHealth /authenticates response missing token:", result);
+      throw new Error("Invalid token response from NexHealth /authenticates");
+    }
+
+    const accessToken = result.data.token;
+    const now = new Date();
+    
+    // If NexHealth provides expiry in response, use it. Otherwise, use default lifetime.
+    // Most JWT tokens have 1-hour validity, we use 55 minutes to be safe
+    let expiresAt: Date;
+    
+    if (result.data.exp) {
+      // If exp is provided as UNIX timestamp (seconds)
+      expiresAt = new Date(result.data.exp * 1000);
+    } else {
+      // Default to 55 minutes from now
+      expiresAt = addSeconds(now, DEFAULT_TOKEN_LIFETIME_SECONDS);
+    }
+
+    console.log(`New NexHealth token expires at: ${expiresAt.toISOString()}`);
+
+    // Cache the token in database
+    await prisma.nexhealthTokenCache.upsert({
+      where: { id: TOKEN_CACHE_ID },
+      update: { accessToken, expiresAt },
+      create: { id: TOKEN_CACHE_ID, accessToken, expiresAt },
+    });
+
+    return { accessToken, expiresAt };
+  } catch (error) {
+    console.error('Error fetching NexHealth bearer token:', error);
+    throw error;
+  }
+}
+
+export async function getNexhealthBearerToken(): Promise<string> {
+  try {
+    // Check for cached token
+    const cachedToken = await prisma.nexhealthTokenCache.findUnique({
+      where: { id: TOKEN_CACHE_ID },
+    });
+
+    if (cachedToken) {
+      const now = new Date();
+      const tokenStillValidUntil = addSeconds(now, TOKEN_EXPIRY_BUFFER_SECONDS);
+      
+      if (cachedToken.expiresAt > tokenStillValidUntil) {
+        console.log("Using cached NexHealth bearer token.");
+        return cachedToken.accessToken;
+      }
+      console.log("Cached NexHealth token expired or nearing expiry.");
+    } else {
+      console.log("No cached NexHealth token found.");
+    }
+
+    // Fetch new token if none cached or expired
+    const { accessToken } = await fetchNewBearerToken();
+    return accessToken;
+  } catch (error) {
+    console.error('Error getting NexHealth bearer token:', error);
+    throw error;
+  }
+}
+
+// Export the generic API function for use in tools and other modules
+export async function fetchNexhealthAPI(
+  path: string, // e.g., "/appointment_types"
+  subdomain: string, // Practice-specific subdomain
+  params?: Record<string, string | number | string[]>,
+  method: string = 'GET',
+  body?: unknown
+) {
+  // Get valid bearer token
+  const bearerToken = await getNexhealthBearerToken();
+  
+  const url = new URL(`${NEXHEALTH_API_BASE_URL}${path}`);
+  
+  // Add subdomain for data API calls (not for /authenticates)
+  if (path !== '/authenticates' && !params?.subdomain) {
+    url.searchParams.append('subdomain', subdomain);
+  }
+  
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach(v => url.searchParams.append(key, v.toString()));
+      } else {
+        url.searchParams.append(key, value.toString());
+      }
+    });
+  }
+
+  const options: RequestInit = {
+    method,
+    headers: {
+      'Accept': 'application/vnd.Nexhealth+json;version=2',
+      'Authorization': `Bearer ${bearerToken}`, // Use bearer token for data APIs
+      'Content-Type': 'application/json',
+    },
+  };
+
+  if (body && method !== 'GET') {
+    options.body = JSON.stringify(body);
+  }
+
+  console.log(`Fetching from NexHealth: ${method} ${url.toString()} for subdomain ${subdomain}`);
+
+  try {
+    const response = await fetch(url.toString(), options);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`NexHealth API error (${response.status}):`, errorText);
+      
+      // If we get 401, the token might be invalid - clear cache and retry once
+      if (response.status === 401) {
+        console.log("Got 401, clearing token cache and retrying...");
+        await prisma.nexhealthTokenCache.deleteMany({
+          where: { id: TOKEN_CACHE_ID }
+        });
+        
+        // Retry with fresh token (recursive call - but only once due to cache clear)
+        return fetchNexhealthAPI(path, subdomain, params, method, body);
+      }
+      
+      throw new Error(`NexHealth API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('NexHealth API error:', error);
+    throw error;
+  }
+}
+
+export async function getAppointmentTypes(subdomain: string, locationId: string): Promise<NexHealthAppointmentType[]> {
+  if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
+  
+  const data = await fetchNexhealthAPI(
+    '/appointment_types',
+    subdomain,
+    { location_id: locationId }
+  );
+  
+  console.log("Raw NexHealth appointment_types response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let appointmentTypes = null;
+  
+  if (Array.isArray(data)) {
+    appointmentTypes = data;
+  } else if (data?.data?.appointment_types && Array.isArray(data.data.appointment_types)) {
+    appointmentTypes = data.data.appointment_types;
+  } else if (data?.appointment_types && Array.isArray(data.appointment_types)) {
+    appointmentTypes = data.appointment_types;
+  } else if (data?.data && Array.isArray(data.data)) {
+    appointmentTypes = data.data;
+  } else {
+    console.warn("Unexpected appointment_types response structure:", data);
+    appointmentTypes = [];
+  }
+  
+  console.log(`Parsed ${appointmentTypes.length} appointment types`);
+  return appointmentTypes;
+}
+
+export async function getProviders(subdomain: string, locationId: string): Promise<NexHealthProvider[]> {
+  if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
+  
+  const data = await fetchNexhealthAPI(
+    '/providers',
+    subdomain,
+    { location_id: locationId, inactive: 'false' }
+  );
+  
+  console.log("Raw NexHealth providers response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let providers = null;
+  
+  if (Array.isArray(data)) {
+    providers = data;
+  } else if (data?.data?.providers && Array.isArray(data.data.providers)) {
+    providers = data.data.providers;
+  } else if (data?.providers && Array.isArray(data.providers)) {
+    providers = data.providers;
+  } else if (data?.data && Array.isArray(data.data)) {
+    providers = data.data;
+  } else {
+    console.warn("Unexpected providers response structure:", data);
+    providers = [];
+  }
+  
+  console.log(`Parsed ${providers.length} providers`);
+  return providers;
+}
+
+================
+File: package.json
+================
+{
+  "name": "laine-integrated",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma generate",
+    "vercel-build": "prisma generate && next build",
+    "db:migrate": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed"
+  },
+  "dependencies": {
+    "@clerk/nextjs": "^6.20.2",
+    "@prisma/client": "^6.8.2",
+    "date-fns": "^4.1.0",
+    "fast-glob": "^3.3.3",
+    "next": "15.3.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sonner": "^2.0.4",
+    "zod": "^3.25.42",
+    "zod-to-json-schema": "^3.24.5"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.3",
+    "prisma": "^6.8.2",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+
+
+
+
+================================================================
+End of Codebase
+================================================================

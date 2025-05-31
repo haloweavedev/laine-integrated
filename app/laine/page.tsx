@@ -34,10 +34,10 @@ async function createPracticeAssistant() {
   
   // Create default assistant configuration
   const assistantConfig = {
-    name: `${practice.name || 'Practice'} - Laine Assistant`,
+    name: `${practice.name ? practice.name.substring(0, 15) : 'Practice'} - Laine`,
     model: {
       provider: "openai" as const,
-      model: "gpt-3.5-turbo",
+      model: "gpt-4.1-nano-2025-04-14",
       temperature: 0.7,
       messages: [
         {
@@ -122,7 +122,7 @@ async function updatePracticeAssistantConfig(formData: FormData) {
   const updateConfig = {
     model: {
       provider: "openai" as const,
-      model: "gpt-3.5-turbo",
+      model: "gpt-4.1-nano-2025-04-14",
       temperature: 0.7,
       messages: [
         {
