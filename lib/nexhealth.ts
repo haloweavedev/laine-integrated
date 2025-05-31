@@ -193,7 +193,26 @@ export async function getAppointmentTypes(subdomain: string, locationId: string)
     { location_id: locationId }
   );
   
-  return data?.data?.appointment_types || data?.appointment_types || data || [];
+  console.log("Raw NexHealth appointment_types response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let appointmentTypes = null;
+  
+  if (Array.isArray(data)) {
+    appointmentTypes = data;
+  } else if (data?.data?.appointment_types && Array.isArray(data.data.appointment_types)) {
+    appointmentTypes = data.data.appointment_types;
+  } else if (data?.appointment_types && Array.isArray(data.appointment_types)) {
+    appointmentTypes = data.appointment_types;
+  } else if (data?.data && Array.isArray(data.data)) {
+    appointmentTypes = data.data;
+  } else {
+    console.warn("Unexpected appointment_types response structure:", data);
+    appointmentTypes = [];
+  }
+  
+  console.log(`Parsed ${appointmentTypes.length} appointment types`);
+  return appointmentTypes;
 }
 
 export async function getProviders(subdomain: string, locationId: string): Promise<NexHealthProvider[]> {
@@ -205,5 +224,24 @@ export async function getProviders(subdomain: string, locationId: string): Promi
     { location_id: locationId, requestable: 'true' }
   );
   
-  return data?.data?.providers || data?.providers || data || [];
+  console.log("Raw NexHealth providers response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let providers = null;
+  
+  if (Array.isArray(data)) {
+    providers = data;
+  } else if (data?.data?.providers && Array.isArray(data.data.providers)) {
+    providers = data.data.providers;
+  } else if (data?.providers && Array.isArray(data.providers)) {
+    providers = data.providers;
+  } else if (data?.data && Array.isArray(data.data)) {
+    providers = data.data;
+  } else {
+    console.warn("Unexpected providers response structure:", data);
+    providers = [];
+  }
+  
+  console.log(`Parsed ${providers.length} providers`);
+  return providers;
 } 
