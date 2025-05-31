@@ -2,16 +2,24 @@ import { prisma } from "@/lib/prisma";
 import { addSeconds } from 'date-fns';
 
 interface NexHealthAppointmentType {
-  id: string | number;
+  id: number;
   name: string;
-  duration: string | number;
+  minutes: number; // NexHealth uses 'minutes' not 'duration'
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
 }
 
 interface NexHealthProvider {
-  id: string | number;
+  id: number;
   first_name?: string;
   last_name?: string;
   name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
 }
 
 const NEXHEALTH_API_BASE_URL = process.env.NEXHEALTH_API_BASE_URL!;
@@ -221,7 +229,7 @@ export async function getProviders(subdomain: string, locationId: string): Promi
   const data = await fetchNexhealthAPI(
     '/providers',
     subdomain,
-    { location_id: locationId, requestable: 'true' }
+    { location_id: locationId, inactive: 'false' }
   );
   
   console.log("Raw NexHealth providers response:", JSON.stringify(data, null, 2));

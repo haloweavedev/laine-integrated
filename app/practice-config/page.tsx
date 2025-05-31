@@ -3,18 +3,28 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getAppointmentTypes, getProviders } from "@/lib/nexhealth";
+import { Toaster } from "sonner";
+import { SaveConfigButton, SyncDataButton, ConfigForm, SyncForm } from "./client-components";
 
 interface NexHealthAppointmentType {
-  id: string | number;
+  id: number;
   name: string;
-  duration: string | number;
+  minutes: number;
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
 }
 
 interface NexHealthProvider {
-  id: string | number;
+  id: number;
   first_name?: string;
   last_name?: string;
   name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
 }
 
 async function savePracticeConfig(formData: FormData) {
@@ -68,7 +78,7 @@ async function syncNexhealthData() {
       getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
     ]);
 
-    // Sync appointment types
+    // Sync appointment types - fix the mapping to use 'minutes' instead of 'duration'
     const appointmentTypePromises = appointmentTypes.map((type: NexHealthAppointmentType) =>
       prisma.appointmentType.upsert({
         where: {
@@ -79,13 +89,13 @@ async function syncNexhealthData() {
         },
         update: {
           name: type.name,
-          duration: parseInt(type.duration.toString()) || 0,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
         },
         create: {
           practiceId: practice.id,
           nexhealthAppointmentTypeId: type.id.toString(),
           name: type.name,
-          duration: parseInt(type.duration.toString()) || 0,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
         },
       })
     );
@@ -135,130 +145,123 @@ export default async function PracticeConfigPage() {
   });
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Practice Configuration</h1>
-      
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">Basic Information</h2>
-        <form action={savePracticeConfig} className="space-y-4">
-          <div>
-            <label htmlFor="practiceName" className="block text-sm font-medium text-gray-700 mb-1">
-              Practice Name (Optional)
-            </label>
-            <input
-              type="text"
-              id="practiceName"
-              name="practiceName"
-              defaultValue={practice?.name || ""}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter your practice name"
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="nexhealthSubdomain" className="block text-sm font-medium text-gray-700 mb-1">
-              NexHealth Subdomain *
-            </label>
-            <input
-              type="text"
-              id="nexhealthSubdomain"
-              name="nexhealthSubdomain"
-              defaultValue={practice?.nexhealthSubdomain || ""}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="e.g., testdental"
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              Your NexHealth subdomain (the part before .nexhealth.com)
-            </p>
-          </div>
-          
-          <div>
-            <label htmlFor="nexhealthLocationId" className="block text-sm font-medium text-gray-700 mb-1">
-              NexHealth Location ID *
-            </label>
-            <input
-              type="text"
-              id="nexhealthLocationId"
-              name="nexhealthLocationId"
-              defaultValue={practice?.nexhealthLocationId || ""}
-              required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="e.g., 123"
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              Your NexHealth Location ID number
-            </p>
-          </div>
-          
-          <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            Save Configuration
-          </button>
-        </form>
-      </div>
-
-      {practice?.nexhealthSubdomain && practice?.nexhealthLocationId && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">NexHealth Data</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <>
+      <Toaster position="top-right" />
+      <div className="max-w-4xl mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">Practice Configuration</h1>
+        
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Basic Information</h2>
+          <ConfigForm action={savePracticeConfig}>
             <div>
-              <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
-              <p className="text-sm text-gray-600 mb-3">
-                {practice.appointmentTypes.length} synced
-              </p>
-              {practice.appointmentTypes.length > 0 && (
-                <ul className="text-sm space-y-1">
-                  {practice.appointmentTypes.slice(0, 5).map((type) => (
-                    <li key={type.id} className="text-gray-700">
-                      {type.name} ({type.duration} min)
-                    </li>
-                  ))}
-                  {practice.appointmentTypes.length > 5 && (
-                    <li className="text-gray-500">
-                      ... and {practice.appointmentTypes.length - 5} more
-                    </li>
-                  )}
-                </ul>
-              )}
+              <label htmlFor="practiceName" className="block text-sm font-medium text-gray-700 mb-1">
+                Practice Name (Optional)
+              </label>
+              <input
+                type="text"
+                id="practiceName"
+                name="practiceName"
+                defaultValue={practice?.name || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter your practice name"
+              />
             </div>
             
             <div>
-              <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
-              <p className="text-sm text-gray-600 mb-3">
-                {practice.providers.length} synced
+              <label htmlFor="nexhealthSubdomain" className="block text-sm font-medium text-gray-700 mb-1">
+                NexHealth Subdomain *
+              </label>
+              <input
+                type="text"
+                id="nexhealthSubdomain"
+                name="nexhealthSubdomain"
+                defaultValue={practice?.nexhealthSubdomain || ""}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., testdental"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Your NexHealth subdomain (the part before .nexhealth.com)
               </p>
-              {practice.providers.length > 0 && (
-                <ul className="text-sm space-y-1">
-                  {practice.providers.slice(0, 5).map((provider) => (
-                    <li key={provider.id} className="text-gray-700">
-                      {provider.firstName} {provider.lastName}
-                    </li>
-                  ))}
-                  {practice.providers.length > 5 && (
-                    <li className="text-gray-500">
-                      ... and {practice.providers.length - 5} more
-                    </li>
-                  )}
-                </ul>
-              )}
+            </div>
+            
+            <div>
+              <label htmlFor="nexhealthLocationId" className="block text-sm font-medium text-gray-700 mb-1">
+                NexHealth Location ID *
+              </label>
+              <input
+                type="text"
+                id="nexhealthLocationId"
+                name="nexhealthLocationId"
+                defaultValue={practice?.nexhealthLocationId || ""}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 123"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Your NexHealth Location ID number
+              </p>
+            </div>
+            
+            <SaveConfigButton />
+          </ConfigForm>
+        </div>
+
+        {practice?.nexhealthSubdomain && practice?.nexhealthLocationId && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold mb-4">NexHealth Data</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  {practice.appointmentTypes.length} synced
+                </p>
+                {practice.appointmentTypes.length > 0 && (
+                  <ul className="text-sm space-y-1">
+                    {practice.appointmentTypes.slice(0, 5).map((type) => (
+                      <li key={type.id} className="text-gray-700">
+                        {type.name} ({type.duration} min)
+                      </li>
+                    ))}
+                    {practice.appointmentTypes.length > 5 && (
+                      <li className="text-gray-500">
+                        ... and {practice.appointmentTypes.length - 5} more
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+              
+              <div>
+                <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  {practice.providers.length} synced
+                </p>
+                {practice.providers.length > 0 && (
+                  <ul className="text-sm space-y-1">
+                    {practice.providers.slice(0, 5).map((provider) => (
+                      <li key={provider.id} className="text-gray-700">
+                        {provider.firstName} {provider.lastName}
+                      </li>
+                    ))}
+                    {practice.providers.length > 5 && (
+                      <li className="text-gray-500">
+                        ... and {practice.providers.length - 5} more
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </div>
+            
+            <div className="mt-6">
+              <SyncForm action={syncNexhealthData}>
+                <SyncDataButton />
+              </SyncForm>
             </div>
           </div>
-          
-          <div className="mt-6">
-            <form action={syncNexhealthData}>
-              <button
-                type="submit"
-                className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
-              >
-                Sync NexHealth Data
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 } 

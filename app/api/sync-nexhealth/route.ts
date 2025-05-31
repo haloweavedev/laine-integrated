@@ -4,16 +4,24 @@ import { prisma } from "@/lib/prisma";
 import { getAppointmentTypes, getProviders } from "@/lib/nexhealth";
 
 interface NexHealthAppointmentType {
-  id: string | number;
+  id: number;
   name: string;
-  duration: string | number;
+  minutes: number;
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
 }
 
 interface NexHealthProvider {
-  id: string | number;
+  id: number;
   first_name?: string;
   last_name?: string;
   name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
 }
 
 export async function POST() {
@@ -45,7 +53,7 @@ export async function POST() {
       getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
     ]);
 
-    // Sync appointment types
+    // Sync appointment types - use 'minutes' from NexHealth API
     const appointmentTypePromises = appointmentTypes.map((type: NexHealthAppointmentType) =>
       prisma.appointmentType.upsert({
         where: {
@@ -56,13 +64,13 @@ export async function POST() {
         },
         update: {
           name: type.name,
-          duration: parseInt(type.duration.toString()) || 0,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
         },
         create: {
           practiceId: practice.id,
           nexhealthAppointmentTypeId: type.id.toString(),
           name: type.name,
-          duration: parseInt(type.duration.toString()) || 0,
+          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
         },
       })
     );
