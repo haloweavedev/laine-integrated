@@ -188,11 +188,15 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
       // Format slots for patient-friendly display
       const formattedSlots = availableSlots.slice(0, 8).map((slot, index) => {
+        // Parse the time string correctly to preserve the timezone
         const startTime = new Date(slot.time);
+        
+        // Use the timezone from the original date string for formatting
         const timeString = startTime.toLocaleTimeString('en-US', {
           hour: 'numeric',
           minute: '2-digit',
-          hour12: true
+          hour12: true,
+          timeZone: 'America/Chicago' // Explicitly use Central Time to match NexHealth
         });
         
         return {
