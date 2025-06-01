@@ -2,90 +2,61 @@ import { z } from "zod";
 import { ToolDefinition, ToolResult } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 
-// Add date normalization function to handle voice input
-function normalizeDateFromVoice(dateString: string): string {
-  // Handle cases like "December 20 third 20 25" -> "2025-12-23"
-  // Handle cases like "December twenty third" -> current year + "12-23"
-  
-  const currentYear = new Date().getFullYear();
-  
-  // Pattern for "Month Day third Year" format
-  const ordinalPattern = /(\w+)\s+(\d+)\s+(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty[- ]?first|twenty[- ]?second|twenty[- ]?third|twenty[- ]?fourth|twenty[- ]?fifth|twenty[- ]?sixth|twenty[- ]?seventh|twenty[- ]?eighth|twenty[- ]?ninth|thirtieth|thirty[- ]?first)\s+(\d{2,4})/i;
-  
-  const match = dateString.match(ordinalPattern);
-  if (match) {
-    const [, month, baseDay, ordinal, year] = match;
-    
-    // Convert ordinal to number
-    const ordinalMap: { [key: string]: number } = {
-      'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
-      'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
-      'eleventh': 11, 'twelfth': 12, 'thirteenth': 13, 'fourteenth': 14, 'fifteenth': 15,
-      'sixteenth': 16, 'seventeenth': 17, 'eighteenth': 18, 'nineteenth': 19, 'twentieth': 20,
-      'twenty first': 21, 'twenty-first': 21, 'twenty second': 22, 'twenty-second': 22,
-      'twenty third': 23, 'twenty-third': 23, 'twenty fourth': 24, 'twenty-fourth': 24,
-      'twenty fifth': 25, 'twenty-fifth': 25, 'twenty sixth': 26, 'twenty-sixth': 26,
-      'twenty seventh': 27, 'twenty-seventh': 27, 'twenty eighth': 28, 'twenty-eighth': 28,
-      'twenty ninth': 29, 'twenty-ninth': 29, 'thirtieth': 30, 'thirty first': 31, 'thirty-first': 31
-    };
-    
-    const day = ordinalMap[ordinal.toLowerCase().replace('-', ' ')] || parseInt(baseDay);
-    const fullYear = year.length === 2 ? 2000 + parseInt(year) : parseInt(year);
-    
-    // Convert month name to number
-    const monthMap: { [key: string]: number } = {
-      january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
-      july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
-    };
-    
-    const monthNum = monthMap[month.toLowerCase()];
-    if (monthNum && day >= 1 && day <= 31) {
-      return `${fullYear}-${monthNum.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-    }
-  }
-  
-  // Pattern for "Month twenty third" without year (assume current year)
-  const ordinalNoYearPattern = /(\w+)\s+(twenty[- ]?first|twenty[- ]?second|twenty[- ]?third|twenty[- ]?fourth|twenty[- ]?fifth|twenty[- ]?sixth|twenty[- ]?seventh|twenty[- ]?eighth|twenty[- ]?ninth|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth|thirty[- ]?first)/i;
-  
-  const matchNoYear = dateString.match(ordinalNoYearPattern);
-  if (matchNoYear) {
-    const [, month, ordinal] = matchNoYear;
-    
-    const ordinalMap: { [key: string]: number } = {
-      'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
-      'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
-      'eleventh': 11, 'twelfth': 12, 'thirteenth': 13, 'fourteenth': 14, 'fifteenth': 15,
-      'sixteenth': 16, 'seventeenth': 17, 'eighteenth': 18, 'nineteenth': 19, 'twentieth': 20,
-      'twenty first': 21, 'twenty-first': 21, 'twenty second': 22, 'twenty-second': 22,
-      'twenty third': 23, 'twenty-third': 23, 'twenty fourth': 24, 'twenty-fourth': 24,
-      'twenty fifth': 25, 'twenty-fifth': 25, 'twenty sixth': 26, 'twenty-sixth': 26,
-      'twenty seventh': 27, 'twenty-seventh': 27, 'twenty eighth': 28, 'twenty-eighth': 28,
-      'twenty ninth': 29, 'twenty-ninth': 29, 'thirtieth': 30, 'thirty first': 31, 'thirty-first': 31
-    };
-    
-    const day = ordinalMap[ordinal.toLowerCase().replace('-', ' ')];
-    
-    const monthMap: { [key: string]: number } = {
-      january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
-      july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
-    };
-    
-    const monthNum = monthMap[month.toLowerCase()];
-    if (monthNum && day && day >= 1 && day <= 31) {
-      return `${currentYear}-${monthNum.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-    }
-  }
-  
-  // Return original if no match or try other parsing methods
-  return dateString;
+// Generate current date dynamically for LLM context
+function getCurrentDate(): string {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-based
+  const dd = String(today.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Get current day name for better LLM context
+function getCurrentDayInfo(): string {
+  const today = new Date();
+  const dayName = today.toLocaleDateString('en-US', { weekday: 'long' });
+  const monthName = today.toLocaleDateString('en-US', { month: 'long' });
+  return `Today is ${dayName}, ${monthName} ${today.getDate()}, ${today.getFullYear()}`;
 }
 
 export const checkAvailableSlotsSchema = z.object({
   requestedDate: z.string()
     .min(1)
-    .transform(normalizeDateFromVoice)
-    .refine((date) => /^\d{4}-\d{2}-\d{2}$/.test(date), "Invalid date format")
-    .describe("The date the patient wants to schedule for"),
+    .refine((date) => {
+      // Simple validation to ensure YYYY-MM-DD format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(date)) {
+        return false;
+      }
+      // Validate it's a real date
+      const parsedDate = new Date(date);
+      return !isNaN(parsedDate.getTime()) && date === parsedDate.toISOString().split('T')[0];
+    }, "Date must be in YYYY-MM-DD format and be a valid date")
+    .describe(`
+Convert the patient's natural language date request to YYYY-MM-DD format.
+
+CURRENT DATE CONTEXT:
+- ${getCurrentDayInfo()}
+- Current date: ${getCurrentDate()}
+
+EXAMPLES OF CONVERSIONS:
+- "December twenty third" → "2025-12-23"
+- "December 23rd" → "2025-12-23" 
+- "next Friday" → calculate the next Friday from ${getCurrentDate()}
+- "tomorrow" → calculate tomorrow from ${getCurrentDate()}
+- "Monday" → calculate the next Monday from ${getCurrentDate()}
+- "next week" → calculate a date next week from ${getCurrentDate()}
+- "Christmas" → "2025-12-25" (if current year) or "2025-12-25" (if Christmas has passed)
+
+IMPORTANT INSTRUCTIONS:
+1. Always return dates in YYYY-MM-DD format
+2. If year is not specified, assume the next occurrence of that date
+3. If the specified date has already passed this year, use next year
+4. For relative dates like "tomorrow", "next Friday", calculate from current date: ${getCurrentDate()}
+5. If the date is ambiguous or unclear, ask the patient for clarification
+
+Current date for calculations: ${getCurrentDate()}
+    `),
   appointmentTypeId: z.string().min(1).describe("The appointment type ID from the previous tool call"),
   days: z.number().min(1).max(7).default(1).describe("Number of days to check (default 1)")
 });
