@@ -37,7 +37,7 @@ async function createPracticeAssistant() {
     name: `${practice.name ? practice.name.substring(0, 15) : 'Practice'} - Laine`,
     model: {
       provider: "openai" as const,
-      model: "gpt-4.1-nano-2025-04-14",
+      model: "gpt-4.1-nano",
       temperature: 0.7,
       messages: [
         {
