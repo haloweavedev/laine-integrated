@@ -41,7 +41,19 @@ function extractAssistantId(payload: VapiPayload): string {
   
   if (!assistantId) {
     console.error("CRITICAL: No assistant ID found in VAPI payload");
-    console.error("Payload structure:", JSON.stringify(payload.message, null, 2));
+    console.error("Payload structure:", JSON.stringify({
+      call: Object.keys(message.call || {}),
+      assistant: Object.keys(message.assistant || {}),
+      assistantName: message.assistant?.name || message.call?.assistant?.name
+    }, null, 2));
+    
+    // TEMPORARY FALLBACK: Try to use assistant name to find practice
+    const assistantName = message.assistant?.name || message.call?.assistant?.name;
+    if (assistantName && assistantName.includes(" - Laine")) {
+      console.warn("⚠️ Using assistant name as fallback:", assistantName);
+      return assistantName; // This will be handled differently in practice lookup
+    }
+    
     throw new Error("Assistant ID is required for practice identification");
   }
   
@@ -49,28 +61,63 @@ function extractAssistantId(payload: VapiPayload): string {
   return assistantId;
 }
 
-// Simplified practice lookup with strict validation - no fallback methods
-async function findPracticeByAssistantId(assistantId: string) {
+// Simplified practice lookup with strict validation - now handles assistant name fallback
+async function findPracticeByAssistantId(assistantIdOrName: string) {
   console.log("=== Practice Lookup Debug ===");
-  console.log("Assistant ID:", assistantId);
+  console.log("Assistant ID or Name:", assistantIdOrName);
   
   try {
+    let practice = null;
+    
+    // First try to find by assistant ID (preferred method)
     const assistantConfig = await prisma.practiceAssistantConfig.findUnique({
-      where: { vapiAssistantId: assistantId },
+      where: { vapiAssistantId: assistantIdOrName },
       include: { 
         practice: true
       }
     });
     
-    if (!assistantConfig?.practice) {
-      console.error(`❌ No practice found for assistant ID: ${assistantId}`);
-      throw new Error(`No practice found for assistant ID: ${assistantId}`);
+    if (assistantConfig) {
+      practice = assistantConfig.practice;
+      console.log("✅ Found practice by assistant ID:", practice.id);
+    }
+    
+    // If not found and looks like an assistant name, try to find by reconstructed name
+    if (!practice && assistantIdOrName.includes(" - Laine")) {
+      console.warn("⚠️ Attempting practice lookup by assistant name:", assistantIdOrName);
+      
+      // Extract practice name from assistant name (e.g., "Royal Oak Family Dental - Laine" -> "Royal Oak Family Dental")
+      const practiceName = assistantIdOrName.replace(" - Laine", "");
+      
+      // Try to find practice by name
+      const practices = await prisma.practice.findMany({
+        where: {
+          name: {
+            contains: practiceName,
+            mode: 'insensitive'
+          }
+        },
+        include: {
+          assistantConfig: true
+        }
+      });
+      
+      if (practices.length === 1 && practices[0].assistantConfig) {
+        practice = practices[0];
+        console.warn("✅ Found practice by name match:", practice.id);
+      } else if (practices.length > 1) {
+        console.error(`❌ Multiple practices found for name "${practiceName}": ${practices.length}`);
+      }
+    }
+    
+    if (!practice) {
+      console.error(`❌ No practice found for assistant ID/name: ${assistantIdOrName}`);
+      throw new Error(`No practice found for assistant ID/name: ${assistantIdOrName}`);
     }
 
-    console.log("✅ Found practice by assistant ID:", assistantConfig.practice.id);
-    return await fetchPracticeWithSchedulingData(assistantConfig.practice.id);
+    return await fetchPracticeWithSchedulingData(practice.id);
   } catch (error) {
-    console.error("❌ Error finding practice by assistant ID:", error);
+    console.error("❌ Error finding practice:", error);
     throw error;
   }
 }
