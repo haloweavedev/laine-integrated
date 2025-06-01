@@ -1,12 +1,16 @@
 import { ToolDefinition, VapiToolSchema, VapiToolFunction } from "./types";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-// Manually import tools for now to avoid file system dependencies in edge runtime
+// Import all tools
 import findPatientTool from "./findPatient";
+import findAppointmentTypeTool from "./findAppointmentType";
+import checkAvailableSlotsTool from "./checkAvailableSlots";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const tools: ToolDefinition<any>[] = [
   findPatientTool,
+  findAppointmentTypeTool,
+  checkAvailableSlotsTool
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -18,39 +22,46 @@ export function getToolByName(name: string): ToolDefinition<any> | undefined {
 export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
   console.log(`Building VAPI tools for ${tools.length} registered tools`);
   
-  return tools.map(t => {
-    // Generate JSON schema and remove $schema property that VAPI doesn't accept
-    const schema = zodToJsonSchema(t.schema, { target: "jsonSchema7", $refStrategy: "none" });
+  return tools.map(tool => {
+    // Generate JSON schema without $schema property
+    const schema = zodToJsonSchema(tool.schema, { 
+      target: "jsonSchema7", 
+      $refStrategy: "none" 
+    });
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { $schema, ...schemaWithoutDollarSchema } = schema;
+    const { $schema, ...parameters } = schema;
     
     const vapiToolFunction: VapiToolFunction = {
-      name: t.name,
-      description: t.description,
-      parameters: schemaWithoutDollarSchema,
+      name: tool.name,
+      description: tool.description,
+      parameters
     };
     
     const vapiTool: VapiToolSchema = {
       type: "function",
-      async: t.async ?? false,
+      async: tool.async ?? false,
       function: vapiToolFunction,
-      // Tool-specific URL for VAPI to call this specific tool
       server: { 
-        url: `${appBaseUrl}/api/tools/${t.name}`,
-        // secret: process.env.VAPI_TOOL_WEBHOOK_SECRET // Add if VAPI supports per-tool secrets
-      },
+        url: `${appBaseUrl}/api/vapi/tool-calls`
+      }
     };
 
-    if (t.messages) {
+    // Add tool-specific messages if defined
+    if (tool.messages) {
       vapiTool.messages = [
-        t.messages.start ? { type: "request-start", content: t.messages.start } : null,
-        t.messages.delay ? { type: "request-response-delayed", content: t.messages.delay, timingMilliseconds: 2000 } : null,
-        t.messages.success ? { type: "request-complete", content: t.messages.success } : null,
-        t.messages.fail ? { type: "request-failed", content: t.messages.fail } : null,
+        tool.messages.start ? { type: "request-start", content: tool.messages.start } : null,
+        tool.messages.delay ? { type: "request-response-delayed", content: tool.messages.delay, timingMilliseconds: 2000 } : null,
+        tool.messages.success ? { type: "request-complete", content: tool.messages.success } : null,
+        tool.messages.fail ? { type: "request-failed", content: tool.messages.fail } : null,
       ].filter(Boolean) as VapiToolSchema["messages"];
     }
     
-    console.log(`Built VAPI tool: ${t.name}`);
+    console.log(`Built VAPI tool: ${tool.name} -> ${vapiTool.server.url}`);
     return vapiTool;
   });
-} 
+}
+
+// Export individual tool schemas for validation
+export { findPatientSchema } from "./findPatient";
+export { findAppointmentTypeSchema } from "./findAppointmentType";
+export { checkAvailableSlotsSchema } from "./checkAvailableSlots"; 

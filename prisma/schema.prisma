@@ -32,6 +32,10 @@ model Practice {
   callLogs         CallLog[] // For VAPI call logging
   toolLogs         ToolLog[] // For tool execution logging
 
+  // Add new relationships for scheduling preferences
+  savedProviders      SavedProvider[]
+  savedOperatories    SavedOperatory[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -39,6 +43,41 @@ model Practice {
   // Subdomain + LocationID identify it for NexHealth API calls.
   // If a user could manage multiple NexHealth locations, this model would need adjustment.
   // For now, one Clerk user maps to one set of NexHealth subdomain/locationId.
+}
+
+model SavedProvider {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  providerId          String   // References Provider.id from our synced data
+  provider            Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  
+  isDefault           Boolean  @default(false) // Mark primary/default provider
+  isActive            Boolean  @default(true)  // Allow enabling/disabling
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@unique([practiceId, providerId]) // Prevent duplicate saves
+  @@map("saved_providers")
+}
+
+model SavedOperatory {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  nexhealthOperatoryId String  // NexHealth operatory ID
+  name                String  // Display name for operatory
+  isDefault           Boolean @default(false) // Mark primary/default operatory
+  isActive            Boolean @default(true)  // Allow enabling/disabling
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@unique([practiceId, nexhealthOperatoryId]) // Prevent duplicate saves
+  @@map("saved_operatories")
 }
 
 model PracticeAssistantConfig {
@@ -169,6 +208,9 @@ model Provider {
   nexhealthProviderId String // ID from NexHealth
   firstName           String?
   lastName            String
+
+  // Add new relationship
+  savedByPractices    SavedProvider[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

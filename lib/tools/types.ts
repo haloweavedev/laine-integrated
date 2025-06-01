@@ -1,12 +1,36 @@
 // lib/tools/types.ts
 import { z } from "zod";
-import { Practice } from "@prisma/client"; // Assuming your Practice model
+import { Practice, AppointmentType, SavedProvider, SavedOperatory } from "@prisma/client";
 
-// For VAPI tool definition
+// Enhanced practice context with scheduling data
+export interface PracticeWithSchedulingData extends Practice {
+  appointmentTypes: AppointmentType[];
+  savedProviders: (SavedProvider & { provider: { id: string; firstName: string | null; lastName: string; nexhealthProviderId: string; } })[];
+  savedOperatories: SavedOperatory[];
+}
+
+// Tool execution context
+export interface ToolExecutionContext {
+  practice: PracticeWithSchedulingData;
+  vapiCallId: string;
+  toolCallId: string;
+  assistantId: string;
+}
+
+// Standardized tool result format
+export interface ToolResult {
+  success: boolean;
+  message_to_patient: string;
+  data?: Record<string, unknown>;
+  error_code?: string;
+  details?: string;
+}
+
+// VAPI tool definition interface
 export interface VapiToolFunction {
   name: string;
   description: string;
-  parameters: Record<string, unknown>; // JSON schema object - we'll use Zod's shape directly
+  parameters: Record<string, unknown>; // JSON schema object
 }
 
 export interface VapiToolSchema {
@@ -14,29 +38,56 @@ export interface VapiToolSchema {
   async?: boolean;
   function: VapiToolFunction;
   server: {
-    url: string; // URL to your generic tool handler or specific tool endpoint
-    secret?: string; // Optional secret for verifying VAPI requests to this tool
+    url: string;
+    secret?: string;
   };
-  messages?: Array<{ // Optional messages for VAPI to speak during tool call
+  messages?: Array<{
     type: "request-start" | "request-response-delayed" | "request-complete" | "request-failed";
     content?: string;
     timingMilliseconds?: number;
   }>;
 }
 
-// Internal tool definition structure
+// Internal tool definition
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface ToolDefinition<T extends z.ZodType<any, any>> {
   name: string;
   description: string;
-  schema: T; // Zod schema for arguments
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  run: (params: { args: z.infer<T>; practice: Practice; vapiCallId?: string }) => Promise<any>; // Tool execution logic
-  messages?: { // Optional messages for VAPI
+  schema: T;
+  run: (params: { 
+    args: z.infer<T>; 
+    context: ToolExecutionContext 
+  }) => Promise<ToolResult>;
+  messages?: {
     start?: string;
     delay?: string;
     success?: string;
     fail?: string;
   };
-  async?: boolean; // If VAPI should handle this as an async tool
+  async?: boolean;
+}
+
+// VAPI webhook payload types
+export interface VapiToolCall {
+  toolCallId: string;
+  name: string;
+  arguments: string; // JSON string
+}
+
+export interface VapiToolCallsMessage {
+  type: "tool-calls";
+  timestamp: number;
+  call: {
+    id: string;
+    assistantId: string;
+    orgId?: string;
+  };
+  assistant: {
+    id: string;
+  };
+  toolCallList: VapiToolCall[];
+}
+
+export interface VapiServerMessage {
+  message: VapiToolCallsMessage;
 } 

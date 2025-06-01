@@ -1,160 +1,154 @@
-import { auth } from "@clerk/nextjs/server";
+"use client";
+
+import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
-import { getAppointmentTypes, getProviders } from "@/lib/nexhealth";
-import { Toaster } from "sonner";
-import { SaveConfigButton, SyncDataButton, ConfigForm, SyncForm } from "./client-components";
+import { Toaster, toast } from "sonner";
+import { ProviderSelection } from "./provider-selection";
+import { OperatorySelection } from "./operatory-selection";
 
-interface NexHealthAppointmentType {
-  id: number;
-  name: string;
-  minutes: number;
-  parent_type: string;
-  parent_id: number;
-  bookable_online: boolean;
+interface Practice {
+  id: string;
+  name: string | null;
+  nexhealthSubdomain: string | null;
+  nexhealthLocationId: string | null;
+  appointmentTypes: Array<{
+    id: string;
+    name: string;
+    duration: number;
+  }>;
+  providers: Array<{
+    id: string;
+    nexhealthProviderId: string;
+    firstName: string | null;
+    lastName: string;
+  }>;
+  savedProviders: Array<{
+    id: string;
+    providerId: string;
+    isDefault: boolean;
+    isActive: boolean;
+    provider: {
+      id: string;
+      nexhealthProviderId: string;
+      firstName: string | null;
+      lastName: string;
+    };
+  }>;
+  savedOperatories: Array<{
+    id: string;
+    nexhealthOperatoryId: string;
+    name: string;
+    isDefault: boolean;
+    isActive: boolean;
+  }>;
+  nexhealthWebhookSubscriptions: Array<{
+    resourceType: string;
+    eventName: string;
+    nexhealthSubscriptionId: string;
+  }>;
 }
 
-interface NexHealthProvider {
-  id: number;
-  first_name?: string;
-  last_name?: string;
-  name?: string;
-  email?: string;
-  inactive?: boolean;
-  npi?: string;
-  specialty_code?: string;
-  nexhealth_specialty?: string;
+interface GlobalWebhookEndpoint {
+  id: string;
 }
 
-async function savePracticeConfig(formData: FormData) {
-  "use server";
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
+export default function PracticeConfigPage() {
+  const { userId, isLoaded } = useAuth();
+  const [practice, setPractice] = useState<Practice | null>(null);
+  const [globalWebhookEndpoint, setGlobalWebhookEndpoint] = useState<GlobalWebhookEndpoint | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
 
-  const name = formData.get("practiceName") as string | null;
-  const subdomain = formData.get("nexhealthSubdomain") as string;
-  const locationId = formData.get("nexhealthLocationId") as string;
-
-  if (!subdomain || !locationId) {
-    throw new Error("Subdomain and Location ID are required.");
-  }
-
-  try {
-    await prisma.practice.upsert({
-      where: { clerkUserId: userId },
-      update: { name, nexhealthSubdomain: subdomain, nexhealthLocationId: locationId },
-      create: { clerkUserId: userId, name, nexhealthSubdomain: subdomain, nexhealthLocationId: locationId },
-    });
-    revalidatePath("/practice-config");
-  } catch (error) {
-    console.error("Error saving practice config:", error);
-    throw new Error("Failed to save configuration.");
-  }
-}
-
-async function syncNexhealthData() {
-  "use server";
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
-
-  try {
-    // Get the practice for this user
-    const practice = await prisma.practice.findUnique({
-      where: { clerkUserId: userId },
-    });
-
-    if (!practice) {
-      throw new Error("Practice not found.");
+  useEffect(() => {
+    if (isLoaded && !userId) {
+      redirect("/sign-in");
     }
+  }, [isLoaded, userId]);
 
-    if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
-      throw new Error("NexHealth configuration missing. Please configure your subdomain and location ID first.");
+  useEffect(() => {
+    if (isLoaded && userId) {
+      fetchPracticeData();
     }
+  }, [isLoaded, userId]);
 
-    // Fetch data from NexHealth
-    const [appointmentTypes, providers] = await Promise.all([
-      getAppointmentTypes(practice.nexhealthSubdomain, practice.nexhealthLocationId),
-      getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
-    ]);
-
-    // Sync appointment types - fix the mapping to use 'minutes' instead of 'duration'
-    const appointmentTypePromises = appointmentTypes.map((type: NexHealthAppointmentType) =>
-      prisma.appointmentType.upsert({
-        where: {
-          practiceId_nexhealthAppointmentTypeId: {
-            practiceId: practice.id,
-            nexhealthAppointmentTypeId: type.id.toString(),
-          },
-        },
-        update: {
-          name: type.name,
-          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
-        },
-        create: {
-          practiceId: practice.id,
-          nexhealthAppointmentTypeId: type.id.toString(),
-          name: type.name,
-          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
-        },
-      })
-    );
-
-    // Sync providers
-    const providerPromises = providers.map((provider: NexHealthProvider) =>
-      prisma.provider.upsert({
-        where: {
-          practiceId_nexhealthProviderId: {
-            practiceId: practice.id,
-            nexhealthProviderId: provider.id.toString(),
-          },
-        },
-        update: {
-          firstName: provider.first_name || null,
-          lastName: provider.last_name || provider.name || "Unknown",
-        },
-        create: {
-          practiceId: practice.id,
-          nexhealthProviderId: provider.id.toString(),
-          firstName: provider.first_name || null,
-          lastName: provider.last_name || provider.name || "Unknown",
-        },
-      })
-    );
-
-    // Execute all upserts
-    await Promise.all([...appointmentTypePromises, ...providerPromises]);
-
-    revalidatePath("/practice-config");
-  } catch (error) {
-    console.error("Error syncing NexHealth data:", error);
-    throw new Error("Failed to sync NexHealth data. Please check your configuration and try again.");
-  }
-}
-
-export default async function PracticeConfigPage() {
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
-
-  const practice = await prisma.practice.findUnique({ 
-    where: { clerkUserId: userId },
-    include: {
-      appointmentTypes: true,
-      providers: true,
-      nexhealthWebhookSubscriptions: {
-        where: { isActive: true },
-        orderBy: [
-          { resourceType: 'asc' },
-          { eventName: 'asc' }
-        ]
+  const fetchPracticeData = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/practice-config/data');
+      if (response.ok) {
+        const data = await response.json();
+        setPractice(data.practice);
+        setGlobalWebhookEndpoint(data.globalWebhookEndpoint);
+      } else {
+        console.error('Failed to fetch practice data');
       }
+    } catch (error) {
+      console.error('Error fetching practice data:', error);
+    } finally {
+      setLoading(false);
     }
-  });
+  };
 
-  // Check if global webhook endpoint is configured
-  const globalWebhookEndpoint = await prisma.globalNexhealthWebhookEndpoint.findUnique({
-    where: { id: "singleton" }
-  });
+  const handleConfigSave = async (formData: FormData) => {
+    setConfigLoading(true);
+    try {
+      const response = await fetch('/api/practice-config/basic', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        toast.success('Configuration saved successfully!');
+        await fetchPracticeData(); // Refresh data
+      } else {
+        toast.error('Failed to save configuration');
+      }
+    } catch (error) {
+      console.error('Error saving config:', error);
+      toast.error('Failed to save configuration');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncLoading(true);
+    try {
+      const response = await fetch('/api/sync-nexhealth', {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        toast.success('NexHealth data synced successfully!');
+        await fetchPracticeData(); // Refresh data
+      } else {
+        toast.error('Failed to sync NexHealth data');
+      }
+    } catch (error) {
+      console.error('Error syncing data:', error);
+      toast.error('Failed to sync NexHealth data');
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const refreshPracticeData = async () => {
+    await fetchPracticeData();
+  };
+
+  if (!isLoaded || loading) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="text-center">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!userId) {
+    return null; // Will redirect
+  }
 
   return (
     <>
@@ -162,9 +156,14 @@ export default async function PracticeConfigPage() {
       <div className="max-w-4xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-6">Practice Configuration</h1>
         
+        {/* Basic Information Section */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <h2 className="text-lg font-semibold mb-4">Basic Information</h2>
-          <ConfigForm action={savePracticeConfig}>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            await handleConfigSave(formData);
+          }} className="space-y-4">
             <div>
               <label htmlFor="practiceName" className="block text-sm font-medium text-gray-700 mb-1">
                 Practice Name (Optional)
@@ -215,12 +214,99 @@ export default async function PracticeConfigPage() {
               </p>
             </div>
             
-            <SaveConfigButton />
-          </ConfigForm>
+            <button
+              type="submit"
+              disabled={configLoading}
+              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {configLoading ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </form>
         </div>
 
         {practice?.nexhealthSubdomain && practice?.nexhealthLocationId && (
           <>
+            {/* NexHealth Data Sync Section */}
+            <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <h2 className="text-lg font-semibold mb-4">NexHealth Data Sync</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {practice.appointmentTypes.length} synced
+                  </p>
+                  {practice.appointmentTypes.length > 0 && (
+                    <ul className="text-sm space-y-1">
+                      {practice.appointmentTypes.slice(0, 5).map((type) => (
+                        <li key={type.id} className="text-gray-700">
+                          {type.name} ({type.duration} min)
+                        </li>
+                      ))}
+                      {practice.appointmentTypes.length > 5 && (
+                        <li className="text-gray-500">
+                          ... and {practice.appointmentTypes.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+                
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {practice.providers.length} synced
+                  </p>
+                  {practice.providers.length > 0 && (
+                    <ul className="text-sm space-y-1">
+                      {practice.providers.slice(0, 5).map((provider) => (
+                        <li key={provider.id} className="text-gray-700">
+                          {provider.firstName} {provider.lastName}
+                        </li>
+                      ))}
+                      {practice.providers.length > 5 && (
+                        <li className="text-gray-500">
+                          ... and {practice.providers.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              </div>
+              
+              <div className="mt-6">
+                <button
+                  onClick={handleSync}
+                  disabled={syncLoading}
+                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {syncLoading ? 'Syncing...' : 'Sync NexHealth Data'}
+                </button>
+              </div>
+            </div>
+
+            {/* Provider Selection Section */}
+            {practice.providers.length > 0 && (
+              <div className="mb-6">
+                <ProviderSelection
+                  providers={practice.providers}
+                  savedProviders={practice.savedProviders}
+                  onUpdate={refreshPracticeData}
+                />
+              </div>
+            )}
+
+            {/* Operatory Selection Section */}
+            <div className="mb-6">
+              <OperatorySelection
+                practice={{
+                  nexhealthSubdomain: practice.nexhealthSubdomain,
+                  nexhealthLocationId: practice.nexhealthLocationId
+                }}
+                savedOperatories={practice.savedOperatories}
+                onUpdate={refreshPracticeData}
+              />
+            </div>
+
             {/* Webhook Management Section */}
             <div className="bg-white rounded-lg shadow p-6 mb-6">
               <h2 className="text-lg font-semibold mb-4">Webhook Integration</h2>
@@ -278,57 +364,48 @@ export default async function PracticeConfigPage() {
               </div>
             </div>
 
-            {/* Existing NexHealth Data Section */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">NexHealth Data</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    {practice.appointmentTypes.length} synced
-                  </p>
-                  {practice.appointmentTypes.length > 0 && (
-                    <ul className="text-sm space-y-1">
-                      {practice.appointmentTypes.slice(0, 5).map((type) => (
-                        <li key={type.id} className="text-gray-700">
-                          {type.name} ({type.duration} min)
-                        </li>
-                      ))}
-                      {practice.appointmentTypes.length > 5 && (
-                        <li className="text-gray-500">
-                          ... and {practice.appointmentTypes.length - 5} more
-                        </li>
-                      )}
-                    </ul>
-                  )}
+            {/* Scheduling Configuration Summary */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+              <h2 className="text-lg font-semibold mb-4 text-blue-900">Scheduling Configuration Summary</h2>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Appointment Types:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.appointmentTypes.length} available
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Saved Providers:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.savedProviders.length} configured for scheduling
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Saved Operatories:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.savedOperatories.length} configured for scheduling
+                  </span>
                 </div>
                 
-                <div>
-                  <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    {practice.providers.length} synced
-                  </p>
-                  {practice.providers.length > 0 && (
-                    <ul className="text-sm space-y-1">
-                      {practice.providers.slice(0, 5).map((provider) => (
-                        <li key={provider.id} className="text-gray-700">
-                          {provider.firstName} {provider.lastName}
-                        </li>
-                      ))}
-                      {practice.providers.length > 5 && (
-                        <li className="text-gray-500">
-                          ... and {practice.providers.length - 5} more
-                        </li>
-                      )}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              
-              <div className="mt-6">
-                <SyncForm action={syncNexhealthData}>
-                  <SyncDataButton />
-                </SyncForm>
+                {practice.appointmentTypes.length > 0 && practice.savedProviders.length > 0 ? (
+                  <div className="bg-green-100 border border-green-300 rounded-md p-3 mt-4">
+                    <p className="text-green-800 font-medium">
+                      ✅ Your practice is ready for AI voice scheduling!
+                    </p>
+                    <p className="text-green-700 text-xs mt-1">
+                      Laine can now help patients find appointments, check availability, and schedule visits.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-yellow-100 border border-yellow-300 rounded-md p-3 mt-4">
+                    <p className="text-yellow-800 font-medium">
+                      ⚠️ Configuration incomplete
+                    </p>
+                    <p className="text-yellow-700 text-xs mt-1">
+                      Please sync NexHealth data and select providers to enable scheduling.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </>

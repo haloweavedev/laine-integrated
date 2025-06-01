@@ -22,6 +22,13 @@ interface NexHealthProvider {
   nexhealth_specialty?: string;
 }
 
+interface NexHealthOperatory {
+  id: number;
+  name: string;
+  location_id: number;
+  active: boolean;
+}
+
 const NEXHEALTH_API_BASE_URL = process.env.NEXHEALTH_API_BASE_URL!;
 const MASTER_NEXHEALTH_API_KEY = process.env.NEXHEALTH_API_KEY!; // The master key
 
@@ -253,4 +260,35 @@ export async function getProviders(subdomain: string, locationId: string): Promi
   
   console.log(`Parsed ${providers.length} providers`);
   return providers;
+}
+
+export async function getOperatories(subdomain: string, locationId: string): Promise<NexHealthOperatory[]> {
+  if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
+  
+  const data = await fetchNexhealthAPI(
+    '/operatories',
+    subdomain,
+    { location_id: locationId, page: '1', per_page: '50' }
+  );
+  
+  console.log("Raw NexHealth operatories response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let operatories = null;
+  
+  if (Array.isArray(data)) {
+    operatories = data;
+  } else if (data?.data?.operatories && Array.isArray(data.data.operatories)) {
+    operatories = data.data.operatories;
+  } else if (data?.operatories && Array.isArray(data.operatories)) {
+    operatories = data.operatories;
+  } else if (data?.data && Array.isArray(data.data)) {
+    operatories = data.data;
+  } else {
+    console.warn("Unexpected operatories response structure:", data);
+    operatories = [];
+  }
+  
+  console.log(`Parsed ${operatories.length} operatories`);
+  return operatories.filter((op: NexHealthOperatory) => op.active !== false);
 } 

@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAppointmentTypes, getProviders } from "@/lib/nexhealth";
+import { getAppointmentTypes, getProviders, getOperatories } from "@/lib/nexhealth";
 
 interface NexHealthAppointmentType {
   id: number;
@@ -47,10 +47,11 @@ export async function POST() {
       );
     }
 
-    // Fetch data from NexHealth
-    const [appointmentTypes, providers] = await Promise.all([
+    // Fetch data from NexHealth (including operatories)
+    const [appointmentTypes, providers, operatories] = await Promise.all([
       getAppointmentTypes(practice.nexhealthSubdomain, practice.nexhealthLocationId),
       getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
+      getOperatories(practice.nexhealthSubdomain, practice.nexhealthLocationId),
     ]);
 
     // Sync appointment types - use 'minutes' from NexHealth API
@@ -102,10 +103,11 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully synced ${appointmentTypes.length} appointment types and ${providers.length} providers.`,
+      message: `Successfully synced ${appointmentTypes.length} appointment types, ${providers.length} providers, and found ${operatories.length} operatories.`,
       data: {
         appointmentTypesCount: appointmentTypes.length,
         providersCount: providers.length,
+        operatoriesCount: operatories.length,
       },
     });
   } catch (error) {
