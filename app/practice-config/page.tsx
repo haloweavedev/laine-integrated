@@ -12,6 +12,7 @@ interface Practice {
   name: string | null;
   nexhealthSubdomain: string | null;
   nexhealthLocationId: string | null;
+  webhookLastSyncAt: string | null;
   appointmentTypes: Array<{
     id: string;
     name: string;
@@ -100,7 +101,17 @@ export default function PracticeConfigPage() {
       });
 
       if (response.ok) {
-        toast.success('Configuration saved successfully!');
+        const result = await response.json();
+        
+        if (result.webhookSync?.success) {
+          toast.success('Configuration saved and webhooks synchronized successfully!');
+        } else if (result.webhookSync?.message) {
+          toast.success('Configuration saved successfully!');
+          toast.warning(`Webhook sync: ${result.webhookSync.message}`);
+        } else {
+          toast.success('Configuration saved successfully!');
+        }
+        
         await fetchPracticeData(); // Refresh data
       } else {
         toast.error('Failed to save configuration');
@@ -317,6 +328,21 @@ export default function PracticeConfigPage() {
                     updated, or when patients are modified.
                   </p>
                   
+                  {/* Last Sync Status */}
+                  {practice.webhookLastSyncAt && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                        <span className="text-sm font-medium text-blue-800">
+                          Last webhook sync: {new Date(practice.webhookLastSyncAt).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs text-blue-600 mt-1">
+                        Webhooks are automatically synchronized when you save practice configuration
+                      </p>
+                    </div>
+                  )}
+                  
                   {!globalWebhookEndpoint ? (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
                       <p className="text-sm text-yellow-800">
@@ -349,13 +375,13 @@ export default function PracticeConfigPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                          <p className="text-sm text-blue-800">
-                            ℹ️ No webhook subscriptions found. Use the command below to enable webhooks:
+                        <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
+                          <p className="text-sm text-orange-800">
+                            ⚠️ No active webhook subscriptions found. Webhooks will be automatically configured when you save your practice configuration above.
                           </p>
-                          <code className="block mt-2 bg-blue-100 px-2 py-1 rounded text-sm">
-                            pnpm webhook:subscribe {practice.nexhealthSubdomain}
-                          </code>
+                          <p className="text-xs text-orange-600 mt-2">
+                            If webhooks are still missing after saving, check that your NexHealth subdomain and location ID are correct.
+                          </p>
                         </div>
                       )}
                     </>

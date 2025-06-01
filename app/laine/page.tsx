@@ -34,7 +34,7 @@ async function createPracticeAssistant() {
   
   // Create default assistant configuration
   const assistantConfig = {
-    name: `${practice.name ? practice.name.substring(0, 15) : 'Practice'} - Laine`,
+    name: `${practice.name || 'Practice'} - Laine`,
     model: {
       provider: "openai" as const,
       model: "gpt-4.1-nano",

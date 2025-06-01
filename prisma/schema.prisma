@@ -23,6 +23,9 @@ model Practice {
   nexhealthSubdomain      String?       // User-provided NexHealth subdomain
   nexhealthLocationId     String?       // User-provided NexHealth Location ID
 
+  // Webhook synchronization tracking
+  webhookLastSyncAt       DateTime?     // Last time webhooks were synchronized
+
   // VAPI Assistant relationship - moved to separate config table for better modularity
   assistantConfig   PracticeAssistantConfig? // One-to-one relation
   nexhealthWebhookSubscriptions NexhealthWebhookSubscription[] // One-to-many
