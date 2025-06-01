@@ -47,25 +47,32 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
       console.log(`[checkAvailableSlots] Checking ${args.requestedDate} for appointment type ${args.appointmentTypeId}`);
 
-      // Build API parameters
-      const searchParams: Record<string, string> = {
-        start_date: args.requestedDate,
-        days: args.days.toString(),
-        appointment_type_id: args.appointmentTypeId,
-        [`lids[]`]: practice.nexhealthLocationId
-      };
+      // Get provider and operatory arrays
+      const providers = activeProviders.map(sp => sp.provider.nexhealthProviderId);
+      const operatories = activeOperatories.map(so => so.nexhealthOperatoryId);
 
-      // Add provider IDs
-      activeProviders.forEach((savedProvider, index) => {
-        searchParams[`pids[${index}]`] = savedProvider.provider.nexhealthProviderId;
+      // Build search params object for fetch using URLSearchParams
+      const urlParams = new URLSearchParams();
+      urlParams.append('subdomain', practice.nexhealthSubdomain);
+      urlParams.append('start_date', args.requestedDate);
+      urlParams.append('days', args.days.toString());
+      urlParams.append('appointment_type_id', args.appointmentTypeId);
+      urlParams.append('lids[]', practice.nexhealthLocationId);
+
+      // Add each provider ID as separate parameter
+      providers.forEach(providerId => {
+        urlParams.append('pids[]', providerId);
       });
 
-      // Add operatory IDs if configured
-      if (activeOperatories.length > 0) {
-        activeOperatories.forEach((savedOperatory, index) => {
-          searchParams[`operatory_ids[${index}]`] = savedOperatory.nexhealthOperatoryId;
+      // Add each operatory ID as separate parameter (if configured)
+      if (operatories.length > 0) {
+        operatories.forEach(operatoryId => {
+          urlParams.append('operatory_ids[]', operatoryId);
         });
       }
+
+      // Convert URLSearchParams to object for the API call
+      const searchParams = Object.fromEntries(urlParams.entries());
 
       const slotsResponse = await fetchNexhealthAPI(
         '/appointment_slots',
