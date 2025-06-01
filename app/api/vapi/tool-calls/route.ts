@@ -11,6 +11,10 @@ interface VapiPayload {
     call: {
       id: string;
       assistantId?: string;
+      assistant?: {
+        id?: string;
+        [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      };
       [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     };
     assistant?: {
@@ -22,131 +26,33 @@ interface VapiPayload {
   };
 }
 
-// Enhanced function to extract assistant ID from various possible locations
-function extractAssistantId(payload: any): string | null { // eslint-disable-line @typescript-eslint/no-explicit-any
+// Enhanced function to extract assistant ID with strict validation
+function extractAssistantId(payload: VapiPayload): string {
   const { message } = payload;
   
   console.log("=== Assistant ID Extraction Debug ===");
   console.log("Call object keys:", Object.keys(message.call || {}));
   console.log("Assistant object keys:", Object.keys(message.assistant || {}));
   
-  // Method 1: Check call.assistantId (original expectation)
-  if (message.call?.assistantId) {
-    console.log("✅ Found assistantId in call.assistantId:", message.call.assistantId);
-    return message.call.assistantId;
-  }
-  
-  // Method 2: Check assistant.id (fallback)
-  if (message.assistant?.id) {
-    console.log("✅ Found assistantId in assistant.id:", message.assistant.id);
-    return message.assistant.id;
-  }
-  
-  // Method 3: Check for assistant object with different structure
-  if ((message.assistant as any)?.assistant?.id) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    console.log("✅ Found assistantId in assistant.assistant.id:", (message.assistant as any).assistant.id); // eslint-disable-line @typescript-eslint/no-explicit-any
-    return (message.assistant as any).assistant.id; // eslint-disable-line @typescript-eslint/no-explicit-any
-  }
-  
-  // Method 4: Check call object for nested assistant info
-  if ((message.call as any)?.assistant?.id) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    console.log("✅ Found assistantId in call.assistant.id:", (message.call as any).assistant.id); // eslint-disable-line @typescript-eslint/no-explicit-any
-    return (message.call as any).assistant.id; // eslint-disable-line @typescript-eslint/no-explicit-any
-  }
-  
-  console.log("❌ No assistant ID found in payload");
-  console.log("Available call fields:", message.call);
-  console.log("Available assistant fields:", message.assistant);
-  
-  return null;
-}
-
-// Enhanced practice lookup with fallback strategies
-async function findPracticeByAssistantId(assistantId: string | null, payload: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-  console.log("=== Practice Lookup Debug ===");
-  console.log("Assistant ID:", assistantId);
+  // Check if VAPI is sending assistant ID in different locations
+  const assistantId = message.call?.assistantId || 
+                     message.assistant?.id ||
+                     message.call?.assistant?.id;
   
   if (!assistantId) {
-    console.log("🔄 Attempting to find practice using alternative methods...");
-    
-    // Fallback 1: Try to find by assistant name
-    const assistantName = (payload.message.assistant as any)?.name; // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (assistantName) {
-      console.log("🔄 Attempting lookup by assistant name:", assistantName);
-      try {
-        // Try exact match first
-        let assistantConfig = await prisma.practiceAssistantConfig.findFirst({
-          where: {
-            practice: {
-              name: assistantName.split(" - ")[0] // Extract practice name from "Practice - Laine"
-            }
-          },
-          include: { 
-            practice: true
-          }
-        });
-        
-        // If no exact match, try partial match
-        if (!assistantConfig && assistantName.includes(" - ")) {
-          const practiceName = assistantName.split(" - ")[0];
-          assistantConfig = await prisma.practiceAssistantConfig.findFirst({
-            where: {
-              practice: {
-                name: {
-                  contains: practiceName,
-                  mode: 'insensitive'
-                }
-              }
-            },
-            include: { 
-              practice: true
-            }
-          });
-        }
-        
-        if (assistantConfig?.practice) {
-          console.log("✅ Found practice by assistant name:", assistantConfig.practice.id);
-          return await fetchPracticeWithSchedulingData(assistantConfig.practice.id);
-        }
-      } catch (error) {
-        console.error("❌ Error looking up by assistant name:", error);
-      }
-    }
-    
-    // Fallback 2: For development/testing - use the first available practice
-    if (process.env.NODE_ENV === 'development') {
-      console.log("🔄 Development mode: Using first available practice");
-      try {
-        const firstPractice = await prisma.practice.findFirst({
-          include: { assistantConfig: true }
-        });
-        
-        if (firstPractice) {
-          console.log("✅ Using development practice:", firstPractice.id);
-          return await fetchPracticeWithSchedulingData(firstPractice.id);
-        }
-      } catch (error) {
-        console.error("❌ Error using development fallback:", error);
-      }
-    }
-    
-    // Fallback 3: Check if there's only one practice configured
-    try {
-      const practiceCount = await prisma.practice.count();
-      if (practiceCount === 1) {
-        console.log("🔄 Only one practice found, using it as fallback");
-        const singlePractice = await prisma.practice.findFirst();
-        if (singlePractice) {
-          console.log("✅ Using single practice:", singlePractice.id);
-          return await fetchPracticeWithSchedulingData(singlePractice.id);
-        }
-      }
-    } catch (error) {
-      console.error("❌ Error checking single practice fallback:", error);
-    }
-    
-    return null;
+    console.error("CRITICAL: No assistant ID found in VAPI payload");
+    console.error("Payload structure:", JSON.stringify(payload.message, null, 2));
+    throw new Error("Assistant ID is required for practice identification");
   }
+  
+  console.log("✅ Found assistant ID:", assistantId);
+  return assistantId;
+}
+
+// Simplified practice lookup with strict validation - no fallback methods
+async function findPracticeByAssistantId(assistantId: string) {
+  console.log("=== Practice Lookup Debug ===");
+  console.log("Assistant ID:", assistantId);
   
   try {
     const assistantConfig = await prisma.practiceAssistantConfig.findUnique({
@@ -158,14 +64,14 @@ async function findPracticeByAssistantId(assistantId: string | null, payload: an
     
     if (!assistantConfig?.practice) {
       console.error(`❌ No practice found for assistant ID: ${assistantId}`);
-      return null;
+      throw new Error(`No practice found for assistant ID: ${assistantId}`);
     }
 
     console.log("✅ Found practice by assistant ID:", assistantConfig.practice.id);
     return await fetchPracticeWithSchedulingData(assistantConfig.practice.id);
   } catch (error) {
     console.error("❌ Error finding practice by assistant ID:", error);
-    return null;
+    throw error;
   }
 }
 
@@ -421,16 +327,19 @@ export async function POST(req: NextRequest) {
     
     const { message } = payload;
     const vapiCallId = message.call.id;
-    const assistantId = extractAssistantId(payload);
     
-    // Find practice by assistant ID with scheduling data
-    const practice = await findPracticeByAssistantId(assistantId, payload);
-    if (!practice) {
-      console.error(`No practice found for assistant ID: ${assistantId}`);
+    let assistantId: string;
+    let practice: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    
+    try {
+      assistantId = extractAssistantId(payload);
+      practice = await findPracticeByAssistantId(assistantId);
+    } catch (error) {
+      console.error("Assistant ID extraction or practice lookup failed:", error);
       
       // Create detailed error for debugging
       const debugInfo = {
-        assistantId,
+        error: error instanceof Error ? error.message : "Unknown error",
         callId: vapiCallId,
         assistantName: (message.assistant as any)?.name, // eslint-disable-line @typescript-eslint/no-explicit-any
         availableFields: {
@@ -447,8 +356,8 @@ export async function POST(req: NextRequest) {
         toolCallId: extractToolCallId(toolCall),
         result: JSON.stringify({
           success: false,
-          error_code: "PRACTICE_NOT_FOUND",
-          message_to_patient: getPatientMessage("PRACTICE_NOT_FOUND"),
+          error_code: "ASSISTANT_ID_OR_PRACTICE_ERROR",
+          message_to_patient: "I'm having trouble connecting to your practice's system. Please try again or contact the office directly.",
           debug_info: debugInfo
         })
       }));

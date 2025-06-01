@@ -109,8 +109,8 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
 
   messages: {
     start: "Let me find the right appointment type for you...",
-    success: "Found the appointment type.",
-    fail: "I'm having trouble finding appointment types right now."
+    success: "Great! I can help you schedule that appointment.",
+    fail: "Let me check what appointment types we have available."
   }
 };
 

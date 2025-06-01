@@ -15,91 +15,124 @@ async function getRawBody(req: NextRequest): Promise<Buffer> {
 }
 
 export async function POST(req: NextRequest) {
-  console.log("NexHealth Webhook: Received request");
-  const rawBody = await getRawBody(req);
-  const signature = req.headers.get("x-nexhealth-signature");
-
-  // Fetch the global webhook secret from DB (or env, but DB allows dynamic updates if secret changes)
-  const globalWebhookConfig = await prisma.globalNexhealthWebhookEndpoint.findUnique({
-    where: { id: "singleton" }, // Assuming you use a fixed ID for the global config
-  });
-
-  if (!globalWebhookConfig || !globalWebhookConfig.secretKey) {
-    console.error("NexHealth Webhook: Secret key not configured in the database.");
-    return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 });
-  }
-  const NEXHEALTH_WEBHOOK_SECRET = globalWebhookConfig.secretKey;
-
-  if (!signature) {
-    console.warn("NexHealth Webhook: Signature missing");
-    return NextResponse.json({ error: "Signature missing" }, { status: 400 });
-  }
-
-  const expectedSignature = crypto
-    .createHmac("sha256", NEXHEALTH_WEBHOOK_SECRET)
-    .update(rawBody)
-    .digest("hex");
-
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-    console.error("NexHealth Webhook: Invalid signature.");
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
-  const event = JSON.parse(rawBody.toString());
-  console.log("NexHealth Webhook: Signature VERIFIED. Event:", JSON.stringify(event, null, 2));
-
-  const { resource_type, event_name, subdomain, institution_id, data } = event;
-
-  // Find the practice associated with this subdomain/institution_id
-  // Note: A practice might have a subdomain but events might come with institution_id.
-  // Ensure your Practice model can be looked up by either, or that you store institution_id.
-  // For now, assuming subdomain is the primary link from webhook to your Practice model.
-  const practice = await prisma.practice.findFirst({
-    where: { nexhealthSubdomain: subdomain }, // Or use institution_id if that's more reliable
-  });
-
-  if (!practice) {
-    console.warn(`NexHealth Webhook: Received event for unknown subdomain/institution: ${subdomain}/${institution_id}`);
-    // Still return 200 to NexHealth to acknowledge receipt and prevent retries for unknown practices.
-    return NextResponse.json({ message: "Received, but practice not found." }, { status: 200 });
-  }
-
-  // --- Handle specific events ---
-  // For Phase 2, we'll log events. Actual data processing (e.g., updating local DB) will be in later phases.
+  console.log("=== NexHealth Webhook Handler ===");
   
-  if (resource_type === "Patient") {
-    if (event_name === "patient_created") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
-      // TODO: Upsert patient data into local Patient table
-    } else if (event_name === "patient_updated") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Patient updated in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
-      // TODO: Update local patient data
+  try {
+    const rawBody = await getRawBody(req);
+    console.log("Raw body length:", rawBody.length);
+    
+    if (rawBody.length === 0) {
+      console.error("Empty request body received");
+      return NextResponse.json({ error: "Empty request body" }, { status: 400 });
     }
-  } else if (resource_type === "Appointment") {
-    if (event_name === "appointment_created") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment created in EHR. Appointment ID: ${data?.appointment?.id}`);
-      // TODO: Sync new appointment to local database
-    } else if (event_name === "appointment_updated") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment updated in EHR. Appointment ID: ${data?.appointment?.id}`);
-      // TODO: Update local appointment data
-    } else if (event_name === "appointment_insertion.complete") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion complete (Laine booking succeeded). Appointment ID: ${data?.appointment?.id}`);
-      // TODO: Mark appointment as confirmed in local DB
-    } else if (event_name === "appointment_insertion.failed") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion failed (Laine booking failed). Error: ${data?.error}`);
-      // TODO: Handle booking failure, notify practice or retry
+    
+    const signature = req.headers.get("x-nexhealth-signature");
+    console.log("Signature present:", !!signature);
+    
+    // Enhanced signature verification with better error messages
+    const globalWebhookConfig = await prisma.globalNexhealthWebhookEndpoint.findUnique({
+      where: { id: "singleton" }
+    });
+    
+    if (!globalWebhookConfig?.secretKey) {
+      console.error("CRITICAL: Webhook secret not found in database");
+      return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
     }
-  } else if (resource_type === "SyncStatus") {
-    if (event_name === "sync_status_read_change") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - EHR read functionality came back online. Status: ${data?.read_status}`);
-      // TODO: Update system monitoring, resume read operations if needed
-    } else if (event_name === "sync_status_write_change") {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - EHR write functionality came back online. Status: ${data?.write_status}`);
-      // TODO: Update system monitoring, resume write operations if needed
+    
+    if (!signature) {
+      console.error("Missing webhook signature");
+      return NextResponse.json({ error: "Missing signature" }, { status: 401 });
     }
-  } else {
-    console.log(`NexHealth Webhook: Practice ${practice.id} - Received unhandled event: ${resource_type}.${event_name}`);
-  }
+    
+    // Verify signature
+    const expectedSignature = crypto
+      .createHmac("sha256", globalWebhookConfig.secretKey)
+      .update(rawBody)
+      .digest("hex");
+    
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+      console.error("Signature verification failed");
+      console.error("Expected:", expectedSignature);
+      console.error("Received:", signature);
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
+    
+    // Parse and validate JSON
+    let event;
+    try {
+      event = JSON.parse(rawBody.toString());
+    } catch (parseError) {
+      console.error("JSON parsing failed:", parseError);
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+    
+    console.log("Webhook event received:", {
+      resource_type: event.resource_type,
+      event_name: event.event_name,
+      subdomain: event.subdomain,
+      institution_id: event.institution_id
+    });
+    
+    const { resource_type, event_name, subdomain, institution_id, data } = event;
 
-  return NextResponse.json({ message: "Webhook received successfully" }, { status: 200 });
+    // Find the practice associated with this subdomain/institution_id
+    // Note: A practice might have a subdomain but events might come with institution_id.
+    // Ensure your Practice model can be looked up by either, or that you store institution_id.
+    // For now, assuming subdomain is the primary link from webhook to your Practice model.
+    const practice = await prisma.practice.findFirst({
+      where: { nexhealthSubdomain: subdomain }, // Or use institution_id if that's more reliable
+    });
+
+    if (!practice) {
+      console.warn(`NexHealth Webhook: Received event for unknown subdomain/institution: ${subdomain}/${institution_id}`);
+      // Still return 200 to NexHealth to acknowledge receipt and prevent retries for unknown practices.
+      return NextResponse.json({ message: "Received, but practice not found." }, { status: 200 });
+    }
+
+    // --- Handle specific events ---
+    // For Phase 2, we'll log events. Actual data processing (e.g., updating local DB) will be in later phases.
+    
+    if (resource_type === "Patient") {
+      if (event_name === "patient_created") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+        // TODO: Upsert patient data into local Patient table
+      } else if (event_name === "patient_updated") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - Patient updated in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+        // TODO: Update local patient data
+      }
+    } else if (resource_type === "Appointment") {
+      if (event_name === "appointment_created") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment created in EHR. Appointment ID: ${data?.appointment?.id}`);
+        // TODO: Sync new appointment to local database
+      } else if (event_name === "appointment_updated") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment updated in EHR. Appointment ID: ${data?.appointment?.id}`);
+        // TODO: Update local appointment data
+      } else if (event_name === "appointment_insertion.complete") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion complete (Laine booking succeeded). Appointment ID: ${data?.appointment?.id}`);
+        // TODO: Mark appointment as confirmed in local DB
+      } else if (event_name === "appointment_insertion.failed") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion failed (Laine booking failed). Error: ${data?.error}`);
+        // TODO: Handle booking failure, notify practice or retry
+      }
+    } else if (resource_type === "SyncStatus") {
+      if (event_name === "sync_status_read_change") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - EHR read functionality came back online. Status: ${data?.read_status}`);
+        // TODO: Update system monitoring, resume read operations if needed
+      } else if (event_name === "sync_status_write_change") {
+        console.log(`NexHealth Webhook: Practice ${practice.id} - EHR write functionality came back online. Status: ${data?.write_status}`);
+        // TODO: Update system monitoring, resume write operations if needed
+      }
+    } else {
+      console.log(`NexHealth Webhook: Practice ${practice.id} - Received unhandled event: ${resource_type}.${event_name}`);
+    }
+
+    return NextResponse.json({ success: true });
+    
+  } catch (error) {
+    console.error("Webhook processing error:", error);
+    return NextResponse.json({ 
+      error: "Internal server error",
+      details: error instanceof Error ? error.message : "Unknown error"
+    }, { status: 500 });
+  }
 } 

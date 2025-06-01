@@ -2,8 +2,90 @@ import { z } from "zod";
 import { ToolDefinition, ToolResult } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 
+// Add date normalization function to handle voice input
+function normalizeDateFromVoice(dateString: string): string {
+  // Handle cases like "December 20 third 20 25" -> "2025-12-23"
+  // Handle cases like "December twenty third" -> current year + "12-23"
+  
+  const currentYear = new Date().getFullYear();
+  
+  // Pattern for "Month Day third Year" format
+  const ordinalPattern = /(\w+)\s+(\d+)\s+(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty[- ]?first|twenty[- ]?second|twenty[- ]?third|twenty[- ]?fourth|twenty[- ]?fifth|twenty[- ]?sixth|twenty[- ]?seventh|twenty[- ]?eighth|twenty[- ]?ninth|thirtieth|thirty[- ]?first)\s+(\d{2,4})/i;
+  
+  const match = dateString.match(ordinalPattern);
+  if (match) {
+    const [, month, baseDay, ordinal, year] = match;
+    
+    // Convert ordinal to number
+    const ordinalMap: { [key: string]: number } = {
+      'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+      'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
+      'eleventh': 11, 'twelfth': 12, 'thirteenth': 13, 'fourteenth': 14, 'fifteenth': 15,
+      'sixteenth': 16, 'seventeenth': 17, 'eighteenth': 18, 'nineteenth': 19, 'twentieth': 20,
+      'twenty first': 21, 'twenty-first': 21, 'twenty second': 22, 'twenty-second': 22,
+      'twenty third': 23, 'twenty-third': 23, 'twenty fourth': 24, 'twenty-fourth': 24,
+      'twenty fifth': 25, 'twenty-fifth': 25, 'twenty sixth': 26, 'twenty-sixth': 26,
+      'twenty seventh': 27, 'twenty-seventh': 27, 'twenty eighth': 28, 'twenty-eighth': 28,
+      'twenty ninth': 29, 'twenty-ninth': 29, 'thirtieth': 30, 'thirty first': 31, 'thirty-first': 31
+    };
+    
+    const day = ordinalMap[ordinal.toLowerCase().replace('-', ' ')] || parseInt(baseDay);
+    const fullYear = year.length === 2 ? 2000 + parseInt(year) : parseInt(year);
+    
+    // Convert month name to number
+    const monthMap: { [key: string]: number } = {
+      january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+      july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
+    };
+    
+    const monthNum = monthMap[month.toLowerCase()];
+    if (monthNum && day >= 1 && day <= 31) {
+      return `${fullYear}-${monthNum.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    }
+  }
+  
+  // Pattern for "Month twenty third" without year (assume current year)
+  const ordinalNoYearPattern = /(\w+)\s+(twenty[- ]?first|twenty[- ]?second|twenty[- ]?third|twenty[- ]?fourth|twenty[- ]?fifth|twenty[- ]?sixth|twenty[- ]?seventh|twenty[- ]?eighth|twenty[- ]?ninth|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth|thirty[- ]?first)/i;
+  
+  const matchNoYear = dateString.match(ordinalNoYearPattern);
+  if (matchNoYear) {
+    const [, month, ordinal] = matchNoYear;
+    
+    const ordinalMap: { [key: string]: number } = {
+      'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+      'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
+      'eleventh': 11, 'twelfth': 12, 'thirteenth': 13, 'fourteenth': 14, 'fifteenth': 15,
+      'sixteenth': 16, 'seventeenth': 17, 'eighteenth': 18, 'nineteenth': 19, 'twentieth': 20,
+      'twenty first': 21, 'twenty-first': 21, 'twenty second': 22, 'twenty-second': 22,
+      'twenty third': 23, 'twenty-third': 23, 'twenty fourth': 24, 'twenty-fourth': 24,
+      'twenty fifth': 25, 'twenty-fifth': 25, 'twenty sixth': 26, 'twenty-sixth': 26,
+      'twenty seventh': 27, 'twenty-seventh': 27, 'twenty eighth': 28, 'twenty-eighth': 28,
+      'twenty ninth': 29, 'twenty-ninth': 29, 'thirtieth': 30, 'thirty first': 31, 'thirty-first': 31
+    };
+    
+    const day = ordinalMap[ordinal.toLowerCase().replace('-', ' ')];
+    
+    const monthMap: { [key: string]: number } = {
+      january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+      july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
+    };
+    
+    const monthNum = monthMap[month.toLowerCase()];
+    if (monthNum && day && day >= 1 && day <= 31) {
+      return `${currentYear}-${monthNum.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+    }
+  }
+  
+  // Return original if no match or try other parsing methods
+  return dateString;
+}
+
 export const checkAvailableSlotsSchema = z.object({
-  requestedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").describe("The date the patient wants to schedule for in YYYY-MM-DD format"),
+  requestedDate: z.string()
+    .min(1)
+    .transform(normalizeDateFromVoice)
+    .refine((date) => /^\d{4}-\d{2}-\d{2}$/.test(date), "Invalid date format")
+    .describe("The date the patient wants to schedule for"),
   appointmentTypeId: z.string().min(1).describe("The appointment type ID from the previous tool call"),
   days: z.number().min(1).max(7).default(1).describe("Number of days to check (default 1)")
 });
@@ -163,9 +245,9 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
   },
 
   messages: {
-    start: "Let me check what times are available for you...",
-    success: "Found available appointment times.",
-    fail: "I'm having trouble checking availability right now."
+    start: "Let me check our availability for you...",
+    success: "I found some great options for you!",
+    fail: "I'm having trouble checking our schedule right now."
   }
 };
 
