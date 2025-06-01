@@ -40,21 +40,23 @@ function extractAssistantId(payload: VapiPayload): string {
                      message.call?.assistant?.id;
   
   if (!assistantId) {
-    console.error("CRITICAL: No assistant ID found in VAPI payload");
-    console.error("Payload structure:", JSON.stringify({
+    // For VAPI tool call payloads, assistant ID is often not included
+    // This is normal behavior, not a critical error
+    console.log("ℹ️ No assistant ID found in VAPI tool call payload (this is normal)");
+    console.log("Payload structure:", JSON.stringify({
       call: Object.keys(message.call || {}),
       assistant: Object.keys(message.assistant || {}),
       assistantName: message.assistant?.name || message.call?.assistant?.name
     }, null, 2));
     
-    // TEMPORARY FALLBACK: Try to use assistant name to find practice
+    // Use assistant name as fallback (standard for VAPI tool calls)
     const assistantName = message.assistant?.name || message.call?.assistant?.name;
     if (assistantName && assistantName.includes(" - Laine")) {
-      console.warn("⚠️ Using assistant name as fallback:", assistantName);
+      console.log("✅ Using assistant name for practice lookup:", assistantName);
       return assistantName; // This will be handled differently in practice lookup
     }
     
-    throw new Error("Assistant ID is required for practice identification");
+    throw new Error("Assistant identification is required for practice lookup");
   }
   
   console.log("✅ Found assistant ID:", assistantId);

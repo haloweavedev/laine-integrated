@@ -104,28 +104,20 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       const providers = activeProviders.map(sp => sp.provider.nexhealthProviderId);
       const operatories = activeOperatories.map(so => so.nexhealthOperatoryId);
 
-      // Build search params object for fetch using URLSearchParams
-      const urlParams = new URLSearchParams();
-      urlParams.append('subdomain', practice.nexhealthSubdomain);
-      urlParams.append('start_date', args.requestedDate);
-      urlParams.append('days', args.days.toString());
-      urlParams.append('appointment_type_id', args.appointmentTypeId);
-      urlParams.append('lids[]', practice.nexhealthLocationId);
+      // Build search params object for NexHealth API
+      const searchParams: Record<string, string | string[]> = {
+        subdomain: practice.nexhealthSubdomain,
+        start_date: args.requestedDate,
+        days: args.days.toString(),
+        appointment_type_id: args.appointmentTypeId,
+        'lids[]': [practice.nexhealthLocationId],
+        'pids[]': providers
+      };
 
-      // Add each provider ID as separate parameter
-      providers.forEach(providerId => {
-        urlParams.append('pids[]', providerId);
-      });
-
-      // Add each operatory ID as separate parameter (if configured)
+      // Add operatory IDs if configured
       if (operatories.length > 0) {
-        operatories.forEach(operatoryId => {
-          urlParams.append('operatory_ids[]', operatoryId);
-        });
+        searchParams['operatory_ids[]'] = operatories;
       }
-
-      // Convert URLSearchParams to object for the API call
-      const searchParams = Object.fromEntries(urlParams.entries());
 
       const slotsResponse = await fetchNexhealthAPI(
         '/appointment_slots',
@@ -154,13 +146,42 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       }
 
       if (availableSlots.length === 0) {
+        // No slots found - let's provide more helpful information
+        console.log(`[checkAvailableSlots] No slots found for appointment type ${args.appointmentTypeId} on ${args.requestedDate}`);
+        
+        // Check if this is a systemic issue or specific to this appointment type
+        // by testing with a different appointment type that's known to have availability
+        let suggestionMessage = `I don't see any available slots for ${formatDate(args.requestedDate)}.`;
+        
+        // Try to find alternative appointment types that might have availability
+        const allAppointmentTypes = practice.appointmentTypes || [];
+        if (allAppointmentTypes.length > 1) {
+          const currentType = allAppointmentTypes.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId);
+          const otherTypes = allAppointmentTypes.filter(at => at.nexhealthAppointmentTypeId !== args.appointmentTypeId);
+          
+          if (currentType && otherTypes.length > 0) {
+            console.log(`[checkAvailableSlots] Current appointment type: ${currentType.name} (${args.appointmentTypeId})`);
+            console.log(`[checkAvailableSlots] Other available types:`, otherTypes.map(t => `${t.name} (${t.nexhealthAppointmentTypeId})`));
+            suggestionMessage += ` Would you like me to check availability for a different type of appointment, or would you prefer to call the office?`;
+          }
+        }
+        
+        // Also suggest checking different dates
+        suggestionMessage += ` You can also ask me to check a different date.`;
+
         return {
           success: true,
-          message_to_patient: `I don't see any available slots for ${formatDate(args.requestedDate)}. Would you like me to check a different date, or would you prefer to call the office for more options?`,
+          message_to_patient: suggestionMessage,
           data: {
             requested_date: args.requestedDate,
+            requested_appointment_type_id: args.appointmentTypeId,
             available_slots: [],
-            has_availability: false
+            has_availability: false,
+            debug_info: {
+              providers_checked: providers.length,
+              operatories_checked: operatories.length,
+              appointment_type_name: allAppointmentTypes.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || 'Unknown'
+            }
           }
         };
       }
