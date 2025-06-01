@@ -1,40 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
-
-// Function to subscribe practice to webhooks
-async function syncWebhooksForPractice(subdomain: string): Promise<{ success: boolean; message: string }> {
-  try {
-    console.log(`[AutoWebhookSync] Syncing webhooks for ${subdomain}...`);
-    
-    // Run the webhook subscription script
-    const { stdout, stderr } = await execAsync(`pnpm webhook:subscribe ${subdomain}`, {
-      timeout: 30000 // 30 second timeout
-    });
-    
-    console.log(`[AutoWebhookSync] Stdout:`, stdout);
-    if (stderr) {
-      console.error(`[AutoWebhookSync] Stderr:`, stderr);
-    }
-    
-    // Check for success indicators in output
-    if (stdout.includes('✅') || stdout.includes('success') || stdout.includes('Successfully')) {
-      return { success: true, message: "Webhooks synchronized automatically" };
-    } else {
-      return { success: false, message: "Webhook sync completed with warnings" };
-    }
-  } catch (error) {
-    console.error(`[AutoWebhookSync] Error:`, error);
-    return { 
-      success: false, 
-      message: error instanceof Error ? error.message : "Failed to sync webhooks"
-    };
-  }
-}
+import { subscribePracticeToWebhooks } from "@/lib/webhook-utils";
 
 export async function POST(req: NextRequest) {
   try {
@@ -74,11 +41,17 @@ export async function POST(req: NextRequest) {
     });
 
     // Automatically sync webhooks after saving configuration
-    let webhookSyncResult = { success: false, message: "Webhook sync not attempted" };
+    let webhookSyncResult = { 
+      success: false, 
+      message: "Webhook sync not attempted",
+      successCount: 0,
+      skipCount: 0,
+      failCount: 0
+    };
     
     try {
       console.log(`[AutoWebhookSync] Auto-syncing webhooks for practice ${practice.id}...`);
-      webhookSyncResult = await syncWebhooksForPractice(subdomain);
+      webhookSyncResult = await subscribePracticeToWebhooks(subdomain);
       
       if (webhookSyncResult.success) {
         console.log(`[AutoWebhookSync] ✅ Successfully synced webhooks for ${subdomain}`);
@@ -89,7 +62,10 @@ export async function POST(req: NextRequest) {
       console.error(`[AutoWebhookSync] ❌ Failed to sync webhooks:`, webhookError);
       webhookSyncResult = {
         success: false,
-        message: "Configuration saved, but webhook sync failed"
+        message: "Configuration saved, but webhook sync failed",
+        successCount: 0,
+        skipCount: 0,
+        failCount: 0
       };
     }
 

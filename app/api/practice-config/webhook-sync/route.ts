@@ -1,44 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { exec } from "child_process";
-import { promisify } from "util";
-
-const execAsync = promisify(exec);
-
-// Function to subscribe practice to webhooks using the existing script
-async function subscribeToWebhooks(subdomain: string): Promise<{ success: boolean; message: string; subscriptions?: unknown[] }> {
-  try {
-    console.log(`[WebhookSync] Subscribing practice ${subdomain} to webhooks...`);
-    
-    // Run the existing webhook subscription script
-    const { stdout, stderr } = await execAsync(`pnpm webhook:subscribe ${subdomain}`);
-    
-    console.log(`[WebhookSync] Stdout:`, stdout);
-    if (stderr) {
-      console.error(`[WebhookSync] Stderr:`, stderr);
-    }
-    
-    // Parse the output to check for success
-    if (stdout.includes('✅') || stdout.includes('success')) {
-      return {
-        success: true,
-        message: "Webhooks synchronized successfully"
-      };
-    } else {
-      return {
-        success: false,
-        message: stderr || "Unknown error during webhook subscription"
-      };
-    }
-  } catch (error) {
-    console.error(`[WebhookSync] Error subscribing to webhooks:`, error);
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : "Failed to sync webhooks"
-    };
-  }
-}
+import { subscribePracticeToWebhooks } from "@/lib/webhook-utils";
 
 export async function POST(req: NextRequest) {
   console.log("=== Webhook Sync API ===");
@@ -69,14 +32,14 @@ export async function POST(req: NextRequest) {
 
     console.log(`[WebhookSync] Syncing webhooks for practice: ${practice.id} (${subdomain})`);
 
-    // Subscribe to webhooks
-    const result = await subscribeToWebhooks(subdomain);
+    // Subscribe to webhooks using the new utility
+    const result = await subscribePracticeToWebhooks(subdomain);
 
     // Update the webhook sync timestamp in the database
     await prisma.practice.update({
       where: { id: practice.id },
       data: {
-        updatedAt: new Date() // This will serve as our "last webhook sync" timestamp
+        webhookLastSyncAt: new Date()
       }
     });
 
@@ -91,6 +54,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: result.success,
       message: result.message,
+      details: {
+        successCount: result.successCount,
+        skipCount: result.skipCount,
+        failCount: result.failCount
+      },
       webhookSubscriptions: updatedPractice?.nexhealthWebhookSubscriptions || [],
       lastSyncTime: new Date().toISOString()
     });
