@@ -215,6 +215,64 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
   }
 }
 
+// Enhanced tool name extraction function
+function extractToolName(toolCall: any): string | null { // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Log the tool call structure for debugging
+  console.log("=== Tool Call Structure Debug ===");
+  console.log("Tool call keys:", Object.keys(toolCall));
+  console.log("Tool call object:", JSON.stringify(toolCall, null, 2));
+  
+  // Method 1: Check function.name (most common)
+  if (toolCall.function && typeof toolCall.function === 'object' && toolCall.function.name) {
+    console.log("✅ Found tool name in function.name:", toolCall.function.name);
+    return toolCall.function.name;
+  }
+  
+  // Method 2: Check direct name property
+  if (toolCall.name && typeof toolCall.name === 'string') {
+    console.log("✅ Found tool name in name:", toolCall.name);
+    return toolCall.name;
+  }
+  
+  // Method 3: Check if function is a string (edge case)
+  if (typeof toolCall.function === 'string') {
+    console.log("✅ Found tool name as string in function:", toolCall.function);
+    return toolCall.function;
+  }
+  
+  console.error("❌ Unable to extract tool name from tool call");
+  console.error("Available fields:", {
+    hasFunction: !!toolCall.function,
+    functionType: typeof toolCall.function,
+    functionKeys: toolCall.function ? Object.keys(toolCall.function) : null,
+    hasName: !!toolCall.name,
+    nameType: typeof toolCall.name
+  });
+  
+  return null;
+}
+
+// Enhanced tool call ID extraction function
+function extractToolCallId(toolCall: any): string { // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Method 1: Check id property
+  if (toolCall.id && typeof toolCall.id === 'string') {
+    console.log("✅ Found tool call ID in id:", toolCall.id);
+    return toolCall.id;
+  }
+  
+  // Method 2: Check toolCallId property
+  if (toolCall.toolCallId && typeof toolCall.toolCallId === 'string') {
+    console.log("✅ Found tool call ID in toolCallId:", toolCall.toolCallId);
+    return toolCall.toolCallId;
+  }
+  
+  // Method 3: Generate fallback ID
+  const fallbackId = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  console.warn("⚠️ No tool call ID found, using fallback:", fallbackId);
+  
+  return fallbackId;
+}
+
 // Enhanced tool call argument extraction
 function extractToolCallArguments(toolCall: any): Record<string, unknown> { // eslint-disable-line @typescript-eslint/no-explicit-any
   console.log("=== Tool Call Arguments Extraction ===");
@@ -370,13 +428,28 @@ export async function POST(req: NextRequest) {
     if (!practice) {
       console.error(`No practice found for assistant ID: ${assistantId}`);
       
+      // Create detailed error for debugging
+      const debugInfo = {
+        assistantId,
+        callId: vapiCallId,
+        assistantName: (message.assistant as any)?.name, // eslint-disable-line @typescript-eslint/no-explicit-any
+        availableFields: {
+          call: Object.keys(message.call || {}),
+          assistant: Object.keys(message.assistant || {})
+        }
+      };
+      
+      console.error("Debug info:", JSON.stringify(debugInfo, null, 2));
+      
       // Return error results for all tool calls
-      const errorResults = (message.toolCallList || []).map(toolCall => ({
-        toolCallId: toolCall.toolCallId,
+      const toolCalls = message.toolCallList || message.toolCalls || [];
+      const errorResults = toolCalls.map((toolCall: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+        toolCallId: extractToolCallId(toolCall),
         result: JSON.stringify({
           success: false,
           error_code: "PRACTICE_NOT_FOUND",
-          message_to_patient: getPatientMessage("PRACTICE_NOT_FOUND")
+          message_to_patient: getPatientMessage("PRACTICE_NOT_FOUND"),
+          debug_info: debugInfo
         })
       }));
       
@@ -405,36 +478,74 @@ export async function POST(req: NextRequest) {
     // Process all tool calls
     const results = [];
     
-    for (const toolCall of (message.toolCallList || [])) {
-      const tool = getToolByName(toolCall.name);
+    console.log(`Processing ${(message.toolCallList || []).length} tool call(s)`);
+    
+    for (let i = 0; i < (message.toolCallList || []).length; i++) {
+      const toolCall = (message.toolCallList || [])[i];
       
-      if (!tool) {
-        console.error(`Unknown tool: ${toolCall.name}`);
+      console.log(`=== Processing Tool Call ${i + 1}/${(message.toolCallList || []).length} ===`);
+      
+      // Enhanced tool name extraction
+      const toolName = extractToolName(toolCall);
+      const toolCallId = extractToolCallId(toolCall);
+      
+      console.log(`Tool: ${toolName}, ID: ${toolCallId}`);
+      
+      if (!toolName) {
+        console.error(`❌ Unable to extract tool name from tool call ${i + 1}`);
         results.push({
-          toolCallId: toolCall.toolCallId,
+          toolCallId,
           result: JSON.stringify({
             success: false,
-            error_code: "SYSTEM_ERROR",
-            message_to_patient: getPatientMessage("SYSTEM_ERROR")
+            error_code: "INVALID_TOOL_CALL",
+            message_to_patient: getPatientMessage("VALIDATION_ERROR"),
+            debug_info: {
+              toolCallIndex: i,
+              availableFields: Object.keys(toolCall),
+              toolCallStructure: toolCall
+            }
           })
         });
         continue;
       }
       
+      const tool = getToolByName(toolName);
+      
+      if (!tool) {
+        console.error(`❌ Unknown tool: ${toolName}`);
+        results.push({
+          toolCallId,
+          result: JSON.stringify({
+            success: false,
+            error_code: "SYSTEM_ERROR",
+            message_to_patient: getPatientMessage("SYSTEM_ERROR"),
+            debug_info: {
+              requestedTool: toolName,
+              toolCallIndex: i
+            }
+          })
+        });
+        continue;
+      }
+      
+      console.log(`✅ Found tool: ${tool.name}`);
+      
       // Create execution context
       const context: ToolExecutionContext = {
         practice,
         vapiCallId,
-        toolCallId: toolCall.toolCallId,
+        toolCallId,
         assistantId: assistantId || "unknown"
       };
       
       const toolResult = await executeToolSafely(tool, toolCall, context);
       
       results.push({
-        toolCallId: toolCall.toolCallId,
+        toolCallId,
         result: JSON.stringify(toolResult)
       });
+      
+      console.log(`✅ Tool ${toolName} completed. Success: ${toolResult.success}`);
     }
     
     console.log("Sending results to VAPI:", JSON.stringify({ results }));
