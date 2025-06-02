@@ -5,12 +5,14 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import findPatientTool from "./findPatient";
 import findAppointmentTypeTool from "./findAppointmentType";
 import checkAvailableSlotsTool from "./checkAvailableSlots";
+import bookAppointmentTool from "./bookAppointment";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const tools: ToolDefinition<any>[] = [
   findPatientTool,
   findAppointmentTypeTool,
-  checkAvailableSlotsTool
+  checkAvailableSlotsTool,
+  bookAppointmentTool
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,4 +66,5 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
 // Export individual tool schemas for validation
 export { findPatientSchema } from "./findPatient";
 export { findAppointmentTypeSchema } from "./findAppointmentType";
-export { checkAvailableSlotsSchema } from "./checkAvailableSlots"; 
+export { checkAvailableSlotsSchema } from "./checkAvailableSlots";
+export { bookAppointmentSchema } from "./bookAppointment"; 

@@ -85,7 +85,7 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
       // Good match found - confirm with user
       return {
         success: true,
-        message_to_patient: `Just to confirm, you want to come in for a ${bestMatch.name} (${bestMatch.duration} minutes). Is that correct?`,
+        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. When would you like to come in?`,
         data: {
           matched: true,
           appointment_type_id: bestMatch.id,

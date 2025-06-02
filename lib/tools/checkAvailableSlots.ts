@@ -214,7 +214,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
       return {
         success: true,
-        message_to_patient: `Great! I found available times for ${formatDate(args.requestedDate)}: ${timeOptions}. What time works best for you?`,
+        message_to_patient: `Great! I have these times available for ${formatDate(args.requestedDate)}: ${timeOptions}. Which time would you prefer?`,
         data: {
           requested_date: args.requestedDate,
           available_slots: formattedSlots,

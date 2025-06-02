@@ -75,7 +75,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       
       return {
         success: true,
-        message_to_patient: `Great! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${patient.bio?.date_of_birth || args.dateOfBirth}. Is this the correct patient?`,
+        message_to_patient: `Great! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${patient.bio?.date_of_birth || args.dateOfBirth}. What type of appointment would you like to schedule?`,
         data: {
           found_patients: [{
             id: patient.id,
