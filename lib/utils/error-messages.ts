@@ -156,6 +156,12 @@ export const ERROR_MESSAGES: Record<string, ErrorMessageTemplate> = {
     code: 'EXECUTION_ERROR',
     message: "I encountered an issue while processing your request. Please try again or contact the office for assistance.",
     category: 'technical'
+  },
+
+  INVALID_DATE_OF_BIRTH: {
+    code: 'INVALID_DATE_OF_BIRTH',
+    message: "I need your date of birth in a valid format. Could you tell me your date of birth again?",
+    category: 'validation'
   }
 };
 
@@ -190,31 +196,40 @@ function parseZodValidationError(error: Error, toolName?: string): string {
             
             // Check for specific field validation errors
             if (fieldName === 'phone') {
-              if (issue.code === 'too_small' || issue.message?.includes('at least')) {
+              if (issue.code === 'too_small' || issue.code === 'invalid_string') {
                 return 'MISSING_PHONE';
               }
-              return 'INVALID_PHONE';
             }
             
             if (fieldName === 'email') {
               if (issue.validation === 'email' || issue.code === 'invalid_string') {
-                return 'MISSING_EMAIL'; // Empty string fails email validation
+                return 'MISSING_EMAIL';
               }
-              return 'INVALID_EMAIL';
+            }
+            
+            if (fieldName === 'firstName') {
+              return 'MISSING_FIRST_NAME';
+            }
+            
+            if (fieldName === 'lastName') {
+              return 'MISSING_LAST_NAME';
             }
             
             if (fieldName === 'dateOfBirth') {
-              return 'INVALID_DATE';
+              return 'INVALID_DATE_OF_BIRTH';
             }
           }
         }
       }
+      
+      // Default validation error
+      return 'VALIDATION_ERROR';
     }
-  } catch (parseError) {
-    console.error('Error parsing Zod validation error:', parseError);
+    
+    return 'VALIDATION_ERROR';
+  } catch {
+    return 'VALIDATION_ERROR';
   }
-  
-  return 'VALIDATION_ERROR';
 }
 
 /**

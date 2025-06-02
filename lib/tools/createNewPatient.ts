@@ -84,7 +84,24 @@ IMPORTANT: Convert spoken email format to proper email syntax.
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: "Creates a new patient record in the practice's EHR system. Use this when a caller indicates they are a new patient.",
+  description: `Creates a new patient record in the practice's EHR system. 
+
+CRITICAL: ONLY call this tool when you have ALL required information from the patient conversation:
+- First name (spelled letter by letter)
+- Last name (spelled letter by letter) 
+- Date of birth
+- Phone number (10+ digits)
+- Email address (valid email format)
+
+DO NOT call this tool if ANY of the above information is missing. Instead, ask the patient for the missing information first.
+
+CONVERSATION FLOW:
+1. If missing name/DOB: Ask "Could you spell your first and last name letter by letter, then give me your date of birth?"
+2. If missing phone: Ask "I need your phone number to create your patient record. What's your phone number?"
+3. If missing email: Ask "Finally, I need your email address. What's your email address?"
+4. ONLY when you have ALL information: Call this tool
+
+Use this tool when a caller indicates they are a new patient AND you have collected all required information.`,
   schema: createNewPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
