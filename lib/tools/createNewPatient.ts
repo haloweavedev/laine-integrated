@@ -107,6 +107,25 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
     }
 
     try {
+      // Pre-validate required fields before API call
+      if (!args.phone || args.phone.length < 10) {
+        return {
+          success: false,
+          error_code: "MISSING_PHONE",
+          message_to_patient: "I need your phone number to create your patient record. What's your phone number?",
+          details: "Phone number is required and must be at least 10 digits"
+        };
+      }
+
+      if (!args.email || !args.email.includes('@')) {
+        return {
+          success: false,
+          error_code: "MISSING_EMAIL", 
+          message_to_patient: "I need your email address to create your patient record. What's your email address?",
+          details: "Valid email address is required"
+        };
+      }
+
       // Get the first active provider for new patient assignment
       const activeProvider = practice.savedProviders.find(sp => sp.isActive);
       if (!activeProvider) {
@@ -189,18 +208,37 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       console.error(`[createNewPatient] Error:`, error);
       
       let message = "I'm having trouble creating your patient record right now. Please contact the office directly to register.";
+      let errorCode = "PATIENT_CREATION_ERROR";
       
       if (error instanceof Error) {
-        if (error.message.includes("409") || error.message.includes("duplicate")) {
+        // Handle validation errors specifically
+        if (error.message.includes("400") || error.message.includes("validation")) {
+          errorCode = "VALIDATION_ERROR";
+          
+          // Parse common validation errors and provide specific guidance
+          if (error.message.includes("phone") || error.message.includes("too_small")) {
+            message = "I need your phone number to create your patient record. What's your phone number?";
+          } else if (error.message.includes("email") || error.message.includes("invalid_email")) {
+            message = "I need a valid email address to create your patient record. What's your email address?";
+          } else if (error.message.includes("date_of_birth")) {
+            message = "I need to verify your date of birth. Could you tell me your date of birth again?";
+          } else if (error.message.includes("first_name") || error.message.includes("last_name")) {
+            message = "I need to verify your name. Could you tell me your first and last name again?";
+          } else {
+            message = "I'm missing some required information to create your patient record. Let me collect that from you.";
+          }
+        } else if (error.message.includes("409") || error.message.includes("duplicate")) {
+          errorCode = "DUPLICATE_PATIENT";
           message = "It looks like you might already be in our system. Let me search for your existing record instead.";
         } else if (error.message.includes("401")) {
+          errorCode = "AUTH_ERROR";
           message = "There's an authentication issue with our system. Please contact the office to register.";
         }
       }
       
       return {
         success: false,
-        error_code: "PATIENT_CREATION_ERROR",
+        error_code: errorCode,
         message_to_patient: message,
         details: error instanceof Error ? error.message : "Unknown error"
       };

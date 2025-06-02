@@ -210,7 +210,11 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         };
       });
 
-      const timeOptions = formattedSlots.map(slot => slot.display_time).join(', ');
+      // Create a comprehensive list of times for TTS-friendly presentation
+      const timeList = formattedSlots.map(slot => slot.display_time);
+      const timeOptions = timeList.length > 1 
+        ? timeList.slice(0, -1).join(', ') + ', and ' + timeList[timeList.length - 1]
+        : timeList[0];
 
       return {
         success: true,
@@ -219,7 +223,8 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           requested_date: args.requestedDate,
           available_slots: formattedSlots,
           has_availability: true,
-          total_slots_found: availableSlots.length
+          total_slots_found: availableSlots.length,
+          formatted_times: timeList
         }
       };
 

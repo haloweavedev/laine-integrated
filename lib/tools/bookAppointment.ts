@@ -67,6 +67,26 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
     try {
       console.log(`[bookAppointment] Booking appointment for patient ${args.patientId} on ${args.requestedDate} at ${args.selectedTime}`);
 
+      // Validate patient ID before proceeding
+      if (!args.patientId || args.patientId === 'null' || args.patientId === 'undefined' || args.patientId === 'new_patient') {
+        return {
+          success: false,
+          error_code: "INVALID_PATIENT_ID",
+          message_to_patient: "I need to verify your patient information before booking. Let me help you with that first.",
+          details: `Invalid patient ID provided: ${args.patientId}`
+        };
+      }
+
+      // Validate that patient ID is numeric (NexHealth requirement)
+      if (isNaN(parseInt(args.patientId))) {
+        return {
+          success: false,
+          error_code: "INVALID_PATIENT_ID_FORMAT",
+          message_to_patient: "There's an issue with your patient record. Please contact the office to complete your booking.",
+          details: `Patient ID must be numeric, received: ${args.patientId}`
+        };
+      }
+
       // Validate selected time format
       const timePattern = /^(1[0-2]|[1-9]):([0-5][0-9])\s?(AM|PM)$/i;
       if (!timePattern.test(args.selectedTime.trim())) {
@@ -142,10 +162,33 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      // Check if booking was successful
      if (!bookingResponse || bookingResponse.error || !bookingResponse.data) {
        console.error(`[bookAppointment] Booking failed:`, bookingResponse);
+       
+       // Enhanced error handling for specific booking failures
+       let errorMessage = "I wasn't able to complete your booking. Please contact the office directly to schedule your appointment.";
+       let errorCode = "BOOKING_FAILED";
+       
+       if (bookingResponse?.error) {
+         const errorString = typeof bookingResponse.error === 'string' ? bookingResponse.error : JSON.stringify(bookingResponse.error);
+         
+         if (errorString.includes('patient') && errorString.includes('not found')) {
+           errorCode = "PATIENT_NOT_FOUND";
+           errorMessage = "I couldn't find your patient record in our system. Let me help you create a patient record first.";
+         } else if (errorString.includes('appointment_type')) {
+           errorCode = "INVALID_APPOINTMENT_TYPE";
+           errorMessage = "There's an issue with the appointment type. Let me help you select a different type of appointment.";
+         } else if (errorString.includes('provider')) {
+           errorCode = "PROVIDER_UNAVAILABLE";
+           errorMessage = "The provider is no longer available for this time. Let me show you other available times.";
+         } else if (errorString.includes('operatory')) {
+           errorCode = "ROOM_UNAVAILABLE";
+           errorMessage = "The treatment room is no longer available. Let me check for other available times.";
+         }
+       }
+       
        return {
          success: false,
-         error_code: "BOOKING_FAILED",
-         message_to_patient: "I wasn't able to complete your booking. Please contact the office directly to schedule your appointment.",
+         error_code: errorCode,
+         message_to_patient: errorMessage,
          details: bookingResponse?.error || "Unknown booking error"
        };
      }
