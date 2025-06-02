@@ -83,28 +83,29 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
         at => at.nexhealthAppointmentTypeId === args.appointmentTypeId
       );
 
-      // Prepare booking data
+      // Prepare booking data (matching working curl structure)
       const bookingData = {
-        location_id: parseInt(practice.nexhealthLocationId),
         patient_id: parseInt(args.patientId),
         provider_id: parseInt(provider.provider.nexhealthProviderId),
         appointment_type_id: parseInt(args.appointmentTypeId),
         operatory_id: parseInt(operatory.nexhealthOperatoryId),
         start_time: startTime,
-        end_time: endTime,
-        source: "laine_ai",
+        // Note: Removed end_time and location_id as they should be in URL params
         note: appointmentType ? `${appointmentType.name} - Scheduled via LAINE AI Assistant` : "Scheduled via LAINE AI Assistant"
       };
 
       console.log(`[bookAppointment] Booking data:`, JSON.stringify(bookingData, null, 2));
 
-      // Make the booking API call
+      // Make the booking API call with correct URL parameters and body structure
       const bookingResponse = await fetchNexhealthAPI(
         '/appointments',
         practice.nexhealthSubdomain,
-        {},
+        {
+          location_id: practice.nexhealthLocationId,
+          notify_patient: 'false'
+        },
         'POST',
-        { appointment: bookingData }
+        { appt: bookingData }  // Changed from 'appointment' to 'appt'
       );
 
       console.log(`[bookAppointment] Booking response:`, JSON.stringify(bookingResponse, null, 2));
@@ -137,7 +138,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
           appointment_date: args.requestedDate,
           appointment_time: args.selectedTime,
           appointment_type: appointmentTypeName,
-          provider_name: provider.provider.name || "Dr. " + provider.provider.lastName,
+          provider_name: provider.provider.firstName + " " + provider.provider.lastName || "Dr. " + provider.provider.lastName,
           location_name: practice.name,
           booking_source: "laine_ai"
         }
@@ -197,15 +198,15 @@ function parseSelectedTimeToNexHealthFormat(
     hours = 0;
   }
 
-  // Create start time in Central Time (NexHealth uses -06:00)
+  // Create start time in UTC format to match working curl
   const startDate = new Date(`${requestedDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`);
-  const startTime = `${requestedDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00-06:00`;
+  const startTime = `${requestedDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00Z`;
 
   // Calculate end time
   const endDate = new Date(startDate.getTime() + (durationMinutes * 60 * 1000));
   const endHours = endDate.getHours();
   const endMinutes = endDate.getMinutes();
-  const endTime = `${requestedDate}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00-06:00`;
+  const endTime = `${requestedDate}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00Z`;
 
   return { startTime, endTime };
 }
@@ -242,9 +243,8 @@ async function updateCallLogWithBooking(
       where: { vapiCallId },
       data: {
         callStatus: "APPOINTMENT_BOOKED",
-        nexhealthAppointmentId: appointmentId,
-        scheduledAppointmentDate: new Date(appointmentDate + 'T00:00:00'),
-        callResult: `Appointment booked for ${appointmentDate} at ${appointmentTime}`,
+        bookedAppointmentNexhealthId: appointmentId,
+        summary: `Appointment booked for ${appointmentDate} at ${appointmentTime}`,
         updatedAt: new Date()
       }
     });
