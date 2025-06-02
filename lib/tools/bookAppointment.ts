@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ToolDefinition, ToolResult } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
+import { DateTime } from "luxon";
 
 export const bookAppointmentSchema = z.object({
   selectedTime: z.string()
@@ -47,6 +48,15 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
     try {
       console.log(`[bookAppointment] Booking appointment for patient ${args.patientId} on ${args.requestedDate} at ${args.selectedTime}`);
 
+      // Validate selected time format
+      if (!validateSelectedTime(args.selectedTime)) {
+        return {
+          success: false,
+          error_code: "INVALID_TIME_FORMAT",
+          message_to_patient: `The time "${args.selectedTime}" is not in a valid format. Please choose a time like "8:00 AM" or "2:30 PM".`
+        };
+      }
+
       // Get practice configuration
       const activeProviders = practice.savedProviders.filter(sp => sp.isActive);
       const activeOperatories = practice.savedOperatories?.filter(so => so.isActive) || [];
@@ -74,7 +84,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       // Convert selected time to proper start_time format
       const { startTime } = parseSelectedTimeToNexHealthFormat(
         args.selectedTime,
-        args.requestedDate
+        args.requestedDate,
+        'America/Chicago' // Default practice timezone - TODO: add to practice model
       );
 
       // Get appointment type name for notes
@@ -172,32 +183,41 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 };
 
 /**
- * Convert patient's selected time to NexHealth API format
+ * Validate that the selected time is in the correct format
+ */
+function validateSelectedTime(selectedTime: string): boolean {
+  // Check if the time matches expected format (e.g., "8:00 AM", "12:30 PM")
+  const timePattern = /^(1[0-2]|[1-9]):([0-5][0-9])\s?(AM|PM)$/i;
+  return timePattern.test(selectedTime.trim());
+}
+
+/**
+ * Convert patient's selected time to NexHealth API format with proper timezone handling
  */
 function parseSelectedTimeToNexHealthFormat(
   selectedTime: string,
-  requestedDate: string
+  requestedDate: string,
+  practiceTimezone: string = 'America/Chicago'
 ): { startTime: string } {
-  // Parse the selected time (e.g., "8:00 AM", "2:30 PM")
-  const timeParts = selectedTime.match(/(\d{1,2}):?(\d{0,2})\s*(AM|PM)/i);
-  
-  if (!timeParts) {
-    throw new Error(`Invalid time format: ${selectedTime}`);
+  // Parse the selected time and date in the practice's timezone
+  const localDateTime = DateTime.fromFormat(
+    `${requestedDate} ${selectedTime}`,
+    'yyyy-MM-dd h:mm a',
+    { zone: practiceTimezone }
+  );
+
+  if (!localDateTime.isValid) {
+    throw new Error(`Invalid date/time format: ${requestedDate} ${selectedTime}. Error: ${localDateTime.invalidReason}`);
   }
 
-  let hours = parseInt(timeParts[1]);
-  const minutes = timeParts[2] ? parseInt(timeParts[2]) : 0;
-  const ampm = timeParts[3].toUpperCase();
+  // Convert to UTC and format for NexHealth API
+  const startTime = localDateTime.toUTC().toISO({ suppressMilliseconds: true });
 
-  // Convert to 24-hour format
-  if (ampm === 'PM' && hours !== 12) {
-    hours += 12;
-  } else if (ampm === 'AM' && hours === 12) {
-    hours = 0;
+  if (!startTime) {
+    throw new Error(`Failed to convert to UTC: ${requestedDate} ${selectedTime}`);
   }
 
-  // Create start time in UTC format to match working curl
-  const startTime = `${requestedDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00Z`;
+  console.log(`[timezone] Converting ${selectedTime} on ${requestedDate} in ${practiceTimezone} to UTC: ${startTime}`);
 
   return { startTime };
 }
