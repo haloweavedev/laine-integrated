@@ -4,29 +4,18 @@ import { ToolDefinition, ToolResult } from "./types";
 export const findAppointmentTypeSchema = z.object({
   userRequest: z.string()
     .min(1)
-    .describe(`
-Extract what type of appointment the patient is requesting.
+    .describe(`Extract appointment type patient is requesting.
 
-COMMON REQUESTS AND VARIATIONS:
-- Cleaning: "cleaning", "teeth cleaning", "dental cleaning", "hygiene", "prophy", "prophylaxis"
-- Checkup: "checkup", "check up", "exam", "examination", "routine visit"
-- Both: "cleaning and checkup", "regular appointment", "6 month visit"
-- Emergency: "tooth pain", "broken tooth", "emergency", "urgent"
+Common variations:
+- Cleaning: "cleaning", "teeth cleaning", "hygiene", "prophy"
+- Checkup: "checkup", "exam", "routine visit"
+- Emergency: "tooth pain", "broken tooth", "urgent"
 - Filling: "cavity", "filling", "tooth repair"
-- Crown: "crown", "cap", "tooth cap"
-- Root Canal: "root canal", "tooth infection", "nerve treatment"
-- Extraction: "pull tooth", "extraction", "remove tooth"
-- Consultation: "consult", "consultation", "second opinion", "new patient exam"
+- Crown: "crown", "cap"
+- Root Canal: "root canal", "nerve treatment"
+- Extraction: "pull tooth", "remove tooth"
 
-EXAMPLES:
-- "I need a cleaning" → "cleaning"
-- "Just my regular six month checkup and cleaning" → "cleaning and checkup"
-- "I have a cavity that needs to be filled" → "filling"
-- "My tooth hurts" → "tooth pain"
-- "general cleanup" → "cleaning"
-
-IMPORTANT: Extract the core service request, not the exact words used.
-    `)
+Examples: "I need a cleaning" → "cleaning", "My tooth hurts" → "tooth pain"`)
 });
 
 const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {

@@ -6,26 +6,11 @@ import { DateTime } from "luxon";
 export const bookAppointmentSchema = z.object({
   selectedTime: z.string()
     .min(1)
-    .describe(`
-Extract the time the patient selected from the available options.
+    .describe(`Extract time patient selected from available options.
 
-IMPORTANT: The time should match one of the times that were presented to the patient.
+Examples: "I'll take 8 AM" → "8:00 AM", "The 2:30 slot" → "2:30 PM", "10 o'clock" → "10:00 AM"
 
-EXAMPLES:
-- "I'll take 8 AM" → "8:00 AM"
-- "The 2:30 slot" → "2:30 PM"
-- "10 o'clock" → "10:00 AM"
-- "Let's do the first one" → (use the first time from the list presented)
-- "The last option" → (use the last time from the list presented)
-- "Two thirty" → "2:30 PM"
-- "Eight in the morning" → "8:00 AM"
-- "3 in the afternoon" → "3:00 PM"
-
-RULES:
-- Always include :00 or :30 for minutes
-- Always include AM or PM
-- Match the format that was presented to the patient (e.g., "8:00 AM", "2:30 PM")
-    `),
+Rules: Include :00/:30 for minutes, include AM/PM, match format presented to patient`),
   patientId: z.string()
     .min(1)
     .describe("The patient ID from the find_patient_in_ehr or create_new_patient tool call"),

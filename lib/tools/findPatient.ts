@@ -17,50 +17,22 @@ function getCurrentDateContext(): string {
 export const findPatientSchema = z.object({
   firstName: z.string()
     .min(1)
-    .describe(`
-Extract the patient's first name from their response.
+    .describe(`Extract patient's first name. If spelled letter by letter (B-O-B), convert to proper name (Bob).
 
-IMPORTANT: If the patient spells their name letter by letter (e.g., "B-O-B"), convert it to the proper name (e.g., "Bob").
-
-EXAMPLES:
-- "My name is Bob Ross" → firstName: "Bob"
-- "First name B-O-B" → firstName: "Bob"
-- "It's Robert but I go by Bob" → firstName: "Robert" (use legal first name)
-- "Sarah with an H" → firstName: "Sarah"
-    `),
+Examples: "My name is Bob Ross" → "Bob", "First name B-O-B" → "Bob"`),
   lastName: z.string()
     .min(1)
-    .describe(`
-Extract the patient's last name from their response.
+    .describe(`Extract patient's last name. If spelled letter by letter (R-O-S-S), convert to proper name (Ross).
 
-IMPORTANT: If the patient spells their name letter by letter (e.g., "R-O-S-S"), convert it to the proper name (e.g., "Ross").
-
-EXAMPLES:
-- "Bob Ross" → lastName: "Ross"
-- "last name R-O-S-S" → lastName: "Ross"
-- "Smith, S-M-I-T-H" → lastName: "Smith"
-- "McDonald with a capital D" → lastName: "McDonald"
-    `),
+Examples: "Bob Ross" → "Ross", "last name R-O-S-S" → "Ross"`),
   dateOfBirth: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe(`
-Convert the patient's date of birth to YYYY-MM-DD format.
+    .describe(`Convert date of birth to YYYY-MM-DD format.
 
 ${getCurrentDateContext()}
 
-EXAMPLES:
-- "October 30, 1998" → "1998-10-30"
-- "October thirtieth nineteen ninety-eight" → "1998-10-30"
-- "10/30/98" → "1998-10-30"
-- "10-30-1998" → "1998-10-30"
-- "October 30th, 98" → "1998-10-30"
-- "I was born in 1998, October 30" → "1998-10-30"
-
-IMPORTANT:
-- For 2-digit years, assume 1900s for 50-99, and 2000s for 00-49
-- Always return in YYYY-MM-DD format
-- Handle various date formats and spoken variations
-    `)
+Examples: "October 30, 1998" → "1998-10-30", "10/30/98" → "1998-10-30"
+For 2-digit years: 50-99 → 1900s, 00-49 → 2000s`)
 });
 
 const findPatientTool: ToolDefinition<typeof findPatientSchema> = {

@@ -16,99 +16,60 @@ function getCurrentDateContext(): string {
 export const createNewPatientSchema = z.object({
   firstName: z.string()
     .min(1)
-    .describe(`
-Extract the patient's first name from their response.
+    .describe(`Extract patient's first name. If spelled letter by letter (B-O-B), convert to proper name (Bob).
 
-IMPORTANT: If the patient spells their name letter by letter (e.g., "B-O-B"), convert it to the proper name (e.g., "Bob").
-
-EXAMPLES:
-- "My first name is Sarah" → "Sarah"
-- "V-A-P-I" → "Vapi"
-- "It's Michael, M-I-C-H-A-E-L" → "Michael"
-    `),
+Examples: "My name is Sarah" → "Sarah", "V-A-P-I" → "Vapi"`),
   lastName: z.string()
     .min(1)
-    .describe(`
-Extract the patient's last name from their response.
+    .describe(`Extract patient's last name. If spelled letter by letter (T-E-S-T), convert to proper name (Test).
 
-IMPORTANT: If the patient spells their name letter by letter (e.g., "T-E-S-T"), convert it to the proper name (e.g., "Test").
-
-EXAMPLES:
-- "Last name is Johnson" → "Johnson"
-- "Smith, S-M-I-T-H" → "Smith"
-- "It's Rodriguez with a Z" → "Rodriguez"
-    `),
+Examples: "Last name is Johnson" → "Johnson", "Smith, S-M-I-T-H" → "Smith"`),
   dateOfBirth: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe(`
-Convert the patient's date of birth to YYYY-MM-DD format.
+    .describe(`Convert date of birth to YYYY-MM-DD format.
 
 ${getCurrentDateContext()}
 
-EXAMPLES:
-- "January 20, 1990" → "1990-01-20"
-- "January twentieth nineteen ninety" → "1990-01-20"
-- "1/20/90" → "1990-01-20"
-- "01-20-1990" → "1990-01-20"
-
-IMPORTANT:
-- For 2-digit years, assume 1900s for 50-99, and 2000s for 00-49
-- Always return in YYYY-MM-DD format
-    `),
+Examples: "January 20, 1990" → "1990-01-20", "1/20/90" → "1990-01-20"
+For 2-digit years: 50-99 → 1900s, 00-49 → 2000s`),
   phone: z.string()
     .min(10)
-    .describe(`
-Extract and format the patient's phone number as just digits.
+    .describe(`Extract phone number as digits only.
 
-EXAMPLES:
-- "313-555-1200" → "3135551200"
-- "three one three, five five five, one two zero zero" → "3135551200"
-- "(313) 555-1200" → "3135551200"
-- "My number is 313 555 1200" → "3135551200"
-
-IMPORTANT: Return only digits, no formatting characters.
-    `),
+Examples: "313-555-1200" → "3135551200", "(313) 555-1200" → "3135551200"`),
   email: z.string()
     .email()
-    .describe(`
-Extract the patient's email address.
+    .describe(`Extract email address. Convert spoken format to proper syntax.
 
-EXAMPLES:
-- "My email is john at gmail dot com" → "john@gmail.com"
-- "sarah.smith@example.com" → "sarah.smith@example.com"
-- "It's mike underscore jones at yahoo dot com" → "mike_jones@yahoo.com"
-
-IMPORTANT: Convert spoken email format to proper email syntax.
-    `)
+Examples: "john at gmail dot com" → "john@gmail.com"`)
 });
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: `Creates a new patient record in the practice's EHR system. 
+  description: `Creates new patient record in EHR system.
 
-CRITICAL: ONLY call this tool when you have ALL required information from the patient conversation:
-- First name (spelled letter by letter)
-- Last name (spelled letter by letter) 
+🚨 CRITICAL: ONLY call when you have ALL required information:
+- First/last name (spelled letter by letter)
 - Date of birth
-- Phone number (10+ digits)
-- Email address (valid email format)
+- Phone number (10+ digits) 
+- Valid email address
 
-DO NOT call this tool if ANY of the above information is missing. Instead, ask the patient for the missing information first.
+DO NOT call if ANY field is missing. Ask for missing info first.
 
-IMPORTANT: Empty strings ("") count as MISSING information. Do not call this tool with empty strings for any field.
+IMPORTANT: Empty strings ("") = MISSING. Do not call with empty strings.
 
-CONVERSATION FLOW:
-1. If missing name/DOB: Ask "Could you spell your first and last name letter by letter, then give me your date of birth?"
-2. If missing phone: Ask "I need your phone number to create your patient record. What's your phone number?"
-3. If missing email: Ask "Finally, I need your email address. What's your email address?"
-4. ONLY when you have ALL information: Call this tool
+FLOW:
+1. Missing name/DOB → Ask "Could you spell your first and last name letter by letter, then give me your date of birth?"
+2. Missing phone → Ask "I need your phone number to create your patient record. What's your phone number?"
+3. Missing email → Ask "Finally, I need your email address. What's your email address?"
+4. ONLY when ALL info collected → Call this tool
 
-Examples of WHEN NOT TO CALL:
-- phone: "" (empty string) → Ask for phone first
-- email: "" (empty string) → Ask for email first  
-- firstName: "" (empty string) → Ask for name first
+Examples WHEN NOT TO CALL:
+- phone: "" → Ask for phone first
+- email: "" → Ask for email first
+- firstName: "" → Ask for name first
 
-Use this tool when a caller indicates they are a new patient AND you have collected all required information.`,
+Use only when caller is new patient AND you have ALL required information.`,
   schema: createNewPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {

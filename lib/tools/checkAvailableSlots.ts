@@ -5,58 +5,34 @@ import { fetchNexhealthAPI } from "@/lib/nexhealth";
 // Generate current date dynamically for LLM context
 function getCurrentDate(): string {
   const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-based
-  const dd = String(today.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-// Get current day name for better LLM context
-function getCurrentDayInfo(): string {
-  const today = new Date();
-  const dayName = today.toLocaleDateString('en-US', { weekday: 'long' });
-  const monthName = today.toLocaleDateString('en-US', { month: 'long' });
-  return `Today is ${dayName}, ${monthName} ${today.getDate()}, ${today.getFullYear()}`;
+  return today.toISOString().split('T')[0]; // Returns YYYY-MM-DD
 }
 
 export const checkAvailableSlotsSchema = z.object({
   requestedDate: z.string()
     .min(1)
     .refine((date) => {
-      // Simple validation to ensure YYYY-MM-DD format
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(date)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return false;
       }
       // Validate it's a real date
       const parsedDate = new Date(date);
       return !isNaN(parsedDate.getTime()) && date === parsedDate.toISOString().split('T')[0];
     }, "Date must be in YYYY-MM-DD format and be a valid date")
-    .describe(`
-Convert the patient's natural language date request to YYYY-MM-DD format.
+    .describe(`Convert patient's date request to YYYY-MM-DD format.
 
-CURRENT DATE CONTEXT:
-- ${getCurrentDayInfo()}
-- Current date: ${getCurrentDate()}
+Current date: ${getCurrentDate()}
 
-EXAMPLES OF CONVERSIONS:
-- "December twenty third" → "2025-12-23"
-- "December 23rd" → "2025-12-23" 
-- "next Friday" → calculate the next Friday from ${getCurrentDate()}
+Examples:
+- "December 23rd" → "2025-12-23"
+- "next Friday" → calculate next Friday from ${getCurrentDate()}
 - "tomorrow" → calculate tomorrow from ${getCurrentDate()}
-- "Monday" → calculate the next Monday from ${getCurrentDate()}
-- "next week" → calculate a date next week from ${getCurrentDate()}
-- "Christmas" → "2025-12-25" (if current year) or "2025-12-25" (if Christmas has passed)
 
-IMPORTANT INSTRUCTIONS:
-1. Always return dates in YYYY-MM-DD format
-2. If year is not specified, assume the next occurrence of that date
-3. If the specified date has already passed this year, use next year
-4. For relative dates like "tomorrow", "next Friday", calculate from current date: ${getCurrentDate()}
-5. If the date is ambiguous or unclear, ask the patient for clarification
-
-Current date for calculations: ${getCurrentDate()}
-    `),
+Rules:
+1. Return YYYY-MM-DD format
+2. If no year specified, use next occurrence
+3. For relative dates, calculate from ${getCurrentDate()}
+4. If ambiguous, ask for clarification`),
   appointmentTypeId: z.string().min(1).describe("The appointment type ID from the previous tool call"),
   days: z.number().min(1).max(7).default(1).describe("Number of days to check (default 1)")
 });
