@@ -162,6 +162,18 @@ export const ERROR_MESSAGES: Record<string, ErrorMessageTemplate> = {
     code: 'INVALID_DATE_OF_BIRTH',
     message: "I need your date of birth in a valid format. Could you tell me your date of birth again?",
     category: 'validation'
+  },
+
+  MISSING_FIRST_NAME: {
+    code: 'MISSING_FIRST_NAME',
+    message: "I need your first name to create your patient record. Could you tell me your first name?",
+    category: 'validation'
+  },
+
+  MISSING_LAST_NAME: {
+    code: 'MISSING_LAST_NAME',
+    message: "I need your last name to create your patient record. Could you tell me your last name?",
+    category: 'validation'
   }
 };
 

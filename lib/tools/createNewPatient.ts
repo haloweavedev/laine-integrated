@@ -95,11 +95,18 @@ CRITICAL: ONLY call this tool when you have ALL required information from the pa
 
 DO NOT call this tool if ANY of the above information is missing. Instead, ask the patient for the missing information first.
 
+IMPORTANT: Empty strings ("") count as MISSING information. Do not call this tool with empty strings for any field.
+
 CONVERSATION FLOW:
 1. If missing name/DOB: Ask "Could you spell your first and last name letter by letter, then give me your date of birth?"
 2. If missing phone: Ask "I need your phone number to create your patient record. What's your phone number?"
 3. If missing email: Ask "Finally, I need your email address. What's your email address?"
 4. ONLY when you have ALL information: Call this tool
+
+Examples of WHEN NOT TO CALL:
+- phone: "" (empty string) → Ask for phone first
+- email: "" (empty string) → Ask for email first  
+- firstName: "" (empty string) → Ask for name first
 
 Use this tool when a caller indicates they are a new patient AND you have collected all required information.`,
   schema: createNewPatientSchema,
@@ -241,9 +248,9 @@ Use this tool when a caller indicates they are a new patient AND you have collec
   },
 
   messages: {
-    start: "Let me create your patient record...",
-    success: "Perfect! I've set up your patient record.",
-    fail: "I'm having trouble creating your record. Let me try another way."
+    start: "Let me gather the information needed to create your patient record...",
+    success: "Perfect! I've created your patient record and you're all set.",
+    fail: "I need some additional information to complete your registration."
   }
 };
 

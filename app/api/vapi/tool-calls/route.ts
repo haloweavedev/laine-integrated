@@ -296,6 +296,33 @@ async function executeToolSafely(
     
     console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
     
+    // Pre-validation for create_new_patient to prevent premature calls
+    if (tool.name === 'create_new_patient') {
+      const preValidationResult = validateCreateNewPatientArgs(parsedArgs);
+      if (!preValidationResult.isValid) {
+        console.log(`[${tool.name}] Pre-validation failed:`, preValidationResult.reason);
+        
+        const preValidationError = {
+          success: false,
+          error_code: preValidationResult.errorCode,
+          message_to_patient: preValidationResult.message,
+          details: preValidationResult.reason
+        };
+        
+        // Log the pre-validation failure
+        await logToolExecution(
+          context,
+          tool.name,
+          parsedArgs,
+          preValidationError,
+          false,
+          preValidationResult.reason
+        );
+        
+        return preValidationError;
+      }
+    }
+    
     // Validate arguments with tool schema
     const validatedArgs = tool.schema.parse(parsedArgs);
     
@@ -339,6 +366,115 @@ async function executeToolSafely(
     );
     
     return errorResult;
+  }
+}
+
+/**
+ * Pre-validation for create_new_patient to prevent premature tool calls
+ */
+function validateCreateNewPatientArgs(args: any): { // eslint-disable-line @typescript-eslint/no-explicit-any
+  isValid: boolean;
+  errorCode?: string;
+  message?: string;
+  reason?: string;
+} {
+  // Check if any required field is missing or empty
+  const requiredFields = ['firstName', 'lastName', 'dateOfBirth', 'phone', 'email'];
+  const missingFields = [];
+  
+  for (const field of requiredFields) {
+    if (!args[field] || typeof args[field] !== 'string' || args[field].trim().length === 0) {
+      missingFields.push(field);
+    }
+  }
+  
+  // If multiple fields are missing, provide comprehensive guidance
+  if (missingFields.length > 1) {
+    const missingFieldsStr = missingFields.join(', ');
+    let message = "";
+    
+    if (missingFields.includes('firstName') || missingFields.includes('lastName') || missingFields.includes('dateOfBirth')) {
+      message = "I need to collect some information to create your patient record. Could you spell your first and last name letter by letter, then give me your date of birth?";
+    } else if (missingFields.includes('phone') && missingFields.includes('email')) {
+      message = "I still need your phone number and email address to finish creating your patient record. What's your phone number?";
+    } else {
+      message = getMissingFieldMessage(missingFields[0]);
+    }
+    
+    return {
+      isValid: false,
+      errorCode: getMissingFieldErrorCode(missingFields[0]),
+      message,
+      reason: `Multiple missing fields: ${missingFieldsStr}`
+    };
+  }
+  
+  // Single field missing
+  if (missingFields.length === 1) {
+    const field = missingFields[0];
+    return {
+      isValid: false,
+      errorCode: getMissingFieldErrorCode(field),
+      message: getMissingFieldMessage(field),
+      reason: `Missing or empty ${field}: "${args[field]}"`
+    };
+  }
+  
+  // Additional validation for phone (minimum 10 digits)
+  const phoneDigits = args.phone.replace(/\D/g, '');
+  if (phoneDigits.length < 10) {
+    return {
+      isValid: false,
+      errorCode: 'MISSING_PHONE',
+      message: "I need your phone number to create your patient record. What's your phone number?",
+      reason: `Phone number too short: "${args.phone}" (${phoneDigits.length} digits)`
+    };
+  }
+  
+  // Additional validation for email (basic @ check)
+  if (!args.email.includes('@') || !args.email.includes('.')) {
+    return {
+      isValid: false,
+      errorCode: 'MISSING_EMAIL',
+      message: "I need your email address to create your patient record. What's your email address?",
+      reason: `Invalid email format: "${args.email}"`
+    };
+  }
+  
+  return { isValid: true };
+}
+
+/**
+ * Get error code for missing field
+ */
+function getMissingFieldErrorCode(field: string): string {
+  switch (field) {
+    case 'firstName': return 'MISSING_FIRST_NAME';
+    case 'lastName': return 'MISSING_LAST_NAME';
+    case 'dateOfBirth': return 'INVALID_DATE_OF_BIRTH';
+    case 'phone': return 'MISSING_PHONE';
+    case 'email': return 'MISSING_EMAIL';
+    default: return 'VALIDATION_ERROR';
+  }
+}
+
+/**
+ * Get error message for missing field
+ */
+function getMissingFieldMessage(field: string): string {
+  switch (field) {
+    case 'firstName': 
+      return "I need your first name to create your patient record. Could you tell me your first name?";
+    case 'lastName': 
+      return "I need your last name to create your patient record. Could you tell me your last name?";
+    case 'dateOfBirth': 
+      return "I need your date of birth to create your patient record. Could you tell me your date of birth?";
+    case 'phone': 
+      return "I need your phone number to create your patient record. What's your phone number?";
+    case 'email': 
+      return "I need your email address to create your patient record. What's your email address?";
+    default: 
+      return "I need some additional information to complete your registration.";
   }
 }
 
