@@ -72,10 +72,9 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       const operatory = activeOperatories[0];
 
       // Convert selected time to proper start_time format
-      const { startTime, endTime } = parseSelectedTimeToNexHealthFormat(
+      const { startTime } = parseSelectedTimeToNexHealthFormat(
         args.selectedTime,
-        args.requestedDate,
-        args.durationMinutes
+        args.requestedDate
       );
 
       // Get appointment type name for notes
@@ -177,9 +176,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
  */
 function parseSelectedTimeToNexHealthFormat(
   selectedTime: string,
-  requestedDate: string,
-  durationMinutes: number
-): { startTime: string; endTime: string } {
+  requestedDate: string
+): { startTime: string } {
   // Parse the selected time (e.g., "8:00 AM", "2:30 PM")
   const timeParts = selectedTime.match(/(\d{1,2}):?(\d{0,2})\s*(AM|PM)/i);
   
@@ -199,16 +197,9 @@ function parseSelectedTimeToNexHealthFormat(
   }
 
   // Create start time in UTC format to match working curl
-  const startDate = new Date(`${requestedDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`);
   const startTime = `${requestedDate}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00Z`;
 
-  // Calculate end time
-  const endDate = new Date(startDate.getTime() + (durationMinutes * 60 * 1000));
-  const endHours = endDate.getHours();
-  const endMinutes = endDate.getMinutes();
-  const endTime = `${requestedDate}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00Z`;
-
-  return { startTime, endTime };
+  return { startTime };
 }
 
 /**
