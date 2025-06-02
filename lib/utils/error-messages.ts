@@ -75,10 +75,35 @@ export const ERROR_MESSAGES: Record<string, ErrorMessageTemplate> = {
     category: 'technical'
   },
 
-  // Validation Errors
+  // Validation Errors - General
   VALIDATION_ERROR: {
     code: 'VALIDATION_ERROR',
     message: "I received some unexpected information. Could you try rephrasing that?",
+    category: 'validation'
+  },
+
+  // Validation Errors - Specific to New Patient Creation
+  MISSING_PHONE: {
+    code: 'MISSING_PHONE',
+    message: "I need your phone number to create your patient record. What's your phone number?",
+    category: 'validation'
+  },
+
+  MISSING_EMAIL: {
+    code: 'MISSING_EMAIL',
+    message: "I need your email address to create your patient record. What's your email address?",
+    category: 'validation'
+  },
+
+  INVALID_PHONE: {
+    code: 'INVALID_PHONE',
+    message: "I didn't get a valid phone number. Could you tell me your phone number again? For example, 'my number is three one three, five five five, one two three four'.",
+    category: 'validation'
+  },
+
+  INVALID_EMAIL: {
+    code: 'INVALID_EMAIL',
+    message: "I need a valid email address. Could you tell me your email again? For example, 'my email is john at gmail dot com'.",
     category: 'validation'
   },
 
@@ -149,11 +174,60 @@ export function getPatientMessage(code: string): string {
 }
 
 /**
+ * Parse Zod validation errors to determine specific error codes
+ */
+function parseZodValidationError(error: Error, toolName?: string): string {
+  try {
+    // Check if this is a ZodError with detailed issues
+    if (error.name === 'ZodError' && 'issues' in error) {
+      const zodError = error as { issues: Array<{ path: string[]; code: string; message?: string; validation?: string }> };
+      
+      // Special handling for create_new_patient tool
+      if (toolName === 'create_new_patient' && zodError.issues) {
+        for (const issue of zodError.issues) {
+          if (issue.path && issue.path.length > 0) {
+            const fieldName = issue.path[0];
+            
+            // Check for specific field validation errors
+            if (fieldName === 'phone') {
+              if (issue.code === 'too_small' || issue.message?.includes('at least')) {
+                return 'MISSING_PHONE';
+              }
+              return 'INVALID_PHONE';
+            }
+            
+            if (fieldName === 'email') {
+              if (issue.validation === 'email' || issue.code === 'invalid_string') {
+                return 'MISSING_EMAIL'; // Empty string fails email validation
+              }
+              return 'INVALID_EMAIL';
+            }
+            
+            if (fieldName === 'dateOfBirth') {
+              return 'INVALID_DATE';
+            }
+          }
+        }
+      }
+    }
+  } catch (parseError) {
+    console.error('Error parsing Zod validation error:', parseError);
+  }
+  
+  return 'VALIDATION_ERROR';
+}
+
+/**
  * Determine error code from an error object
  */
-export function getErrorCode(error: unknown): string {
+export function getErrorCode(error: unknown, toolName?: string): string {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
+    
+    // Handle Zod validation errors with specific parsing
+    if (error.name === 'ZodError' || message.includes('validation')) {
+      return parseZodValidationError(error, toolName);
+    }
     
     // Authentication & Permission
     if (message.includes('401') || message.includes('unauthorized')) {
@@ -169,11 +243,6 @@ export function getErrorCode(error: unknown): string {
         return 'NEXHEALTH_RATE_LIMIT';
       }
       return 'NEXHEALTH_API_ERROR';
-    }
-    
-    // Validation
-    if (error.name === 'ZodError' || message.includes('validation')) {
-      return 'VALIDATION_ERROR';
     }
     
     // Not found
@@ -193,8 +262,8 @@ export function getErrorCode(error: unknown): string {
 /**
  * Helper to get both error code and patient message from an error
  */
-export function processError(error: unknown): { code: string; message: string } {
-  const code = getErrorCode(error);
+export function processError(error: unknown, toolName?: string): { code: string; message: string } {
+  const code = getErrorCode(error, toolName);
   const message = getPatientMessage(code);
   return { code, message };
 } 

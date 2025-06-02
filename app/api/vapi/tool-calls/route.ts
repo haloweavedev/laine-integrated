@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToolByName } from "@/lib/tools";
 import { prisma } from "@/lib/prisma";
 import { ToolExecutionContext, ToolDefinition } from "@/lib/tools/types";
-import { getErrorCode, getPatientMessage } from "@/lib/tools/error-messages";
+import { getErrorCode, getPatientMessage } from "@/lib/utils/error-messages";
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -323,8 +323,8 @@ async function executeToolSafely(
     
     const errorResult = {
       success: false,
-      error_code: getErrorCode(error),
-      message_to_patient: getPatientMessage(getErrorCode(error)),
+      error_code: getErrorCode(error, tool.name),
+      message_to_patient: getPatientMessage(getErrorCode(error, tool.name)),
       details: error instanceof Error ? error.message : "Unknown error"
     };
     

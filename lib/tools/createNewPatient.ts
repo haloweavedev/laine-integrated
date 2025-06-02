@@ -14,77 +14,43 @@ function getCurrentDateContext(): string {
 }
 
 export const createNewPatientSchema = z.object({
-  firstName: z.string()
+  patientInfo: z.string()
     .min(1)
     .describe(`
-Extract the patient's first name from their response.
+IMPORTANT: This tool handles NEW PATIENT REGISTRATION through natural conversation flow.
 
-IMPORTANT: If the patient spells their name letter by letter (e.g., "B-O-B"), convert it to the proper name (e.g., "Bob").
+CONVERSATION FLOW - STEP BY STEP:
+1. If missing basic info (name/DOB), ask: "Let's register you as a new patient. Can you please spell your first and last name letter by letter, then give me your date of birth?"
 
-EXAMPLES:
-- "My first name is Sarah" → "Sarah"
-- "V-A-P-I" → "Vapi"
-- "It's Michael, M-I-C-H-A-E-L" → "Michael"
-    `),
-  lastName: z.string()
-    .min(1)
-    .describe(`
-Extract the patient's last name from their response.
+2. If missing phone, ask: "I need your phone number to create your patient record. What's your phone number?"
 
-IMPORTANT: If the patient spells their name letter by letter (e.g., "T-E-S-T"), convert it to the proper name (e.g., "Test").
+3. If missing email, ask: "Finally, I need your email address. What's your email address?"
 
-EXAMPLES:
-- "Last name is Johnson" → "Johnson"
-- "Smith, S-M-I-T-H" → "Smith"
-- "It's Rodriguez with a Z" → "Rodriguez"
-    `),
-  dateOfBirth: z.string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe(`
-Convert the patient's date of birth to YYYY-MM-DD format.
+4. Once you have ALL required information, extract and process it.
 
-${getCurrentDateContext()}
+EXTRACT THE FOLLOWING from the conversation:
+- First Name: Convert spelled letters (J-O-H-N → John)
+- Last Name: Convert spelled letters (S-M-I-T-H → Smith)  
+- Date of Birth: Convert to YYYY-MM-DD format using current context: ${getCurrentDateContext()}
+- Phone Number: Extract digits only (e.g., "5553331245")
+- Email: Convert spoken format (john at gmail dot com → john@gmail.com)
 
 EXAMPLES:
-- "January 20, 1990" → "1990-01-20"
-- "January twentieth nineteen ninety" → "1990-01-20"
-- "1/20/90" → "1990-01-20"
-- "01-20-1990" → "1990-01-20"
+User: "My name is John J-O-H-N Smith S-M-I-T-H, born January 15th 1990, phone is 555-333-1245, email john at gmail dot com"
+Extract: firstName="John", lastName="Smith", dateOfBirth="1990-01-15", phone="5553331245", email="john@gmail.com"
 
-IMPORTANT:
-- For 2-digit years, assume 1900s for 50-99, and 2000s for 00-49
-- Always return in YYYY-MM-DD format
-    `),
-  phone: z.string()
-    .min(10)
-    .describe(`
-Extract and format the patient's phone number as just digits.
+VALIDATION RULES:
+- If ANY required field is missing or unclear, ask for that specific information
+- Don't proceed with patient creation until you have ALL fields
+- Guide the conversation naturally to collect missing data
 
-EXAMPLES:
-- "313-555-1200" → "3135551200"
-- "three one three, five five five, one two zero zero" → "3135551200"
-- "(313) 555-1200" → "3135551200"
-- "My number is 313 555 1200" → "3135551200"
-
-IMPORTANT: Return only digits, no formatting characters.
-    `),
-  email: z.string()
-    .email()
-    .describe(`
-Extract the patient's email address.
-
-EXAMPLES:
-- "My email is john at gmail dot com" → "john@gmail.com"
-- "sarah.smith@example.com" → "sarah.smith@example.com"
-- "It's mike underscore jones at yahoo dot com" → "mike_jones@yahoo.com"
-
-IMPORTANT: Convert spoken email format to proper email syntax.
+IMPORTANT: Only proceed with patient creation when you have complete, clear information for all fields.
     `)
 });
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: "Creates a new patient record in the practice's EHR system. Use this when a caller indicates they are a new patient.",
+  description: "Handles new patient registration through natural conversation flow. Collects required information step by step and creates the patient record when complete.",
   schema: createNewPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -107,22 +73,20 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
     }
 
     try {
-      // Pre-validate required fields before API call
-      if (!args.phone || args.phone.length < 10) {
+      // Use LLM to extract patient information from natural conversation
+      const extractedInfo = await extractPatientInfoFromConversation(args.patientInfo);
+      
+      // Check if we have all required information
+      const missingFields = validateRequiredFields(extractedInfo);
+      if (missingFields.length > 0) {
         return {
           success: false,
-          error_code: "MISSING_PHONE",
-          message_to_patient: "I need your phone number to create your patient record. What's your phone number?",
-          details: "Phone number is required and must be at least 10 digits"
-        };
-      }
-
-      if (!args.email || !args.email.includes('@')) {
-        return {
-          success: false,
-          error_code: "MISSING_EMAIL", 
-          message_to_patient: "I need your email address to create your patient record. What's your email address?",
-          details: "Valid email address is required"
+          error_code: "MISSING_INFORMATION",
+          message_to_patient: getMissingFieldsMessage(missingFields),
+          data: {
+            missing_fields: missingFields,
+            extracted_so_far: extractedInfo
+          }
         };
       }
 
@@ -136,27 +100,25 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         };
       }
 
-      // Format phone for display
-      const formattedPhone = args.phone.replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3');
-      
-      // Prepare new patient data matching NexHealth API structure
+      // Prepare new patient data in exact NexHealth API format
       const newPatientData = {
         provider: { 
           provider_id: parseInt(activeProvider.provider.nexhealthProviderId) 
         },
         patient: {
-          first_name: args.firstName,
-          last_name: args.lastName,
-          email: args.email,
+          first_name: extractedInfo.firstName,
+          last_name: extractedInfo.lastName,
+          email: extractedInfo.email,
           bio: {
-            date_of_birth: args.dateOfBirth,
-            phone_number: args.phone,
-            gender: "Prefer not to say" // Default, can be enhanced to collect this
+            date_of_birth: extractedInfo.dateOfBirth,
+            phone_number: extractedInfo.phone,
+            gender: "Female" // Default as per API example
           }
         }
       };
 
-      console.log(`[createNewPatient] Creating patient: ${args.firstName} ${args.lastName}`);
+      console.log(`[createNewPatient] Creating patient: ${extractedInfo.firstName} ${extractedInfo.lastName}`);
+      console.log(`[createNewPatient] Patient data:`, JSON.stringify(newPatientData, null, 2));
 
       const createResponse = await fetchNexhealthAPI(
         '/patients',
@@ -166,16 +128,14 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         newPatientData
       );
 
-      console.log(`[createNewPatient] Response:`, JSON.stringify(createResponse, null, 2));
+      console.log(`[createNewPatient] API Response:`, JSON.stringify(createResponse, null, 2));
 
-      // Extract patient ID from response
+      // Extract patient ID from response (following the response format from curl example)
       let newPatientId = null;
-      if (createResponse?.data?.id) {
+      if (createResponse?.data?.user?.id) {
+        newPatientId = createResponse.data.user.id;
+      } else if (createResponse?.data?.id) {
         newPatientId = createResponse.data.id;
-      } else if (createResponse?.id) {
-        newPatientId = createResponse.id;
-      } else if (createResponse?.data?.patient?.id) {
-        newPatientId = createResponse.data.patient.id;
       }
 
       if (!newPatientId) {
@@ -191,15 +151,18 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       // Update call log with new patient ID
       await updateCallLogWithPatient(vapiCallId, practice.id, String(newPatientId));
 
+      // Format confirmation message
+      const formattedPhone = formatPhoneForDisplay(extractedInfo.phone || "");
+
       return {
         success: true,
-        message_to_patient: `Perfect! I've created your patient record. Welcome to ${practice.name || 'our practice'}, ${args.firstName}! Now, what type of appointment would you like to schedule?`,
+        message_to_patient: `Perfect! I've created your patient record. Welcome to ${practice.name || 'our practice'}, ${extractedInfo.firstName || 'new patient'}! Now, what type of appointment would you like to schedule?`,
         data: {
-          patient_id: newPatientId,
-          patient_name: `${args.firstName} ${args.lastName}`,
-          date_of_birth: args.dateOfBirth,
+          patient_id: String(newPatientId), // Ensure string format for consistency
+          patient_name: `${extractedInfo.firstName || ''} ${extractedInfo.lastName || ''}`.trim(),
+          date_of_birth: extractedInfo.dateOfBirth,
           phone: formattedPhone,
-          email: args.email,
+          email: extractedInfo.email,
           created: true
         }
       };
@@ -211,22 +174,9 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       let errorCode = "PATIENT_CREATION_ERROR";
       
       if (error instanceof Error) {
-        // Handle validation errors specifically
         if (error.message.includes("400") || error.message.includes("validation")) {
           errorCode = "VALIDATION_ERROR";
-          
-          // Parse common validation errors and provide specific guidance
-          if (error.message.includes("phone") || error.message.includes("too_small")) {
-            message = "I need your phone number to create your patient record. What's your phone number?";
-          } else if (error.message.includes("email") || error.message.includes("invalid_email")) {
-            message = "I need a valid email address to create your patient record. What's your email address?";
-          } else if (error.message.includes("date_of_birth")) {
-            message = "I need to verify your date of birth. Could you tell me your date of birth again?";
-          } else if (error.message.includes("first_name") || error.message.includes("last_name")) {
-            message = "I need to verify your name. Could you tell me your first and last name again?";
-          } else {
-            message = "I'm missing some required information to create your patient record. Let me collect that from you.";
-          }
+          message = "There was an issue with the information provided. Let me help you with the registration process.";
         } else if (error.message.includes("409") || error.message.includes("duplicate")) {
           errorCode = "DUPLICATE_PATIENT";
           message = "It looks like you might already be in our system. Let me search for your existing record instead.";
@@ -246,12 +196,190 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   },
 
   messages: {
-    start: "Let me create your patient record...",
+    start: "Let me help you register as a new patient...",
     success: "Perfect! I've set up your patient record.",
-    fail: "I'm having trouble creating your record. Let me try another way."
+    fail: "I'm having trouble creating your record. Let me try a different approach."
   }
 };
 
+/**
+ * Extract patient information from natural conversation using LLM logic
+ */
+async function extractPatientInfoFromConversation(patientInfo: string): Promise<{
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  phone?: string;
+  email?: string;
+}> {
+  // This simulates LLM extraction - in reality, the LLM in the schema description handles this
+  // But we'll add some basic parsing as backup
+  
+  const extracted: Record<string, string> = {};
+  
+  // Extract spelled names (J-O-H-N → John)
+  const spelledNameRegex = /([a-z](?:\s*-\s*[a-z])+)/gi;
+  const spelledMatches = patientInfo.match(spelledNameRegex);
+  if (spelledMatches) {
+    spelledMatches.forEach(match => {
+      const letters = match.replace(/[\s-]/g, '');
+      if (letters.length >= 2) {
+        const word = letters.charAt(0).toUpperCase() + letters.slice(1).toLowerCase();
+        if (!extracted.firstName) {
+          extracted.firstName = word;
+        } else if (!extracted.lastName) {
+          extracted.lastName = word;
+        }
+      }
+    });
+  }
+  
+  // Extract phone number (look for digit sequences)
+  const phoneRegex = /(?:phone|number|call)(?:\s+is)?\s*[:]*\s*([0-9\s\-\(\)]+)/i;
+  const phoneMatch = patientInfo.match(phoneRegex);
+  if (phoneMatch) {
+    extracted.phone = phoneMatch[1].replace(/\D/g, '');
+  }
+  
+  // Extract email (look for email patterns or spoken format)
+  const emailRegex = /(?:email|e-mail)(?:\s+is)?\s*[:]*\s*([^\s]+(?:\s+at\s+[^\s]+\s+dot\s+[^\s]+|@[^\s]+))/i;
+  const emailMatch = patientInfo.match(emailRegex);
+  if (emailMatch) {
+    let email = emailMatch[1];
+    // Convert spoken format: "john at gmail dot com" → "john@gmail.com"
+    email = email.replace(/\s+at\s+/i, '@').replace(/\s+dot\s+/gi, '.');
+    extracted.email = email;
+  }
+  
+  // Extract date of birth
+  // Look for birth date patterns
+  const birthPatterns = [
+    /(?:born|birth|dob)(?:\s+is|\s+on|\s*:)?\s*([^,]+)/i,
+    /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4}|\d{2})/i,
+    /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4}|\d{2})/
+  ];
+  
+  for (const pattern of birthPatterns) {
+    const match = patientInfo.match(pattern);
+    if (match) {
+      // Handle different date formats and convert to YYYY-MM-DD
+      if (match[1] && !match[2]) {
+        // Full date string like "January 15, 1990"
+        const dateStr = match[1].trim();
+        const parsedDate = parseNaturalDate(dateStr);
+        if (parsedDate) extracted.dateOfBirth = parsedDate;
+      } else if (match[1] && match[2] && match[3]) {
+        // Month name format or MM/DD/YYYY
+        const parsedDate = parseStructuredDate(match[1], match[2], match[3]);
+        if (parsedDate) extracted.dateOfBirth = parsedDate;
+      }
+      break;
+    }
+  }
+  
+  return extracted;
+}
+
+/**
+ * Parse natural language dates like "January 15, 1990"
+ */
+function parseNaturalDate(dateStr: string): string | null {
+  try {
+    const date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().split('T')[0];
+    }
+  } catch {
+    // Continue to other parsing methods
+  }
+  return null;
+}
+
+/**
+ * Parse structured dates like month/day/year
+ */
+function parseStructuredDate(part1: string, part2: string, part3: string): string | null {
+  const months: Record<string, string> = {
+    'january': '01', 'february': '02', 'march': '03', 'april': '04',
+    'may': '05', 'june': '06', 'july': '07', 'august': '08',
+    'september': '09', 'october': '10', 'november': '11', 'december': '12'
+  };
+  
+  let year, month, day;
+  
+  const monthKey = part1.toLowerCase();
+  if (months[monthKey]) {
+    // Month name format: "January 15 1990"
+    month = months[monthKey];
+    day = part2.padStart(2, '0');
+    year = part3.length === 2 ? (parseInt(part3) >= 50 ? `19${part3}` : `20${part3}`) : part3;
+  } else {
+    // Numeric format: "01/15/90"
+    month = part1.padStart(2, '0');
+    day = part2.padStart(2, '0');
+    year = part3.length === 2 ? (parseInt(part3) >= 50 ? `19${part3}` : `20${part3}`) : part3;
+  }
+  
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Validate that all required fields are present
+ */
+function validateRequiredFields(info: Record<string, string>): string[] {
+  const required = ['firstName', 'lastName', 'dateOfBirth', 'phone', 'email'];
+  const missing = [];
+  
+  for (const field of required) {
+    if (!info[field] || info[field].toString().trim().length === 0) {
+      missing.push(field);
+    }
+  }
+  
+  // Additional validation
+  if (info.phone && info.phone.length < 10) {
+    missing.push('phone');
+  }
+  
+  if (info.email && !info.email.includes('@')) {
+    missing.push('email');
+  }
+  
+  return [...new Set(missing)]; // Remove duplicates
+}
+
+/**
+ * Generate appropriate message for missing fields
+ */
+function getMissingFieldsMessage(missingFields: string[]): string {
+  if (missingFields.includes('firstName') || missingFields.includes('lastName') || missingFields.includes('dateOfBirth')) {
+    return "Let's register you as a new patient. Can you please spell your first and last name letter by letter, then give me your date of birth?";
+  }
+  
+  if (missingFields.includes('phone')) {
+    return "I need your phone number to create your patient record. What's your phone number?";
+  }
+  
+  if (missingFields.includes('email')) {
+    return "Finally, I need your email address. What's your email address?";
+  }
+  
+  return "I need some additional information to complete your registration. Could you provide your contact details?";
+}
+
+/**
+ * Format phone number for display
+ */
+function formatPhoneForDisplay(phone: string): string {
+  if (phone.length === 10) {
+    return `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`;
+  }
+  return phone;
+}
+
+/**
+ * Update call log with new patient ID
+ */
 async function updateCallLogWithPatient(vapiCallId: string, practiceId: string, patientId: string) {
   try {
     const { prisma } = await import("@/lib/prisma");
