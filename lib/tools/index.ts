@@ -6,13 +6,15 @@ import findPatientTool from "./findPatient";
 import findAppointmentTypeTool from "./findAppointmentType";
 import checkAvailableSlotsTool from "./checkAvailableSlots";
 import bookAppointmentTool from "./bookAppointment";
+import createNewPatientTool from "./createNewPatient";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const tools: ToolDefinition<any>[] = [
   findPatientTool,
   findAppointmentTypeTool,
   checkAvailableSlotsTool,
-  bookAppointmentTool
+  bookAppointmentTool,
+  createNewPatientTool
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,4 +69,5 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
 export { findPatientSchema } from "./findPatient";
 export { findAppointmentTypeSchema } from "./findAppointmentType";
 export { checkAvailableSlotsSchema } from "./checkAvailableSlots";
-export { bookAppointmentSchema } from "./bookAppointment"; 
+export { bookAppointmentSchema } from "./bookAppointment";
+export { createNewPatientSchema } from "./createNewPatient"; 

@@ -2,7 +2,31 @@ import { z } from "zod";
 import { ToolDefinition, ToolResult } from "./types";
 
 export const findAppointmentTypeSchema = z.object({
-  userRequest: z.string().min(1).describe("The patient's description of what they want to come in for (e.g., 'cleanup', 'checkup', 'consultation', 'filling')")
+  userRequest: z.string()
+    .min(1)
+    .describe(`
+Extract what type of appointment the patient is requesting.
+
+COMMON REQUESTS AND VARIATIONS:
+- Cleaning: "cleaning", "teeth cleaning", "dental cleaning", "hygiene", "prophy", "prophylaxis"
+- Checkup: "checkup", "check up", "exam", "examination", "routine visit"
+- Both: "cleaning and checkup", "regular appointment", "6 month visit"
+- Emergency: "tooth pain", "broken tooth", "emergency", "urgent"
+- Filling: "cavity", "filling", "tooth repair"
+- Crown: "crown", "cap", "tooth cap"
+- Root Canal: "root canal", "tooth infection", "nerve treatment"
+- Extraction: "pull tooth", "extraction", "remove tooth"
+- Consultation: "consult", "consultation", "second opinion", "new patient exam"
+
+EXAMPLES:
+- "I need a cleaning" → "cleaning"
+- "Just my regular six month checkup and cleaning" → "cleaning and checkup"
+- "I have a cavity that needs to be filled" → "filling"
+- "My tooth hurts" → "tooth pain"
+- "general cleanup" → "cleaning"
+
+IMPORTANT: Extract the core service request, not the exact words used.
+    `)
 });
 
 const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {
@@ -17,24 +41,45 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
       return {
         success: false,
         error_code: "NO_APPOINTMENT_TYPES",
-        message_to_patient: "I don't have any appointment types configured for this practice. Please contact the office directly to schedule."
+        message_to_patient: "I don't have any appointment types configured for this practice. Please contact the office directly to schedule your appointment."
       };
     }
 
     try {
       const userRequest = args.userRequest.toLowerCase().trim();
       
-      // Create searchable appointment type list
+      // Create searchable appointment type list with common aliases
+      const appointmentTypeAliases: Record<string, string[]> = {
+        'cleaning': ['clean', 'hygiene', 'prophy', 'prophylaxis', 'dental cleaning', 'teeth cleaning'],
+        'checkup': ['check', 'exam', 'examination', 'visit', 'routine'],
+        'consultation': ['consult', 'new patient', 'initial'],
+        'filling': ['cavity', 'restoration', 'tooth repair'],
+        'crown': ['cap', 'tooth cap'],
+        'root canal': ['endodontic', 'nerve', 'tooth infection'],
+        'extraction': ['pull', 'remove', 'tooth removal'],
+        'emergency': ['urgent', 'pain', 'broken', 'asap']
+      };
+
       const availableTypes = practice.appointmentTypes.map(type => ({
         id: type.nexhealthAppointmentTypeId,
         name: type.name,
         duration: type.duration,
-        searchTerms: type.name.toLowerCase()
+        searchTerms: type.name.toLowerCase(),
+        aliases: [] as string[]
       }));
+
+      // Add aliases to available types
+      availableTypes.forEach(type => {
+        Object.entries(appointmentTypeAliases).forEach(([key, aliases]) => {
+          if (type.searchTerms.includes(key)) {
+            type.aliases = aliases;
+          }
+        });
+      });
 
       console.log(`[findAppointmentType] Looking for "${userRequest}" in types:`, availableTypes.map(t => t.name));
 
-      // Simple matching algorithm - can be enhanced with fuzzy matching
+      // Enhanced matching algorithm
       let bestMatch = null;
       let bestScore = 0;
 
@@ -42,8 +87,16 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
         let score = 0;
         
         // Exact match gets highest score
-        if (type.searchTerms.includes(userRequest)) {
+        if (type.searchTerms === userRequest) {
           score = 100;
+        }
+        // Check aliases
+        else if (type.aliases.some(alias => userRequest.includes(alias))) {
+          score = 80;
+        }
+        // Check if type name is in request
+        else if (userRequest.includes(type.searchTerms)) {
+          score = 70;
         }
         // Partial word matches
         else {
@@ -53,7 +106,13 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
           for (const requestWord of requestWords) {
             for (const typeWord of typeWords) {
               if (typeWord.includes(requestWord) || requestWord.includes(typeWord)) {
-                score += 10;
+                score += 20;
+              }
+            }
+            // Check aliases too
+            for (const alias of type.aliases) {
+              if (alias.includes(requestWord) || requestWord.includes(alias)) {
+                score += 15;
               }
             }
           }
@@ -65,27 +124,32 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
         }
       }
 
-      if (!bestMatch || bestScore < 5) {
-        // No good match found - present options
+      if (!bestMatch || bestScore < 10) {
+        // No good match found - present options conversationally
         const typeOptions = availableTypes
-          .map(type => `${type.name} (${type.duration} minutes)`)
+          .slice(0, 5) // Limit to 5 options for voice
+          .map(type => type.name)
           .join(', ');
           
         return {
           success: true,
-          message_to_patient: `I'm not sure which appointment type matches "${args.userRequest}". We have these options available: ${typeOptions}. Which one would you like?`,
+          message_to_patient: `I want to make sure I schedule the right appointment for you. We offer ${typeOptions}. Which of these best describes what you need?`,
           data: {
             matched: false,
-            available_types: availableTypes,
+            available_types: availableTypes.map(t => ({
+              id: t.id,
+              name: t.name,
+              duration: t.duration
+            })),
             user_request: userRequest
           }
         };
       }
 
-      // Good match found - confirm with user
+      // Good match found - confirm and move forward
       return {
         success: true,
-        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. When would you like to come in?`,
+        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. What day would you like to come in?`,
         data: {
           matched: true,
           appointment_type_id: bestMatch.id,
@@ -101,7 +165,7 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
       return {
         success: false,
         error_code: "APPOINTMENT_TYPE_SEARCH_ERROR",
-        message_to_patient: "I had trouble finding appointment types. Please tell me specifically what type of appointment you need.",
+        message_to_patient: "I had trouble understanding what type of appointment you need. Could you tell me again what you'd like to come in for?",
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
@@ -109,7 +173,7 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
 
   messages: {
     start: "Let me find the right appointment type for you...",
-    success: "Great! I can help you schedule that appointment.",
+    success: "Great! I can help you schedule that.",
     fail: "Let me check what appointment types we have available."
   }
 };

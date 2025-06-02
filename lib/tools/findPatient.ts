@@ -3,10 +3,64 @@ import { z } from "zod";
 import { ToolDefinition, ToolResult } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 
+// Helper to get current date context
+function getCurrentDateContext(): string {
+  const today = new Date();
+  return `Today is ${today.toLocaleDateString('en-US', { 
+    weekday: 'long', 
+    month: 'long', 
+    day: 'numeric', 
+    year: 'numeric' 
+  })}`;
+}
+
 export const findPatientSchema = z.object({
-  firstName: z.string().min(1).describe("The first name of the patient"),
-  lastName: z.string().min(1).describe("The last name of the patient"),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").describe("Patient's date of birth in YYYY-MM-DD format")
+  firstName: z.string()
+    .min(1)
+    .describe(`
+Extract the patient's first name from their response.
+
+IMPORTANT: If the patient spells their name letter by letter (e.g., "B-O-B"), convert it to the proper name (e.g., "Bob").
+
+EXAMPLES:
+- "My name is Bob Ross" → firstName: "Bob"
+- "First name B-O-B" → firstName: "Bob"
+- "It's Robert but I go by Bob" → firstName: "Robert" (use legal first name)
+- "Sarah with an H" → firstName: "Sarah"
+    `),
+  lastName: z.string()
+    .min(1)
+    .describe(`
+Extract the patient's last name from their response.
+
+IMPORTANT: If the patient spells their name letter by letter (e.g., "R-O-S-S"), convert it to the proper name (e.g., "Ross").
+
+EXAMPLES:
+- "Bob Ross" → lastName: "Ross"
+- "last name R-O-S-S" → lastName: "Ross"
+- "Smith, S-M-I-T-H" → lastName: "Smith"
+- "McDonald with a capital D" → lastName: "McDonald"
+    `),
+  dateOfBirth: z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
+    .describe(`
+Convert the patient's date of birth to YYYY-MM-DD format.
+
+${getCurrentDateContext()}
+
+EXAMPLES:
+- "October 30, 1998" → "1998-10-30"
+- "October thirtieth nineteen ninety-eight" → "1998-10-30"
+- "10/30/98" → "1998-10-30"
+- "10-30-1998" → "1998-10-30"
+- "October 30th, 98" → "1998-10-30"
+- "I was born in 1998, October 30" → "1998-10-30"
+
+IMPORTANT:
+- For 2-digit years, assume 1900s for 50-99, and 2000s for 00-49
+- Always return in YYYY-MM-DD format
+- Handle various date formats and spoken variations
+    `)
 });
 
 const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
@@ -21,7 +75,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I'm sorry, I can't access patient records right now. Please contact the office directly."
+        message_to_patient: "I'm sorry, I can't access patient records right now. Please contact the office directly at your convenience."
       };
     }
 
@@ -60,10 +114,24 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       console.log(`[findPatient] Found ${patients.length} potential matches`);
 
       if (patients.length === 0) {
+        // Format the date for friendly display
+        const dobParts = args.dateOfBirth.split('-');
+        const dobDate = new Date(parseInt(dobParts[0]), parseInt(dobParts[1]) - 1, parseInt(dobParts[2]));
+        const friendlyDob = dobDate.toLocaleDateString('en-US', { 
+          month: 'long', 
+          day: 'numeric', 
+          year: 'numeric' 
+        });
+        
         return {
           success: true,
-          message_to_patient: `I couldn't find a patient named ${args.firstName} ${args.lastName} with that date of birth. Would you like me to help you schedule as a new patient, or would you like to try different information?`,
-          data: { found_patients: [], patient_exists: false }
+          message_to_patient: `I couldn't find a patient record for ${args.firstName} ${args.lastName} with date of birth ${friendlyDob}. Are you a new patient with us, or would you like to try different information?`,
+          data: { 
+            found_patients: [], 
+            patient_exists: false,
+            searched_name: `${args.firstName} ${args.lastName}`,
+            searched_dob: args.dateOfBirth
+          }
         };
       }
 
@@ -73,15 +141,25 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       // Store patient context for subsequent tool calls
       await updateCallLogWithPatient(vapiCallId, practice.id, String(patient.id));
       
+      // Format the date of birth for natural speech
+      const patientDob = patient.bio?.date_of_birth || patient.date_of_birth || args.dateOfBirth;
+      const dobParts = patientDob.split('-');
+      const dobDate = new Date(parseInt(dobParts[0]), parseInt(dobParts[1]) - 1, parseInt(dobParts[2]));
+      const friendlyDob = dobDate.toLocaleDateString('en-US', { 
+        month: 'long', 
+        day: 'numeric', 
+        year: 'numeric' 
+      });
+      
       return {
         success: true,
-        message_to_patient: `Great! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${patient.bio?.date_of_birth || args.dateOfBirth}. What type of appointment would you like to schedule?`,
+        message_to_patient: `Great! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${friendlyDob}. What type of appointment would you like to schedule today?`,
         data: {
           found_patients: [{
             id: patient.id,
             firstName: patient.first_name,
             lastName: patient.last_name,
-            dob: patient.bio?.date_of_birth || patient.date_of_birth
+            dob: patientDob
           }],
           patient_exists: true,
           patient_id: patient.id
@@ -91,9 +169,9 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
     } catch (error) {
       console.error(`[findPatient] Error:`, error);
       
-      let message = "I'm having trouble accessing patient records right now. Please try again in a moment.";
+      let message = "I'm having trouble accessing patient records right now. Please try again in a moment or contact the office directly.";
       if (error instanceof Error && error.message.includes("401")) {
-        message = "There's an authentication issue with the patient system. Please contact support.";
+        message = "There's an authentication issue with the patient system. Please contact the office for assistance.";
       }
       
       return {
