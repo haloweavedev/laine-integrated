@@ -296,10 +296,16 @@ export default async function LainePage() {
             </form>
 
             <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-medium text-gray-900 mb-2">Available Tools</h3>
-              <ul className="text-sm text-gray-600 space-y-1">
-                <li>• Patient Search - Find patients by name and date of birth</li>
-                <li>• More tools will be added in future updates</li>
+              <h3 className="font-medium text-gray-900 mb-2">Available Tools (8)</h3>
+              <ul className="text-sm text-gray-600 space-y-1 list-disc list-inside">
+                <li>find_patient_in_ehr - Searches for existing patients.</li>
+                <li>create_new_patient - Creates new patient records (now with optional insurance name).</li>
+                <li>find_appointment_type - Matches patient requests to appointment types.</li>
+                <li>check_available_slots - Finds available appointment times.</li>
+                <li>book_appointment - Books the selected appointment.</li>
+                <li>check_insurance_participation - Checks if practice accepts patient&apos;s insurance.</li>
+                <li>get_service_cost_estimate - Provides estimated service costs.</li>
+                <li>get_practice_details - Retrieves practice address and other details.</li>
               </ul>
             </div>
           </div>

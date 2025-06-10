@@ -7,6 +7,9 @@ import findAppointmentTypeTool from "./findAppointmentType";
 import checkAvailableSlotsTool from "./checkAvailableSlots";
 import bookAppointmentTool from "./bookAppointment";
 import createNewPatientTool from "./createNewPatient";
+import getPracticeDetailsTool from "./getPracticeDetails";
+import checkInsuranceParticipationTool from "./checkInsuranceParticipation";
+import getServiceCostEstimateTool from "./getServiceCostEstimate";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const tools: ToolDefinition<any>[] = [
@@ -14,7 +17,10 @@ export const tools: ToolDefinition<any>[] = [
   findAppointmentTypeTool,
   checkAvailableSlotsTool,
   bookAppointmentTool,
-  createNewPatientTool
+  createNewPatientTool,
+  getPracticeDetailsTool,
+  checkInsuranceParticipationTool,
+  getServiceCostEstimateTool
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,4 +76,7 @@ export { findPatientSchema } from "./findPatient";
 export { findAppointmentTypeSchema } from "./findAppointmentType";
 export { checkAvailableSlotsSchema } from "./checkAvailableSlots";
 export { bookAppointmentSchema } from "./bookAppointment";
-export { createNewPatientSchema } from "./createNewPatient"; 
+export { createNewPatientSchema } from "./createNewPatient";
+export { getPracticeDetailsSchema } from "./getPracticeDetails";
+export { checkInsuranceParticipationSchema } from "./checkInsuranceParticipation";
+export { getServiceCostEstimateSchema } from "./getServiceCostEstimate"; 

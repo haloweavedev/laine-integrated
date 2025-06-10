@@ -41,12 +41,14 @@ Examples: "313-555-1200" → "3135551200", "(313) 555-1200" → "3135551200"`),
     .email()
     .describe(`Extract email address. Convert spoken format to proper syntax.
 
-Examples: "john at gmail dot com" → "john@gmail.com"`)
+Examples: "john at gmail dot com" → "john@gmail.com"`),
+  insurance_name: z.string().optional()
+    .describe("Patient's dental insurance company name (e.g., Cigna, MetLife). This is optional. If provided, it will be added to the patient's record.")
 });
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: `Creates new patient record in EHR system.
+  description: `Creates new patient record in EHR system. Collects first/last name, DOB, phone, email. Optionally collects the patient's dental insurance company name. Use only when the caller is confirmed as a new patient and you have at least the core required information (name, DOB, phone, email).
 
 🚨 CRITICAL: ONLY call when you have ALL required information:
 - First/last name (spelled letter by letter)
@@ -54,7 +56,10 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
 - Phone number (10+ digits) 
 - Valid email address
 
-DO NOT call if ANY field is missing. Ask for missing info first.
+Optional:
+- Insurance company name (if mentioned by patient)
+
+DO NOT call if ANY required field is missing. Ask for missing info first.
 
 IMPORTANT: Empty strings ("") = MISSING. Do not call with empty strings.
 
@@ -62,7 +67,7 @@ FLOW:
 1. Missing name/DOB → Ask "Could you spell your first and last name letter by letter, then give me your date of birth?"
 2. Missing phone → Ask "I need your phone number to create your patient record. What's your phone number?"
 3. Missing email → Ask "Finally, I need your email address. What's your email address?"
-4. ONLY when ALL info collected → Call this tool
+4. ONLY when ALL required info collected → Call this tool
 
 Examples WHEN NOT TO CALL:
 - phone: "" → Ask for phone first
@@ -114,6 +119,22 @@ Use only when caller is new patient AND you have ALL required information.`,
       }
 
       // Prepare new patient data in EXACT NexHealth API format (matching your curl example)
+      const patientBio: {
+        date_of_birth: string;
+        phone_number: string;
+        gender: string;
+        insurance_name?: string;
+      } = {
+        date_of_birth: args.dateOfBirth,
+        phone_number: args.phone,
+        gender: "Female" // Default as per API example - this can be enhanced later
+      };
+
+      // Add insurance_name if provided
+      if (args.insurance_name && args.insurance_name.trim() !== "") {
+        patientBio.insurance_name = args.insurance_name.trim();
+      }
+
       const newPatientData = {
         provider: { 
           provider_id: parseInt(activeProvider.provider.nexhealthProviderId) 
@@ -122,11 +143,7 @@ Use only when caller is new patient AND you have ALL required information.`,
           first_name: args.firstName,
           last_name: args.lastName,
           email: args.email,
-          bio: {
-            date_of_birth: args.dateOfBirth,
-            phone_number: args.phone,
-            gender: "Female" // Default as per API example - this can be enhanced later
-          }
+          bio: patientBio
         }
       };
 
@@ -167,15 +184,23 @@ Use only when caller is new patient AND you have ALL required information.`,
       // Format confirmation message
       const formattedPhone = formatPhoneForDisplay(args.phone);
 
+      // Create success message acknowledging insurance if provided
+      let successMessage = `Perfect! I've created your patient record. Welcome to ${practice.name || 'our practice'}, ${args.firstName}!`;
+      if (args.insurance_name && args.insurance_name.trim() !== "") {
+        successMessage += ` I've also noted your ${args.insurance_name} insurance information.`;
+      }
+      successMessage += ` Now, what type of appointment would you like to schedule?`;
+
       return {
         success: true,
-        message_to_patient: `Perfect! I've created your patient record. Welcome to ${practice.name || 'our practice'}, ${args.firstName}! Now, what type of appointment would you like to schedule?`,
+        message_to_patient: successMessage,
         data: {
           patient_id: String(newPatientId), // Ensure string format for consistency with bookAppointment.ts
           patient_name: `${args.firstName} ${args.lastName}`,
           date_of_birth: args.dateOfBirth,
           phone: formattedPhone,
           email: args.email,
+          insurance_name: args.insurance_name || null,
           created: true
         }
       };
