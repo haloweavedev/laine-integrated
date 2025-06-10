@@ -413,6 +413,8 @@ export default function PracticeConfigPage() {
               <div className="mb-6">
                 <CheckAppointmentSlots
                   appointmentTypes={practice.appointmentTypes}
+                  savedProviders={practice.savedProviders}
+                  savedOperatories={practice.savedOperatories}
                 />
               </div>
             )}

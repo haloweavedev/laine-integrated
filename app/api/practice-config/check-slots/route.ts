@@ -55,7 +55,13 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { appointmentTypeId, requestedDate, days = 1 } = await req.json();
+    const { 
+      appointmentTypeId, 
+      requestedDate, 
+      days = 1, 
+      providerIds = [], 
+      operatoryIds = [] 
+    } = await req.json();
 
     // Validate required fields
     if (!appointmentTypeId || !requestedDate) {
@@ -73,7 +79,7 @@ export async function POST(req: NextRequest) {
 
     // Validate appointment type belongs to practice
     const appointmentType = practice.appointmentTypes.find(
-      (at) => at.nexhealthAppointmentTypeId === appointmentTypeId
+      at => at.nexhealthAppointmentTypeId === appointmentTypeId
     );
 
     if (!appointmentType) {
@@ -82,9 +88,17 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Check if practice has active providers
-    const activeProviders = practice.savedProviders.filter((sp) => sp.isActive);
-    const activeOperatories = practice.savedOperatories.filter((so) => so.isActive);
+    // Filter providers based on selection or use all active
+    let activeProviders = practice.savedProviders.filter(sp => sp.isActive);
+    if (providerIds.length > 0) {
+      activeProviders = activeProviders.filter(sp => providerIds.includes(sp.provider.id));
+    }
+
+    // Filter operatories based on selection or use all active
+    let activeOperatories = practice.savedOperatories.filter(so => so.isActive);
+    if (operatoryIds.length > 0) {
+      activeOperatories = activeOperatories.filter(so => operatoryIds.includes(so.id));
+    }
 
     if (activeProviders.length === 0) {
       return NextResponse.json({ 
@@ -111,6 +125,8 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[check-slots] Checking ${requestedDate} for appointment type ${appointmentTypeId}`);
+    console.log(`[check-slots] Using providers:`, activeProviders.map(sp => `${sp.provider.firstName} ${sp.provider.lastName} (${sp.provider.nexhealthProviderId})`));
+    console.log(`[check-slots] Using operatories:`, activeOperatories.map(so => `${so.name} (${so.nexhealthOperatoryId})`));
 
     const slotsResponse = await fetchNexhealthAPI(
       '/appointment_slots',
@@ -136,7 +152,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Format slots for display
+    // Create provider lookup map
+    const providerLookup = new Map();
+    activeProviders.forEach(sp => {
+      providerLookup.set(sp.provider.nexhealthProviderId, {
+        id: sp.provider.id,
+        nexhealthProviderId: sp.provider.nexhealthProviderId,
+        name: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim()
+      });
+    });
+
+    // Create operatory lookup map
+    const operatoryLookup = new Map();
+    activeOperatories.forEach(so => {
+      operatoryLookup.set(so.nexhealthOperatoryId, {
+        id: so.id,
+        nexhealthOperatoryId: so.nexhealthOperatoryId,
+        name: so.name
+      });
+    });
+
+    // Format slots for display with enhanced information
     const formattedSlots = availableSlots.map((slot, index) => {
       // Parse the time string correctly to preserve the timezone
       const startTime = new Date(slot.time);
@@ -156,6 +192,18 @@ export async function POST(req: NextRequest) {
         hour12: true,
         timeZone: 'America/Chicago'
       });
+
+      // Get provider and operatory details
+      const providerInfo = providerLookup.get(slot.provider_id.toString()) || { 
+        name: `Provider ${slot.provider_id}`, 
+        nexhealthProviderId: slot.provider_id 
+      };
+      
+      const operatoryInfo = slot.operatory_id ? 
+        operatoryLookup.get(slot.operatory_id.toString()) || { 
+          name: `Operatory ${slot.operatory_id}`, 
+          nexhealthOperatoryId: slot.operatory_id 
+        } : null;
       
       return {
         slot_id: `slot_${index}`,
@@ -166,7 +214,9 @@ export async function POST(req: NextRequest) {
         display_range: `${timeString} - ${endTimeString}`,
         operatory_id: slot.operatory_id,
         provider_id: slot.provider_id,
-        location_id: slot.location_id
+        location_id: slot.location_id,
+        provider_info: providerInfo,
+        operatory_info: operatoryInfo
       };
     });
 
@@ -186,8 +236,18 @@ export async function POST(req: NextRequest) {
         has_availability: formattedSlots.length > 0,
         total_slots_found: formattedSlots.length,
         debug_info: {
-          providers_checked: providers.length,
-          operatories_checked: operatories.length
+          providers_checked: activeProviders.length,
+          operatories_checked: activeOperatories.length,
+          providers_used: activeProviders.map(sp => ({
+            id: sp.provider.id,
+            name: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim(),
+            nexhealthProviderId: sp.provider.nexhealthProviderId
+          })),
+          operatories_used: activeOperatories.map(so => ({
+            id: so.id,
+            name: so.name,
+            nexhealthOperatoryId: so.nexhealthOperatoryId
+          }))
         }
       }
     });
