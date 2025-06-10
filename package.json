@@ -15,6 +15,8 @@
     "webhook:setup": "node scripts/manage-nexhealth-webhooks.js setup-global-endpoint",
     "webhook:subscribe": "node scripts/manage-nexhealth-webhooks.js subscribe-practice",
     "webhook:list": "node scripts/manage-nexhealth-webhooks.js list-subscriptions",
+    "fix:appointment-types": "node scripts/fix-availability-appointment-types.js fix",
+    "test:slots": "node scripts/fix-availability-appointment-types.js test-slots",
     "db:list": "node scripts/clean-database.js list",
     "db:clean": "node scripts/clean-database.js clean-test",
     "db:clean-all": "node scripts/clean-database.js clean-all-confirmed"

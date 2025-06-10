@@ -13,16 +13,21 @@ Examples: "I'll take 8 AM" → "8:00 AM", "The 2:30 slot" → "2:30 PM", "10 o'c
 Rules: Include :00/:30 for minutes, include AM/PM, match format presented to patient`),
   patientId: z.string()
     .min(1)
-    .describe("The patient ID from the find_patient_in_ehr or create_new_patient tool call"),
+    .describe(`CRITICAL: This MUST be the numeric patient ID (e.g., "381872342") obtained from the successful result of a PREVIOUS 'find_patient_in_ehr' or 'create_new_patient' tool call. 
+DO NOT use the patient's name (e.g., "Alex Dan"). 
+DO NOT invent an ID. 
+If a new patient was just created, use the 'patient_id' provided in the data output of the 'create_new_patient' tool. 
+If an existing patient was found, use the 'patient_id' from the 'find_patient_in_ehr' tool.
+This ID is essential for linking the appointment to the correct patient record in the EHR.`),
   appointmentTypeId: z.string()
     .min(1)
-    .describe("The appointment type ID from the find_appointment_type tool call"),
+    .describe("The appointment type ID (e.g., '1014017') from the data.appointment_type_id field of a successful 'find_appointment_type' tool call"),
   requestedDate: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe("The requested appointment date in YYYY-MM-DD format from the check_available_slots tool"),
+    .describe("The requested appointment date in YYYY-MM-DD format, typically confirmed after a 'check_available_slots' tool call or directly from user input if a specific date was requested and validated"),
   durationMinutes: z.number()
     .min(1)
-    .describe("The duration of the appointment in minutes from the appointment type")
+    .describe("The duration of the appointment in minutes (e.g., 90) from the data.duration_minutes field of a successful 'find_appointment_type' tool call")
 });
 
 const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
