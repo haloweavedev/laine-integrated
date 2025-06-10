@@ -7,6 +7,7 @@ import { Toaster, toast } from "sonner";
 import { ProviderSelection } from "./provider-selection";
 import { OperatorySelection } from "./operatory-selection";
 import { AvailabilityManager } from "./availability-manager";
+import { CheckAppointmentSlots } from "./check-appointment-slots";
 
 interface ManualAvailabilityData {
   id: string;
@@ -403,6 +404,15 @@ export default function PracticeConfigPage() {
                   appointmentTypes={practice.appointmentTypes}
                   initialAvailabilities={practice.manualAvailabilities || []}
                   onUpdate={refreshPracticeData}
+                />
+              </div>
+            )}
+
+            {/* Check Appointment Slots Section */}
+            {practice.appointmentTypes.length > 0 && practice.savedProviders.length > 0 && (
+              <div className="mb-6">
+                <CheckAppointmentSlots
+                  appointmentTypes={practice.appointmentTypes}
                 />
               </div>
             )}
