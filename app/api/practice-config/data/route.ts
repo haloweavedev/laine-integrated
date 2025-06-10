@@ -23,6 +23,26 @@ export async function GET() {
         savedOperatories: {
           where: { isActive: true }
         },
+        manualAvailabilities: {
+          include: {
+            provider: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                nexhealthProviderId: true
+              }
+            },
+            savedOperatory: {
+              select: {
+                id: true,
+                name: true,
+                nexhealthOperatoryId: true
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' }
+        },
         nexhealthWebhookSubscriptions: {
           where: { isActive: true },
           orderBy: [

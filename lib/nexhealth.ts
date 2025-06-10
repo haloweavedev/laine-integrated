@@ -291,4 +291,140 @@ export async function getOperatories(subdomain: string, locationId: string): Pro
   
   console.log(`Parsed ${operatories.length} operatories`);
   return operatories.filter((op: NexHealthOperatory) => op.active !== false);
+}
+
+// Availability-related interfaces and functions
+interface NexHealthAvailability {
+  id: number;
+  provider_id: number;
+  location_id: number;
+  operatory_id?: number;
+  begin_time: string;
+  end_time: string;
+  days: string[];
+  specific_date?: string;
+  custom_recurrence?: {
+    num: number;
+    unit: string;
+    ref: string;
+  };
+  tz_offset: string;
+  active: boolean;
+  synced: boolean;
+  appointment_types: Array<{
+    id: number;
+    name: string;
+    parent_type: string;
+    parent_id: number;
+    minutes: number;
+    bookable_online: boolean;
+  }>;
+}
+
+interface CreateAvailabilityData {
+  provider_id: number;
+  operatory_id?: number;
+  days: string[];
+  begin_time: string;
+  end_time: string;
+  appointment_type_ids: number[];
+  active?: boolean;
+}
+
+interface UpdateAvailabilityData {
+  provider_id?: number;
+  operatory_id?: number;
+  days?: string[];
+  begin_time?: string;
+  end_time?: string;
+  appointment_type_ids?: number[];
+  active?: boolean;
+}
+
+export async function createNexhealthAvailability(
+  subdomain: string, 
+  locationId: string, 
+  availabilityData: CreateAvailabilityData
+): Promise<NexHealthAvailability> {
+  if (!subdomain || !locationId) {
+    throw new Error("Subdomain and Location ID are required.");
+  }
+
+  const data = await fetchNexhealthAPI(
+    '/availabilities',
+    subdomain,
+    { location_id: locationId },
+    'POST',
+    { availability: availabilityData }
+  );
+
+  console.log("Raw NexHealth create availability response:", JSON.stringify(data, null, 2));
+
+  // Handle response structure
+  let availability = null;
+  
+  if (data?.data) {
+    availability = data.data;
+  } else if (data?.availability) {
+    availability = data.availability;
+  } else {
+    console.warn("Unexpected create availability response structure:", data);
+    throw new Error("Invalid response structure from NexHealth create availability");
+  }
+
+  console.log(`Created availability with ID: ${availability.id}`);
+  return availability;
+}
+
+export async function updateNexhealthAvailability(
+  subdomain: string,
+  nexhealthAvailabilityId: string,
+  availabilityData: UpdateAvailabilityData
+): Promise<NexHealthAvailability> {
+  if (!subdomain || !nexhealthAvailabilityId) {
+    throw new Error("Subdomain and availability ID are required.");
+  }
+
+  const data = await fetchNexhealthAPI(
+    `/availabilities/${nexhealthAvailabilityId}`,
+    subdomain,
+    {},
+    'PATCH',
+    { availability: availabilityData }
+  );
+
+  console.log("Raw NexHealth update availability response:", JSON.stringify(data, null, 2));
+
+  // Handle response structure
+  let availability = null;
+  
+  if (data?.data) {
+    availability = data.data;
+  } else if (data?.availability) {
+    availability = data.availability;
+  } else {
+    console.warn("Unexpected update availability response structure:", data);
+    throw new Error("Invalid response structure from NexHealth update availability");
+  }
+
+  console.log(`Updated availability with ID: ${availability.id}`);
+  return availability;
+}
+
+export async function deleteNexhealthAvailability(
+  subdomain: string,
+  nexhealthAvailabilityId: string
+): Promise<void> {
+  if (!subdomain || !nexhealthAvailabilityId) {
+    throw new Error("Subdomain and availability ID are required.");
+  }
+
+  await fetchNexhealthAPI(
+    `/availabilities/${nexhealthAvailabilityId}`,
+    subdomain,
+    {},
+    'DELETE'
+  );
+
+  console.log(`Deleted availability with ID: ${nexhealthAvailabilityId}`);
 } 

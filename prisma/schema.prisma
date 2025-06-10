@@ -43,6 +43,7 @@ model Practice {
   // Add new relationships for scheduling preferences
   savedProviders      SavedProvider[]
   savedOperatories    SavedOperatory[]
+  manualAvailabilities ManualAvailability[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -80,6 +81,9 @@ model SavedOperatory {
   name                String  // Display name for operatory
   isDefault           Boolean @default(false) // Mark primary/default operatory
   isActive            Boolean @default(true)  // Allow enabling/disabling
+  
+  // Add relationship to manual availabilities
+  manualAvailabilities ManualAvailability[]
   
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -219,6 +223,7 @@ model Provider {
 
   // Add new relationship
   savedByPractices    SavedProvider[]
+  manualAvailabilities ManualAvailability[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -232,4 +237,38 @@ model NexhealthTokenCache {
   expiresAt   DateTime // Timestamp when the token expires
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model ManualAvailability {
+  id                  String    @id @default(cuid())
+  practiceId          String
+  practice            Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthAvailabilityId String?   @unique // ID from NexHealth once created, optional as it might not be synced yet or sync failed
+
+  providerId          String    // References our local Provider.id
+  provider            Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  operatoryId         String?   // References our local SavedOperatory.id (nexhealthOperatoryId is on SavedOperatory)
+  savedOperatory      SavedOperatory? @relation(fields: [operatoryId], references: [id], onDelete: SetNull) // Optional, if operatory is deleted, set this to null
+
+  // For recurring weekly availability
+  daysOfWeek          String[]  // Array of strings like ["Monday", "Tuesday", "Friday"]
+  beginTime           String    // HH:MM format, e.g., "09:00"
+  endTime             String    // HH:MM format, e.g., "17:00"
+
+  // For specific date availability (can be an alternative to daysOfWeek)
+  // specificDate        DateTime? @db.Date // YYYY-MM-DD, mutually exclusive with daysOfWeek for simplicity in V1
+
+  appointmentTypeIds  String[]  // Array of nexhealthAppointmentTypeId strings from our AppointmentType model
+
+  isActive            Boolean   @default(true)
+
+  lastSyncWithNexhealthAt DateTime? // Timestamp of the last successful sync with NexHealth
+  syncError               String?   // Store any error message from the last sync attempt
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([practiceId, providerId])
 }

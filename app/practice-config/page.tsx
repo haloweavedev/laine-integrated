@@ -6,6 +6,32 @@ import { redirect } from "next/navigation";
 import { Toaster, toast } from "sonner";
 import { ProviderSelection } from "./provider-selection";
 import { OperatorySelection } from "./operatory-selection";
+import { AvailabilityManager } from "./availability-manager";
+
+interface ManualAvailabilityData {
+  id: string;
+  nexhealthAvailabilityId: string | null;
+  provider: {
+    id: string;
+    firstName: string | null;
+    lastName: string;
+    nexhealthProviderId: string;
+  };
+  savedOperatory: {
+    id: string;
+    name: string;
+    nexhealthOperatoryId: string;
+  } | null;
+  daysOfWeek: string[];
+  beginTime: string;
+  endTime: string;
+  appointmentTypeIds: string[];
+  isActive: boolean;
+  lastSyncWithNexhealthAt: string | null;
+  syncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface Practice {
   id: string;
@@ -18,6 +44,7 @@ interface Practice {
   serviceCostEstimates: string | null;
   appointmentTypes: Array<{
     id: string;
+    nexhealthAppointmentTypeId: string;
     name: string;
     duration: number;
   }>;
@@ -46,6 +73,7 @@ interface Practice {
     isDefault: boolean;
     isActive: boolean;
   }>;
+  manualAvailabilities: ManualAvailabilityData[];
   nexhealthWebhookSubscriptions: Array<{
     resourceType: string;
     eventName: string;
@@ -365,6 +393,20 @@ export default function PracticeConfigPage() {
               />
             </div>
 
+            {/* Manual Availability Configuration Section */}
+            {practice.providers.length > 0 && practice.appointmentTypes.length > 0 && (
+              <div className="mb-6">
+                <AvailabilityManager
+                  practiceId={practice.id}
+                  providers={practice.providers}
+                  savedOperatories={practice.savedOperatories}
+                  appointmentTypes={practice.appointmentTypes}
+                  initialAvailabilities={practice.manualAvailabilities || []}
+                  onUpdate={refreshPracticeData}
+                />
+              </div>
+            )}
+
             {/* Webhook Management Section */}
             <div className="bg-white rounded-lg shadow p-6 mb-6">
               <h2 className="text-lg font-semibold mb-4">Webhook Integration</h2>
@@ -457,6 +499,12 @@ export default function PracticeConfigPage() {
                   <span className="text-blue-800">Saved Operatories:</span>
                   <span className="font-medium text-blue-900">
                     {practice.savedOperatories.length} configured for scheduling
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Manual Availabilities:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.manualAvailabilities?.length || 0} configured
                   </span>
                 </div>
                 
