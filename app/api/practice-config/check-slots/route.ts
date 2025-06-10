@@ -116,7 +116,9 @@ export async function POST(req: NextRequest) {
 
     // Add operatory IDs if provided
     if (operatoryIds && Array.isArray(operatoryIds) && operatoryIds.length > 0) {
-      params['operatory_ids[]'] = operatoryIds;
+      // Convert local operatory IDs to NexHealth operatory IDs
+      const nexhealthOperatoryIds = activeOperatories.map(so => so.nexhealthOperatoryId);
+      params['operatory_ids[]'] = nexhealthOperatoryIds;
     }
 
     console.log("Checking appointment slots with params:", params);

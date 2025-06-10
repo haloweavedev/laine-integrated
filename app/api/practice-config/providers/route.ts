@@ -31,6 +31,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // First, deactivate all existing saved providers for this practice
+    await prisma.savedProvider.updateMany({
+      where: { practiceId: practice.id },
+      data: { isActive: false }
+    });
+
     // Save selected providers
     const savedProviders = await Promise.all(
       providerIds.map(async (providerId: string, index: number) => {
