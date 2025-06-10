@@ -60,7 +60,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
         inactive: 'false',
         non_patient: 'false',
         page: '1',
-        per_page: '5'
+        per_page: '300'
       };
 
       console.log(`[findPatient] Searching for: ${patientName}, DOB: ${args.dateOfBirth}`);

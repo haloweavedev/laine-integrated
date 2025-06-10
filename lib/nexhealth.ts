@@ -237,7 +237,7 @@ export async function getProviders(subdomain: string, locationId: string): Promi
   const data = await fetchNexhealthAPI(
     '/providers',
     subdomain,
-    { location_id: locationId, inactive: 'false' }
+    { location_id: locationId, inactive: 'false', page: '1', per_page: '300' }
   );
   
   console.log("Raw NexHealth providers response:", JSON.stringify(data, null, 2));
@@ -268,7 +268,7 @@ export async function getOperatories(subdomain: string, locationId: string): Pro
   const data = await fetchNexhealthAPI(
     '/operatories',
     subdomain,
-    { location_id: locationId, page: '1', per_page: '50' }
+    { location_id: locationId, page: '1', per_page: '300' }
   );
   
   console.log("Raw NexHealth operatories response:", JSON.stringify(data, null, 2));
