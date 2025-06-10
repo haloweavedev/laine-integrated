@@ -415,16 +415,188 @@ export async function deleteNexhealthAvailability(
   subdomain: string,
   nexhealthAvailabilityId: string
 ): Promise<void> {
-  if (!subdomain || !nexhealthAvailabilityId) {
-    throw new Error("Subdomain and availability ID are required.");
-  }
-
-  await fetchNexhealthAPI(
+  const response = await fetchNexhealthAPI(
     `/availabilities/${nexhealthAvailabilityId}`,
     subdomain,
-    {},
+    undefined,
+    'DELETE'
+  );
+  
+  // For DELETE operations, expect a 204 or successful response with no data
+  console.log(`Deleted NexHealth availability ${nexhealthAvailabilityId}:`, response);
+}
+
+// Appointment Type CRUD Functions
+
+interface CreateAppointmentTypeData {
+  name: string;
+  minutes: number;
+  bookable_online?: boolean;
+  parent_type: "Location" | "Institution";
+  parent_id: string | number;
+  emr_appt_descriptor_ids?: number[];
+}
+
+interface UpdateAppointmentTypeData {
+  name?: string;
+  minutes?: number;
+  bookable_online?: boolean;
+  parent_type?: "Location" | "Institution";
+  parent_id?: string | number;
+  emr_appt_descriptor_ids?: number[];
+}
+
+export async function createNexhealthAppointmentType(
+  subdomain: string,
+  locationId: string,
+  apptTypeData: CreateAppointmentTypeData
+): Promise<NexHealthAppointmentType> {
+  const requestBody = {
+    location_id: locationId,
+    appointment_type: {
+      name: apptTypeData.name,
+      minutes: apptTypeData.minutes,
+      bookable_online: apptTypeData.bookable_online ?? true,
+      parent_type: apptTypeData.parent_type,
+      parent_id: apptTypeData.parent_id,
+      ...(apptTypeData.emr_appt_descriptor_ids && {
+        emr_appt_descriptor_ids: apptTypeData.emr_appt_descriptor_ids
+      })
+    }
+  };
+
+  const response = await fetchNexhealthAPI(
+    '/appointment_types',
+    subdomain,
+    undefined,
+    'POST',
+    requestBody
+  );
+
+  console.log('Created NexHealth appointment type:', response);
+  return response.data;
+}
+
+export async function updateNexhealthAppointmentType(
+  subdomain: string,
+  nexhealthAppointmentTypeId: string,
+  locationId: string,
+  apptTypeData: UpdateAppointmentTypeData
+): Promise<NexHealthAppointmentType> {
+  const requestBody = {
+    location_id: locationId,
+    appointment_type: {
+      ...(apptTypeData.name !== undefined && { name: apptTypeData.name }),
+      ...(apptTypeData.minutes !== undefined && { minutes: apptTypeData.minutes }),
+      ...(apptTypeData.bookable_online !== undefined && { bookable_online: apptTypeData.bookable_online }),
+      ...(apptTypeData.parent_type !== undefined && { parent_type: apptTypeData.parent_type }),
+      ...(apptTypeData.parent_id !== undefined && { parent_id: apptTypeData.parent_id }),
+      ...(apptTypeData.emr_appt_descriptor_ids !== undefined && {
+        emr_appt_descriptor_ids: apptTypeData.emr_appt_descriptor_ids
+      })
+    }
+  };
+
+  const response = await fetchNexhealthAPI(
+    `/appointment_types/${nexhealthAppointmentTypeId}`,
+    subdomain,
+    undefined,
+    'PATCH',
+    requestBody
+  );
+
+  console.log(`Updated NexHealth appointment type ${nexhealthAppointmentTypeId}:`, response);
+  return response.data;
+}
+
+export async function deleteNexhealthAppointmentType(
+  subdomain: string,
+  nexhealthAppointmentTypeId: string,
+  locationId?: string
+): Promise<void> {
+  const params = locationId ? { location_id: locationId } : undefined;
+
+  const response = await fetchNexhealthAPI(
+    `/appointment_types/${nexhealthAppointmentTypeId}`,
+    subdomain,
+    params,
     'DELETE'
   );
 
-  console.log(`Deleted availability with ID: ${nexhealthAvailabilityId}`);
+  console.log(`Deleted NexHealth appointment type ${nexhealthAppointmentTypeId}:`, response);
+}
+
+// Sync function for appointment types
+export async function syncPracticeAppointmentTypes(
+  practiceId: string,
+  subdomain: string,
+  locationId: string
+): Promise<void> {
+  try {
+    console.log(`Syncing appointment types for practice ${practiceId}...`);
+    
+    // Fetch appointment types from NexHealth
+    const nexhealthAppointmentTypes = await getAppointmentTypes(subdomain, locationId);
+    
+    console.log(`Found ${nexhealthAppointmentTypes.length} appointment types from NexHealth`);
+
+    // Sync each appointment type with local database
+    for (const nexhealthType of nexhealthAppointmentTypes) {
+      try {
+        await prisma.appointmentType.upsert({
+          where: {
+            practiceId_nexhealthAppointmentTypeId: {
+              practiceId,
+              nexhealthAppointmentTypeId: nexhealthType.id.toString()
+            }
+          },
+          update: {
+            name: nexhealthType.name,
+            duration: nexhealthType.minutes,
+            bookableOnline: nexhealthType.bookable_online,
+            parentType: nexhealthType.parent_type,
+            parentId: nexhealthType.parent_id.toString(),
+            lastSyncError: null, // Clear any previous errors on successful sync
+            updatedAt: new Date()
+          },
+          create: {
+            practiceId,
+            nexhealthAppointmentTypeId: nexhealthType.id.toString(),
+            name: nexhealthType.name,
+            duration: nexhealthType.minutes,
+            bookableOnline: nexhealthType.bookable_online,
+            parentType: nexhealthType.parent_type,
+            parentId: nexhealthType.parent_id.toString()
+          }
+        });
+
+        console.log(`Synced appointment type: ${nexhealthType.name} (ID: ${nexhealthType.id})`);
+      } catch (error) {
+        console.error(`Error syncing appointment type ${nexhealthType.id}:`, error);
+        
+        // Try to update just the error field if the record exists
+        try {
+          await prisma.appointmentType.update({
+            where: {
+              practiceId_nexhealthAppointmentTypeId: {
+                practiceId,
+                nexhealthAppointmentTypeId: nexhealthType.id.toString()
+              }
+            },
+            data: {
+              lastSyncError: error instanceof Error ? error.message : 'Unknown sync error',
+              updatedAt: new Date()
+            }
+          });
+        } catch (updateError) {
+          console.error(`Failed to update sync error for appointment type ${nexhealthType.id}:`, updateError);
+        }
+      }
+    }
+
+    console.log(`Completed syncing appointment types for practice ${practiceId}`);
+  } catch (error) {
+    console.error(`Error syncing appointment types for practice ${practiceId}:`, error);
+    throw error;
+  }
 } 

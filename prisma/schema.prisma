@@ -204,7 +204,13 @@ model AppointmentType {
 
   nexhealthAppointmentTypeId  String // ID from NexHealth
   name                        String
-  duration                    Int    // Duration in minutes
+  duration                    Int    // Duration in minutes (maps to NexHealth 'minutes')
+  bookableOnline              Boolean? // Added field for online booking status
+
+  // Optional: Enhanced tracking fields
+  parentType                  String? // "Institution" or "Location"
+  parentId                    String? // ID of the parent
+  lastSyncError               String? // Error tracking for sync operations
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

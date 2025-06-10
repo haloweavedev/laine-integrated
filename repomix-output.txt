@@ -1,0 +1,3283 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: app/practice-config/page.tsx, app/practice-config/availability-manager.tsx, app/practice-config/operatory-selection.tsx, app/practice-config/provider-selection.tsx, app/api/practice-config/availabilities/route.ts, app/api/practice-config/availabilities/[availabilityId]/route.ts, app/api/practice-config/operatories/route.ts, app/api/practice-config/providers/route.ts, lib/nexhealth.ts, prisma/schema.prisma, lib/tools/findAppointmentType.ts, lib/tools/types.ts, lib/tools/index.ts
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+app/
+  api/
+    practice-config/
+      availabilities/
+        [availabilityId]/
+          route.ts
+        route.ts
+      operatories/
+        route.ts
+      providers/
+        route.ts
+  practice-config/
+    availability-manager.tsx
+    operatory-selection.tsx
+    page.tsx
+    provider-selection.tsx
+lib/
+  tools/
+    findAppointmentType.ts
+    index.ts
+    types.ts
+  nexhealth.ts
+prisma/
+  schema.prisma
+
+================================================================
+Files
+================================================================
+
+================
+File: app/api/practice-config/availabilities/[availabilityId]/route.ts
+================
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { updateNexhealthAvailability, deleteNexhealthAvailability } from "@/lib/nexhealth";
+
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ availabilityId: string }> }) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    const { availabilityId } = await params;
+
+    // Find the existing availability
+    const existingAvailability = await prisma.manualAvailability.findFirst({
+      where: {
+        id: availabilityId,
+        practiceId: practice.id
+      },
+      include: {
+        provider: true,
+        savedOperatory: true
+      }
+    });
+
+    if (!existingAvailability) {
+      return NextResponse.json({ error: "Availability not found" }, { status: 404 });
+    }
+
+    const {
+      providerId,
+      operatoryId,
+      daysOfWeek,
+      beginTime,
+      endTime,
+      appointmentTypeIds,
+      isActive
+    } = await req.json();
+
+    // Validate input formats if provided
+    if (daysOfWeek && (!Array.isArray(daysOfWeek) || daysOfWeek.length === 0)) {
+      return NextResponse.json({ error: "daysOfWeek must be a non-empty array" }, { status: 400 });
+    }
+
+    if (appointmentTypeIds && (!Array.isArray(appointmentTypeIds) || appointmentTypeIds.length === 0)) {
+      return NextResponse.json({ error: "appointmentTypeIds must be a non-empty array" }, { status: 400 });
+    }
+
+    // Validate time format if provided
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (beginTime && !timeRegex.test(beginTime)) {
+      return NextResponse.json({ error: "Begin time format must be HH:MM" }, { status: 400 });
+    }
+
+    if (endTime && !timeRegex.test(endTime)) {
+      return NextResponse.json({ error: "End time format must be HH:MM" }, { status: 400 });
+    }
+
+    // Validate end time is after begin time if both are provided
+    if (beginTime && endTime) {
+      const [beginHour, beginMin] = beginTime.split(':').map(Number);
+      const [endHour, endMin] = endTime.split(':').map(Number);
+      const beginMinutes = beginHour * 60 + beginMin;
+      const endMinutes = endHour * 60 + endMin;
+
+      if (endMinutes <= beginMinutes) {
+        return NextResponse.json({ error: "End time must be after begin time" }, { status: 400 });
+      }
+    }
+
+    // Validate provider if provided
+    if (providerId) {
+      const provider = await prisma.provider.findFirst({
+        where: {
+          id: providerId,
+          practiceId: practice.id
+        }
+      });
+
+      if (!provider) {
+        return NextResponse.json({ error: "Provider not found or doesn't belong to practice" }, { status: 400 });
+      }
+    }
+
+    // Validate operatory if provided
+    let validatedOperatoryId = operatoryId;
+    if (operatoryId !== undefined) {
+      if (operatoryId) {
+        const operatory = await prisma.savedOperatory.findFirst({
+          where: {
+            id: operatoryId,
+            practiceId: practice.id,
+            isActive: true
+          }
+        });
+
+        if (!operatory) {
+          return NextResponse.json({ error: "Operatory not found or not active" }, { status: 400 });
+        }
+      } else {
+        validatedOperatoryId = null;
+      }
+    }
+
+    // Validate appointment types if provided
+    if (appointmentTypeIds) {
+      const validAppointmentTypes = await prisma.appointmentType.findMany({
+        where: {
+          practiceId: practice.id,
+          nexhealthAppointmentTypeId: { in: appointmentTypeIds }
+        }
+      });
+
+      if (validAppointmentTypes.length !== appointmentTypeIds.length) {
+        return NextResponse.json({ error: "Some appointment types don't belong to practice" }, { status: 400 });
+      }
+    }
+
+    // Prepare update data (only include fields that were provided)
+    const updateData: Record<string, string | string[] | boolean | null> = {};
+    if (providerId !== undefined) updateData.providerId = providerId;
+    if (validatedOperatoryId !== undefined) updateData.operatoryId = validatedOperatoryId;
+    if (daysOfWeek !== undefined) updateData.daysOfWeek = daysOfWeek;
+    if (beginTime !== undefined) updateData.beginTime = beginTime;
+    if (endTime !== undefined) updateData.endTime = endTime;
+    if (appointmentTypeIds !== undefined) updateData.appointmentTypeIds = appointmentTypeIds;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    // Update the availability
+    const updatedAvailability = await prisma.manualAvailability.update({
+      where: { id: availabilityId },
+      data: updateData,
+      include: {
+        provider: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            nexhealthProviderId: true
+          }
+        },
+        savedOperatory: {
+          select: {
+            id: true,
+            name: true,
+            nexhealthOperatoryId: true
+          }
+        }
+      }
+    });
+
+    // Update availability in NexHealth
+    if (existingAvailability.nexhealthAvailabilityId) {
+      try {
+        await updateNexhealthAvailability(
+          practice.nexhealthSubdomain!,
+          existingAvailability.nexhealthAvailabilityId,
+          {
+            provider_id: Number(updatedAvailability.provider.nexhealthProviderId),
+            operatory_id: updatedAvailability.savedOperatory?.nexhealthOperatoryId ? Number(updatedAvailability.savedOperatory.nexhealthOperatoryId) : undefined,
+            days: updatedAvailability.daysOfWeek,
+            begin_time: updatedAvailability.beginTime,
+            end_time: updatedAvailability.endTime,
+            appointment_type_ids: updatedAvailability.appointmentTypeIds.map(Number),
+            active: updatedAvailability.isActive
+          }
+        );
+
+        await prisma.manualAvailability.update({
+          where: { id: availabilityId },
+          data: {
+            lastSyncWithNexhealthAt: new Date(),
+            syncError: null
+          }
+        });
+      } catch (error) {
+        console.error("Failed to update availability in NexHealth:", error);
+        await prisma.manualAvailability.update({
+          where: { id: availabilityId },
+          data: {
+            syncError: error instanceof Error ? error.message : "Unknown error"
+          }
+        });
+      }
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      availability: updatedAvailability 
+    });
+
+  } catch (error) {
+    console.error("Error updating availability:", error);
+    return NextResponse.json(
+      { error: "Failed to update availability" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ availabilityId: string }> }) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    const { availabilityId } = await params;
+
+    // Find the existing availability
+    const existingAvailability = await prisma.manualAvailability.findFirst({
+      where: {
+        id: availabilityId,
+        practiceId: practice.id
+      }
+    });
+
+    if (!existingAvailability) {
+      return NextResponse.json({ error: "Availability not found" }, { status: 404 });
+    }
+
+    // Delete availability from NexHealth first
+    if (existingAvailability.nexhealthAvailabilityId) {
+      try {
+        await deleteNexhealthAvailability(
+          practice.nexhealthSubdomain!,
+          existingAvailability.nexhealthAvailabilityId
+        );
+      } catch (error) {
+        console.error("Failed to delete availability from NexHealth:", error);
+        // Continue with local deletion even if NexHealth deletion fails
+      }
+    }
+
+    // Delete from local database
+    await prisma.manualAvailability.delete({
+      where: { id: availabilityId }
+    });
+
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    console.error("Error deleting availability:", error);
+    return NextResponse.json(
+      { error: "Failed to delete availability" },
+      { status: 500 }
+    );
+  }
+}
+
+================
+File: app/api/practice-config/availabilities/route.ts
+================
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { createNexhealthAvailability } from "@/lib/nexhealth";
+
+export async function GET() {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    const availabilities = await prisma.manualAvailability.findMany({
+      where: { practiceId: practice.id },
+      include: {
+        provider: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            nexhealthProviderId: true
+          }
+        },
+        savedOperatory: {
+          select: {
+            id: true,
+            name: true,
+            nexhealthOperatoryId: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Map appointment type IDs to their names for easier display
+    const appointmentTypes = await prisma.appointmentType.findMany({
+      where: { practiceId: practice.id },
+      select: {
+        nexhealthAppointmentTypeId: true,
+        name: true
+      }
+    });
+
+    const appointmentTypeMap = new Map(
+      appointmentTypes.map(type => [type.nexhealthAppointmentTypeId, type.name])
+    );
+
+    const availabilitiesWithTypeNames = availabilities.map(availability => ({
+      ...availability,
+      appointmentTypeNames: availability.appointmentTypeIds.map(typeId => 
+        appointmentTypeMap.get(typeId) || `Unknown Type (${typeId})`
+      )
+    }));
+
+    return NextResponse.json({ availabilities: availabilitiesWithTypeNames });
+
+  } catch (error) {
+    console.error("Error fetching availabilities:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch availabilities" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId },
+      include: {
+        savedOperatories: true
+      }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    const {
+      providerId,
+      operatoryId,
+      daysOfWeek,
+      beginTime,
+      endTime,
+      appointmentTypeIds,
+      isActive = true
+    } = await req.json();
+
+    // Validate required fields
+    if (!providerId || !daysOfWeek || !beginTime || !endTime || !appointmentTypeIds) {
+      return NextResponse.json({ 
+        error: "Missing required fields: providerId, daysOfWeek, beginTime, endTime, appointmentTypeIds" 
+      }, { status: 400 });
+    }
+
+    // Validate input formats
+    if (!Array.isArray(daysOfWeek) || daysOfWeek.length === 0) {
+      return NextResponse.json({ error: "daysOfWeek must be a non-empty array" }, { status: 400 });
+    }
+
+    if (!Array.isArray(appointmentTypeIds) || appointmentTypeIds.length === 0) {
+      return NextResponse.json({ error: "appointmentTypeIds must be a non-empty array" }, { status: 400 });
+    }
+
+    // Validate time format (HH:MM)
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(beginTime) || !timeRegex.test(endTime)) {
+      return NextResponse.json({ error: "Time format must be HH:MM" }, { status: 400 });
+    }
+
+    // Validate end time is after begin time
+    const [beginHour, beginMin] = beginTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    const beginMinutes = beginHour * 60 + beginMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    if (endMinutes <= beginMinutes) {
+      return NextResponse.json({ error: "End time must be after begin time" }, { status: 400 });
+    }
+
+    // Validate provider exists and belongs to practice
+    const provider = await prisma.provider.findFirst({
+      where: {
+        id: providerId,
+        practiceId: practice.id
+      }
+    });
+
+    if (!provider) {
+      return NextResponse.json({ error: "Provider not found or doesn't belong to practice" }, { status: 400 });
+    }
+
+    // Validate operatory if provided
+    let validatedOperatoryId = null;
+    if (operatoryId) {
+      const operatory = await prisma.savedOperatory.findFirst({
+        where: {
+          id: operatoryId,
+          practiceId: practice.id,
+          isActive: true
+        }
+      });
+
+      if (!operatory) {
+        return NextResponse.json({ error: "Operatory not found or not active" }, { status: 400 });
+      }
+      validatedOperatoryId = operatoryId;
+    }
+
+    // Validate appointment types belong to practice
+    const validAppointmentTypes = await prisma.appointmentType.findMany({
+      where: {
+        practiceId: practice.id,
+        nexhealthAppointmentTypeId: { in: appointmentTypeIds }
+      }
+    });
+
+    if (validAppointmentTypes.length !== appointmentTypeIds.length) {
+      return NextResponse.json({ error: "Some appointment types don't belong to practice" }, { status: 400 });
+    }
+
+    // Create the manual availability
+    const availability = await prisma.manualAvailability.create({
+      data: {
+        practiceId: practice.id,
+        providerId,
+        operatoryId: validatedOperatoryId,
+        daysOfWeek,
+        beginTime,
+        endTime,
+        appointmentTypeIds,
+        isActive
+      },
+      include: {
+        provider: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            nexhealthProviderId: true
+          }
+        },
+        savedOperatory: {
+          select: {
+            id: true,
+            name: true,
+            nexhealthOperatoryId: true
+          }
+        }
+      }
+    });
+
+    // Create availability in NexHealth
+    try {
+      const nexhealthAvailability = await createNexhealthAvailability(
+        practice.nexhealthSubdomain!,
+        practice.nexhealthLocationId!,
+        {
+          provider_id: Number(provider.nexhealthProviderId),
+          operatory_id: availability.savedOperatory?.nexhealthOperatoryId ? Number(availability.savedOperatory.nexhealthOperatoryId) : undefined,
+          days: daysOfWeek,
+          begin_time: beginTime,
+          end_time: endTime,
+          appointment_type_ids: appointmentTypeIds.map(Number),
+          active: isActive
+        }
+      );
+
+      // Update with NexHealth ID
+      await prisma.manualAvailability.update({
+        where: { id: availability.id },
+        data: {
+          nexhealthAvailabilityId: nexhealthAvailability.id.toString(),
+          lastSyncWithNexhealthAt: new Date(),
+          syncError: null
+        }
+      });
+    } catch (error) {
+      console.error("Failed to create availability in NexHealth:", error);
+      await prisma.manualAvailability.update({
+        where: { id: availability.id },
+        data: {
+          syncError: error instanceof Error ? error.message : "Unknown error"
+        }
+      });
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      availability 
+    });
+
+  } catch (error) {
+    console.error("Error creating availability:", error);
+    return NextResponse.json(
+      { error: "Failed to create availability" },
+      { status: 500 }
+    );
+  }
+}
+
+================
+File: app/api/practice-config/operatories/route.ts
+================
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { operatories, setAsDefault } = await req.json();
+
+    if (!Array.isArray(operatories)) {
+      return NextResponse.json({ error: "operatories must be an array" }, { status: 400 });
+    }
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    // Clear existing default if setting new default
+    if (setAsDefault) {
+      await prisma.savedOperatory.updateMany({
+        where: { practiceId: practice.id },
+        data: { isDefault: false }
+      });
+    }
+
+    // Save selected operatories
+    const savedOperatories = await Promise.all(
+      operatories.map(async (operatory: { id: string; name: string }, index: number) => {
+        return prisma.savedOperatory.upsert({
+          where: {
+            practiceId_nexhealthOperatoryId: {
+              practiceId: practice.id,
+              nexhealthOperatoryId: operatory.id
+            }
+          },
+          update: {
+            name: operatory.name,
+            isActive: true,
+            isDefault: setAsDefault && index === 0
+          },
+          create: {
+            practiceId: practice.id,
+            nexhealthOperatoryId: operatory.id,
+            name: operatory.name,
+            isActive: true,
+            isDefault: setAsDefault && index === 0
+          }
+        });
+      })
+    );
+
+    return NextResponse.json({ 
+      success: true, 
+      savedOperatories: savedOperatories.length 
+    });
+
+  } catch (error) {
+    console.error("Error saving operatories:", error);
+    return NextResponse.json(
+      { error: "Failed to save operatories" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { operatoryIds } = await req.json();
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    await prisma.savedOperatory.deleteMany({
+      where: {
+        practiceId: practice.id,
+        nexhealthOperatoryId: { in: operatoryIds }
+      }
+    });
+
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    console.error("Error removing operatories:", error);
+    return NextResponse.json(
+      { error: "Failed to remove operatories" },
+      { status: 500 }
+    );
+  }
+}
+
+================
+File: app/api/practice-config/providers/route.ts
+================
+import { auth } from "@clerk/nextjs/server";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { providerIds, setAsDefault } = await req.json();
+
+    if (!Array.isArray(providerIds)) {
+      return NextResponse.json({ error: "providerIds must be an array" }, { status: 400 });
+    }
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    // Clear existing default if setting new default
+    if (setAsDefault) {
+      await prisma.savedProvider.updateMany({
+        where: { practiceId: practice.id },
+        data: { isDefault: false }
+      });
+    }
+
+    // Save selected providers
+    const savedProviders = await Promise.all(
+      providerIds.map(async (providerId: string, index: number) => {
+        return prisma.savedProvider.upsert({
+          where: {
+            practiceId_providerId: {
+              practiceId: practice.id,
+              providerId
+            }
+          },
+          update: {
+            isActive: true,
+            isDefault: setAsDefault && index === 0
+          },
+          create: {
+            practiceId: practice.id,
+            providerId,
+            isActive: true,
+            isDefault: setAsDefault && index === 0
+          }
+        });
+      })
+    );
+
+    return NextResponse.json({ 
+      success: true, 
+      savedProviders: savedProviders.length 
+    });
+
+  } catch (error) {
+    console.error("Error saving providers:", error);
+    return NextResponse.json(
+      { error: "Failed to save providers" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { providerIds } = await req.json();
+
+    const practice = await prisma.practice.findUnique({
+      where: { clerkUserId: userId }
+    });
+
+    if (!practice) {
+      return NextResponse.json({ error: "Practice not found" }, { status: 404 });
+    }
+
+    await prisma.savedProvider.deleteMany({
+      where: {
+        practiceId: practice.id,
+        providerId: { in: providerIds }
+      }
+    });
+
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    console.error("Error removing providers:", error);
+    return NextResponse.json(
+      { error: "Failed to remove providers" },
+      { status: 500 }
+    );
+  }
+}
+
+================
+File: app/practice-config/availability-manager.tsx
+================
+"use client";
+
+import { useState } from "react";
+import { toast } from "sonner";
+
+interface Provider {
+  id: string;
+  nexhealthProviderId: string;
+  firstName: string | null;
+  lastName: string;
+}
+
+interface SavedOperatory {
+  id: string;
+  nexhealthOperatoryId: string;
+  name: string;
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+interface AppointmentType {
+  id: string;
+  nexhealthAppointmentTypeId: string;
+  name: string;
+  duration: number;
+}
+
+interface ManualAvailabilityData {
+  id: string;
+  nexhealthAvailabilityId: string | null;
+  provider: {
+    id: string;
+    firstName: string | null;
+    lastName: string;
+    nexhealthProviderId: string;
+  };
+  savedOperatory: {
+    id: string;
+    name: string;
+    nexhealthOperatoryId: string;
+  } | null;
+  daysOfWeek: string[];
+  beginTime: string;
+  endTime: string;
+  appointmentTypeIds: string[];
+  appointmentTypeNames?: string[];
+  isActive: boolean;
+  lastSyncWithNexhealthAt: string | null;
+  syncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AvailabilityFormData {
+  providerId: string;
+  operatoryId: string;
+  daysOfWeek: string[];
+  beginTime: string;
+  endTime: string;
+  appointmentTypeIds: string[];
+  isActive: boolean;
+}
+
+interface AvailabilityManagerProps {
+  practiceId: string;
+  providers: Provider[];
+  savedOperatories: SavedOperatory[];
+  appointmentTypes: AppointmentType[];
+  initialAvailabilities: ManualAvailabilityData[];
+  onUpdate: () => void;
+}
+
+const DAYS_OF_WEEK = [
+  'Monday',
+  'Tuesday', 
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday'
+];
+
+export function AvailabilityManager({
+  providers,
+  savedOperatories,
+  appointmentTypes,
+  initialAvailabilities,
+  onUpdate
+}: AvailabilityManagerProps) {
+  const [availabilities] = useState<ManualAvailabilityData[]>(initialAvailabilities);
+  const [showForm, setShowForm] = useState(false);
+  const [editingAvailability, setEditingAvailability] = useState<ManualAvailabilityData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState<AvailabilityFormData>({
+    providerId: '',
+    operatoryId: '',
+    daysOfWeek: [],
+    beginTime: '09:00',
+    endTime: '17:00',
+    appointmentTypeIds: [],
+    isActive: true
+  });
+
+  const resetForm = () => {
+    setFormData({
+      providerId: '',
+      operatoryId: '',
+      daysOfWeek: [],
+      beginTime: '09:00',
+      endTime: '17:00',
+      appointmentTypeIds: [],
+      isActive: true
+    });
+    setEditingAvailability(null);
+    setShowForm(false);
+  };
+
+  const handleAddNew = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const handleEdit = (availability: ManualAvailabilityData) => {
+    setFormData({
+      providerId: availability.provider.id,
+      operatoryId: availability.savedOperatory?.id || '',
+      daysOfWeek: availability.daysOfWeek,
+      beginTime: availability.beginTime,
+      endTime: availability.endTime,
+      appointmentTypeIds: availability.appointmentTypeIds,
+      isActive: availability.isActive
+    });
+    setEditingAvailability(availability);
+    setShowForm(true);
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation
+    if (!formData.providerId) {
+      toast.error('Please select a provider');
+      return;
+    }
+    
+    if (formData.daysOfWeek.length === 0) {
+      toast.error('Please select at least one day of the week');
+      return;
+    }
+    
+    if (formData.appointmentTypeIds.length === 0) {
+      toast.error('Please select at least one appointment type');
+      return;
+    }
+
+    // Validate time format and logic
+    const beginTime = formData.beginTime;
+    const endTime = formData.endTime;
+    const [beginHour, beginMin] = beginTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    const beginMinutes = beginHour * 60 + beginMin;
+    const endMinutes = endHour * 60 + endMin;
+
+    if (endMinutes <= beginMinutes) {
+      toast.error('End time must be after begin time');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const url = editingAvailability 
+        ? `/api/practice-config/availabilities/${editingAvailability.id}`
+        : '/api/practice-config/availabilities';
+      
+      const method = editingAvailability ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          operatoryId: formData.operatoryId || null
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to save availability');
+      }
+
+      toast.success(editingAvailability ? 'Availability updated successfully!' : 'Availability created successfully!');
+      resetForm();
+      onUpdate(); // Refresh parent data
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save availability');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (availability: ManualAvailabilityData) => {
+    if (!confirm('Are you sure you want to delete this availability? This action cannot be undone.')) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/practice-config/availabilities/${availability.id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete availability');
+      }
+
+      toast.success('Availability deleted successfully!');
+      onUpdate(); // Refresh parent data
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete availability');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDayToggle = (day: string) => {
+    setFormData(prev => ({
+      ...prev,
+      daysOfWeek: prev.daysOfWeek.includes(day)
+        ? prev.daysOfWeek.filter(d => d !== day)
+        : [...prev.daysOfWeek, day]
+    }));
+  };
+
+  const handleAppointmentTypeToggle = (typeId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      appointmentTypeIds: prev.appointmentTypeIds.includes(typeId)
+        ? prev.appointmentTypeIds.filter(id => id !== typeId)
+        : [...prev.appointmentTypeIds, typeId]
+    }));
+  };
+
+  const formatSyncStatus = (availability: ManualAvailabilityData) => {
+    if (availability.syncError) {
+      return (
+        <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded">
+          Sync Error: {availability.syncError}
+        </span>
+      );
+    }
+    
+    if (availability.nexhealthAvailabilityId && availability.lastSyncWithNexhealthAt) {
+      return (
+        <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+          Synced: {new Date(availability.lastSyncWithNexhealthAt).toLocaleDateString()}
+        </span>
+      );
+    }
+    
+    return (
+      <span className="text-xs text-yellow-600 bg-yellow-50 px-2 py-1 rounded">
+        Pending Sync
+      </span>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h3 className="text-lg font-semibold">Manual Availability Configuration</h3>
+          <p className="text-sm text-gray-600">
+            Define when your providers are available for specific appointment types and operatories.
+          </p>
+        </div>
+        <button
+          onClick={handleAddNew}
+          disabled={loading}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Add Availability
+        </button>
+      </div>
+
+      {/* Existing Availabilities List */}
+      {availabilities.length > 0 ? (
+        <div className="space-y-4 mb-6">
+          {availabilities.map((availability) => (
+            <div key={availability.id} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h4 className="font-medium text-gray-900">
+                      {availability.provider.firstName} {availability.provider.lastName}
+                    </h4>
+                    {availability.savedOperatory && (
+                      <span className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                        {availability.savedOperatory.name}
+                      </span>
+                    )}
+                    {!availability.isActive && (
+                      <span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded">
+                        Inactive
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-700">Days:</span>
+                      <div className="mt-1">
+                        {availability.daysOfWeek.join(', ')}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <span className="font-medium text-gray-700">Time:</span>
+                      <div className="mt-1">
+                        {availability.beginTime} - {availability.endTime}
+                      </div>
+                    </div>
+                    
+                    <div className="md:col-span-2">
+                      <span className="font-medium text-gray-700">Appointment Types:</span>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {availability.appointmentTypeNames?.map((typeName, index) => (
+                          <span key={index} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                            {typeName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex flex-col items-end gap-2">
+                  {formatSyncStatus(availability)}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleEdit(availability)}
+                      disabled={loading}
+                      className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(availability)}
+                      disabled={loading}
+                      className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-8 text-gray-500">
+          <p>No manual availabilities configured yet.</p>
+          <p className="text-sm">Click &quot;Add Availability&quot; to get started.</p>
+        </div>
+      )}
+
+      {/* Add/Edit Form Modal */}
+      {showForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">
+                  {editingAvailability ? 'Edit Availability' : 'Add New Availability'}
+                </h3>
+                <button
+                  onClick={resetForm}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleFormSubmit} className="space-y-4">
+                {/* Provider Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Provider *
+                  </label>
+                  <select
+                    value={formData.providerId}
+                    onChange={(e) => setFormData(prev => ({ ...prev, providerId: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="">Select a provider</option>
+                    {providers.map(provider => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.firstName} {provider.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Operatory Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Operatory (Optional)
+                  </label>
+                  <select
+                    value={formData.operatoryId}
+                    onChange={(e) => setFormData(prev => ({ ...prev, operatoryId: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Any operatory</option>
+                    {savedOperatories.map(operatory => (
+                      <option key={operatory.id} value={operatory.id}>
+                        {operatory.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Days of Week */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Days of Week *
+                  </label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {DAYS_OF_WEEK.map(day => (
+                      <label key={day} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={formData.daysOfWeek.includes(day)}
+                          onChange={() => handleDayToggle(day)}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        {day}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Time Range */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Begin Time *
+                    </label>
+                    <input
+                      type="time"
+                      value={formData.beginTime}
+                      onChange={(e) => setFormData(prev => ({ ...prev, beginTime: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      End Time *
+                    </label>
+                    <input
+                      type="time"
+                      value={formData.endTime}
+                      onChange={(e) => setFormData(prev => ({ ...prev, endTime: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Appointment Types */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Appointment Types *
+                  </label>
+                  <div className="max-h-40 overflow-y-auto border border-gray-300 rounded-md p-3 space-y-2">
+                    {appointmentTypes.map(type => (
+                      <label key={type.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={formData.appointmentTypeIds.includes(type.nexhealthAppointmentTypeId)}
+                          onChange={() => handleAppointmentTypeToggle(type.nexhealthAppointmentTypeId)}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        {type.name} ({type.duration} min)
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Active Status */}
+                <div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={formData.isActive}
+                      onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    Active (availability will be used for scheduling)
+                  </label>
+                </div>
+
+                {/* Form Actions */}
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    disabled={loading}
+                    className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Saving...' : (editingAvailability ? 'Update' : 'Create')}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+================
+File: app/practice-config/operatory-selection.tsx
+================
+"use client";
+
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+
+interface Operatory {
+  id: number;
+  name: string;
+  location_id: number;
+  active: boolean;
+}
+
+interface SavedOperatory {
+  id: string;
+  nexhealthOperatoryId: string;
+  name: string;
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+interface OperatorySelectionProps {
+  practice: {
+    nexhealthSubdomain: string;
+    nexhealthLocationId: string;
+  };
+  savedOperatories: SavedOperatory[];
+  onUpdate: () => void;
+}
+
+export function OperatorySelection({ practice, savedOperatories, onUpdate }: OperatorySelectionProps) {
+  const [operatories, setOperatories] = useState<Operatory[]>([]);
+  const [selectedOperatories, setSelectedOperatories] = useState<Operatory[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fetchingOperatories, setFetchingOperatories] = useState(false);
+
+  useEffect(() => {
+    if (practice.nexhealthSubdomain && practice.nexhealthLocationId) {
+      fetchOperatories();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [practice.nexhealthSubdomain, practice.nexhealthLocationId]);
+
+  const fetchOperatories = async () => {
+    setFetchingOperatories(true);
+    try {
+      // Call NexHealth API to get operatories
+      const response = await fetch('/api/practice-config/fetch-operatories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subdomain: practice.nexhealthSubdomain,
+          locationId: practice.nexhealthLocationId
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch operatories');
+
+      const data = await response.json();
+      setOperatories(data.operatories || []);
+      
+      // Pre-select saved operatories
+      const savedOperatoryIds = savedOperatories.map(so => so.nexhealthOperatoryId);
+      setSelectedOperatories(
+        data.operatories.filter((op: Operatory) => 
+          savedOperatoryIds.includes(op.id.toString())
+        )
+      );
+    } catch (error) {
+      toast.error('Failed to fetch operatories');
+      console.error(error);
+    } finally {
+      setFetchingOperatories(false);
+    }
+  };
+
+  const handleOperatoryToggle = (operatory: Operatory) => {
+    setSelectedOperatories(prev => {
+      const isSelected = prev.some(op => op.id === operatory.id);
+      if (isSelected) {
+        return prev.filter(op => op.id !== operatory.id);
+      } else {
+        return [...prev, operatory];
+      }
+    });
+  };
+
+  const handleSaveOperatories = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/practice-config/operatories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          operatories: selectedOperatories.map(op => ({
+            id: op.id.toString(),
+            name: op.name
+          })),
+          setAsDefault: true 
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to save operatories');
+
+      toast.success('Operatories saved successfully!');
+      onUpdate();
+    } catch (error) {
+      toast.error('Failed to save operatories');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (fetchingOperatories) {
+    return (
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold mb-4">Operatory Selection</h3>
+        <div className="text-gray-600">Loading operatories...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <h3 className="text-lg font-semibold mb-4">Select Operatories for Scheduling</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Choose which operatories (rooms/chairs) should be available for appointment scheduling.
+      </p>
+      
+      {operatories.length === 0 ? (
+        <div className="text-gray-600 mb-4">
+          No operatories found. This practice might not use operatory-based scheduling.
+        </div>
+      ) : (
+        <div className="space-y-3 mb-6">
+          {operatories.map(operatory => {
+            const isSelected = selectedOperatories.some(op => op.id === operatory.id);
+            const isSaved = savedOperatories.some(so => so.nexhealthOperatoryId === operatory.id.toString());
+            
+            return (
+              <div key={operatory.id} className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id={`operatory-${operatory.id}`}
+                  checked={isSelected}
+                  onChange={() => handleOperatoryToggle(operatory)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <label htmlFor={`operatory-${operatory.id}`} className="flex-1 text-sm">
+                  {operatory.name}
+                  {isSaved && (
+                    <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
+                      Currently Saved
+                    </span>
+                  )}
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <button
+          onClick={handleSaveOperatories}
+          disabled={loading || selectedOperatories.length === 0}
+          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? 'Saving...' : `Save ${selectedOperatories.length} Operatory(s)`}
+        </button>
+        
+        {savedOperatories.length > 0 && (
+          <div className="text-sm text-gray-600 flex items-center">
+            ✅ {savedOperatories.length} operatory(s) currently saved for scheduling
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+================
+File: app/practice-config/provider-selection.tsx
+================
+"use client";
+
+import { useState } from "react";
+import { toast } from "sonner";
+
+interface Provider {
+  id: string;
+  nexhealthProviderId: string;
+  firstName: string | null;
+  lastName: string;
+}
+
+interface SavedProvider {
+  id: string;
+  providerId: string;
+  isDefault: boolean;
+  isActive: boolean;
+  provider: Provider;
+}
+
+interface ProviderSelectionProps {
+  providers: Provider[];
+  savedProviders: SavedProvider[];
+  onUpdate: () => void;
+}
+
+export function ProviderSelection({ providers, savedProviders, onUpdate }: ProviderSelectionProps) {
+  const [selectedProviders, setSelectedProviders] = useState<string[]>(
+    savedProviders.map(sp => sp.providerId)
+  );
+  const [loading, setLoading] = useState(false);
+
+  const handleProviderToggle = (providerId: string) => {
+    setSelectedProviders(prev => 
+      prev.includes(providerId)
+        ? prev.filter(id => id !== providerId)
+        : [...prev, providerId]
+    );
+  };
+
+  const handleSaveProviders = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/practice-config/providers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          providerIds: selectedProviders,
+          setAsDefault: true 
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to save providers');
+
+      toast.success('Providers saved successfully!');
+      onUpdate();
+    } catch (error) {
+      toast.error('Failed to save providers');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6">
+      <h3 className="text-lg font-semibold mb-4">Select Providers for Scheduling</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Choose which providers should be available for online appointment scheduling.
+      </p>
+      
+      <div className="space-y-3 mb-6">
+        {providers.map(provider => {
+          const isSelected = selectedProviders.includes(provider.id);
+          const isSaved = savedProviders.some(sp => sp.providerId === provider.id);
+          
+          return (
+            <div key={provider.id} className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id={`provider-${provider.id}`}
+                checked={isSelected}
+                onChange={() => handleProviderToggle(provider.id)}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <label htmlFor={`provider-${provider.id}`} className="flex-1 text-sm">
+                {provider.firstName} {provider.lastName}
+                {isSaved && (
+                  <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
+                    Currently Saved
+                  </span>
+                )}
+              </label>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={handleSaveProviders}
+          disabled={loading || selectedProviders.length === 0}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? 'Saving...' : `Save ${selectedProviders.length} Provider(s)`}
+        </button>
+        
+        {savedProviders.length > 0 && (
+          <div className="text-sm text-gray-600 flex items-center">
+            ✅ {savedProviders.length} provider(s) currently saved for scheduling
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+================
+File: lib/tools/types.ts
+================
+// lib/tools/types.ts
+import { z } from "zod";
+import { Practice, AppointmentType, SavedProvider, SavedOperatory } from "@prisma/client";
+
+// Enhanced practice context with scheduling data
+export interface PracticeWithSchedulingData extends Practice {
+  appointmentTypes: AppointmentType[];
+  savedProviders: (SavedProvider & { provider: { id: string; firstName: string | null; lastName: string; nexhealthProviderId: string; } })[];
+  savedOperatories: SavedOperatory[];
+}
+
+// Tool execution context
+export interface ToolExecutionContext {
+  practice: PracticeWithSchedulingData;
+  vapiCallId: string;
+  toolCallId: string;
+  assistantId: string;
+}
+
+// Standardized tool result format
+export interface ToolResult {
+  success: boolean;
+  message_to_patient: string;
+  data?: Record<string, unknown>;
+  error_code?: string;
+  details?: string;
+}
+
+// VAPI tool definition interface
+export interface VapiToolFunction {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>; // JSON schema object
+}
+
+export interface VapiToolSchema {
+  type: "function";
+  async?: boolean;
+  function: VapiToolFunction;
+  server: {
+    url: string;
+    secret?: string;
+  };
+  messages?: Array<{
+    type: "request-start" | "request-response-delayed" | "request-complete" | "request-failed";
+    content?: string;
+    timingMilliseconds?: number;
+  }>;
+}
+
+// Internal tool definition
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface ToolDefinition<T extends z.ZodType<any, any>> {
+  name: string;
+  description: string;
+  schema: T;
+  run: (params: { 
+    args: z.infer<T>; 
+    context: ToolExecutionContext 
+  }) => Promise<ToolResult>;
+  messages?: {
+    start?: string;
+    delay?: string;
+    success?: string;
+    fail?: string;
+  };
+  async?: boolean;
+}
+
+// VAPI webhook payload types
+export interface VapiToolCall {
+  toolCallId: string;
+  name: string;
+  arguments: string; // JSON string
+}
+
+export interface VapiToolCallsMessage {
+  type: "tool-calls";
+  timestamp: number;
+  call: {
+    id: string;
+    assistantId: string;
+    orgId?: string;
+  };
+  assistant: {
+    id: string;
+  };
+  toolCallList: VapiToolCall[];
+}
+
+export interface VapiServerMessage {
+  message: VapiToolCallsMessage;
+}
+
+================
+File: lib/tools/findAppointmentType.ts
+================
+import { z } from "zod";
+import { ToolDefinition, ToolResult } from "./types";
+
+export const findAppointmentTypeSchema = z.object({
+  userRequest: z.string()
+    .min(1)
+    .describe(`Extract appointment type patient is requesting.
+
+Common variations:
+- Cleaning: "cleaning", "teeth cleaning", "hygiene", "prophy"
+- Checkup: "checkup", "exam", "routine visit"
+- Emergency: "tooth pain", "broken tooth", "urgent"
+- Filling: "cavity", "filling", "tooth repair"
+- Crown: "crown", "cap"
+- Root Canal: "root canal", "nerve treatment"
+- Extraction: "pull tooth", "remove tooth"
+
+Examples: "I need a cleaning" → "cleaning", "My tooth hurts" → "tooth pain"`)
+});
+
+const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {
+  name: "find_appointment_type",
+  description: "Matches the patient's request for service to available appointment types in the practice. Use this after confirming patient identity to determine what type of appointment they need.",
+  schema: findAppointmentTypeSchema,
+  
+  async run({ args, context }): Promise<ToolResult> {
+    const { practice } = context;
+    
+    if (!practice.appointmentTypes || practice.appointmentTypes.length === 0) {
+      return {
+        success: false,
+        error_code: "NO_APPOINTMENT_TYPES",
+        message_to_patient: "I don't have any appointment types configured for this practice. Please contact the office directly to schedule your appointment."
+      };
+    }
+
+    try {
+      const userRequest = args.userRequest.toLowerCase().trim();
+      
+      // Create searchable appointment type list with common aliases
+      const appointmentTypeAliases: Record<string, string[]> = {
+        'cleaning': ['clean', 'hygiene', 'prophy', 'prophylaxis', 'dental cleaning', 'teeth cleaning'],
+        'checkup': ['check', 'exam', 'examination', 'visit', 'routine'],
+        'consultation': ['consult', 'new patient', 'initial'],
+        'filling': ['cavity', 'restoration', 'tooth repair'],
+        'crown': ['cap', 'tooth cap'],
+        'root canal': ['endodontic', 'nerve', 'tooth infection'],
+        'extraction': ['pull', 'remove', 'tooth removal'],
+        'emergency': ['urgent', 'pain', 'broken', 'asap']
+      };
+
+      const availableTypes = practice.appointmentTypes.map(type => ({
+        id: type.nexhealthAppointmentTypeId,
+        name: type.name,
+        duration: type.duration,
+        searchTerms: type.name.toLowerCase(),
+        aliases: [] as string[]
+      }));
+
+      // Add aliases to available types
+      availableTypes.forEach(type => {
+        Object.entries(appointmentTypeAliases).forEach(([key, aliases]) => {
+          if (type.searchTerms.includes(key)) {
+            type.aliases = aliases;
+          }
+        });
+      });
+
+      console.log(`[findAppointmentType] Looking for "${userRequest}" in types:`, availableTypes.map(t => t.name));
+
+      // Enhanced matching algorithm
+      let bestMatch = null;
+      let bestScore = 0;
+
+      for (const type of availableTypes) {
+        let score = 0;
+        
+        // Exact match gets highest score
+        if (type.searchTerms === userRequest) {
+          score = 100;
+        }
+        // Check aliases
+        else if (type.aliases.some(alias => userRequest.includes(alias))) {
+          score = 80;
+        }
+        // Check if type name is in request
+        else if (userRequest.includes(type.searchTerms)) {
+          score = 70;
+        }
+        // Partial word matches
+        else {
+          const requestWords = userRequest.split(' ');
+          const typeWords = type.searchTerms.split(' ');
+          
+          for (const requestWord of requestWords) {
+            for (const typeWord of typeWords) {
+              if (typeWord.includes(requestWord) || requestWord.includes(typeWord)) {
+                score += 20;
+              }
+            }
+            // Check aliases too
+            for (const alias of type.aliases) {
+              if (alias.includes(requestWord) || requestWord.includes(alias)) {
+                score += 15;
+              }
+            }
+          }
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = type;
+        }
+      }
+
+      if (!bestMatch || bestScore < 10) {
+        // No good match found - present options conversationally
+        const typeOptions = availableTypes
+          .slice(0, 5) // Limit to 5 options for voice
+          .map(type => type.name)
+          .join(', ');
+          
+        return {
+          success: true,
+          message_to_patient: `I want to make sure I schedule the right appointment for you. We offer ${typeOptions}. Which of these best describes what you need?`,
+          data: {
+            matched: false,
+            available_types: availableTypes.map(t => ({
+              id: t.id,
+              name: t.name,
+              duration: t.duration
+            })),
+            user_request: userRequest
+          }
+        };
+      }
+
+      // Good match found - confirm and move forward
+      return {
+        success: true,
+        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. What day would you like to come in?`,
+        data: {
+          matched: true,
+          appointment_type_id: bestMatch.id,
+          appointment_type_name: bestMatch.name,
+          duration_minutes: bestMatch.duration,
+          user_request: userRequest
+        }
+      };
+
+    } catch (error) {
+      console.error(`[findAppointmentType] Error:`, error);
+      
+      return {
+        success: false,
+        error_code: "APPOINTMENT_TYPE_SEARCH_ERROR",
+        message_to_patient: "I had trouble understanding what type of appointment you need. Could you tell me again what you'd like to come in for?",
+        details: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  },
+
+  messages: {
+    start: "Let me find the right appointment type for you...",
+    success: "Great! I can help you schedule that.",
+    fail: "Let me check what appointment types we have available."
+  }
+};
+
+export default findAppointmentTypeTool;
+
+================
+File: lib/tools/index.ts
+================
+import { ToolDefinition, VapiToolSchema, VapiToolFunction } from "./types";
+import { zodToJsonSchema } from "zod-to-json-schema";
+
+// Import all tools
+import findPatientTool from "./findPatient";
+import findAppointmentTypeTool from "./findAppointmentType";
+import checkAvailableSlotsTool from "./checkAvailableSlots";
+import bookAppointmentTool from "./bookAppointment";
+import createNewPatientTool from "./createNewPatient";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const tools: ToolDefinition<any>[] = [
+  findPatientTool,
+  findAppointmentTypeTool,
+  checkAvailableSlotsTool,
+  bookAppointmentTool,
+  createNewPatientTool
+];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getToolByName(name: string): ToolDefinition<any> | undefined {
+  return tools.find(t => t.name === name);
+}
+
+// This function builds the array for VAPI's `model.tools[]`
+export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
+  console.log(`Building VAPI tools for ${tools.length} registered tools`);
+  
+  return tools.map(tool => {
+    // Generate JSON schema without $schema property
+    const schema = zodToJsonSchema(tool.schema, { 
+      target: "jsonSchema7", 
+      $refStrategy: "none" 
+    });
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { $schema, ...parameters } = schema;
+    
+    const vapiToolFunction: VapiToolFunction = {
+      name: tool.name,
+      description: tool.description,
+      parameters
+    };
+    
+    const vapiTool: VapiToolSchema = {
+      type: "function",
+      async: tool.async ?? false,
+      function: vapiToolFunction,
+      server: { 
+        url: `${appBaseUrl}/api/vapi/tool-calls`
+      }
+    };
+
+    // Add tool-specific messages if defined
+    if (tool.messages) {
+      vapiTool.messages = [
+        tool.messages.start ? { type: "request-start", content: tool.messages.start } : null,
+        tool.messages.delay ? { type: "request-response-delayed", content: tool.messages.delay, timingMilliseconds: 2000 } : null,
+        tool.messages.success ? { type: "request-complete", content: tool.messages.success } : null,
+        tool.messages.fail ? { type: "request-failed", content: tool.messages.fail } : null,
+      ].filter(Boolean) as VapiToolSchema["messages"];
+    }
+    
+    console.log(`Built VAPI tool: ${tool.name} -> ${vapiTool.server.url}`);
+    return vapiTool;
+  });
+}
+
+// Export individual tool schemas for validation
+export { findPatientSchema } from "./findPatient";
+export { findAppointmentTypeSchema } from "./findAppointmentType";
+export { checkAvailableSlotsSchema } from "./checkAvailableSlots";
+export { bookAppointmentSchema } from "./bookAppointment";
+export { createNewPatientSchema } from "./createNewPatient";
+
+================
+File: lib/nexhealth.ts
+================
+import { prisma } from "@/lib/prisma";
+import { addSeconds } from 'date-fns';
+
+interface NexHealthAppointmentType {
+  id: number;
+  name: string;
+  minutes: number; // NexHealth uses 'minutes' not 'duration'
+  parent_type: string;
+  parent_id: number;
+  bookable_online: boolean;
+}
+
+interface NexHealthProvider {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  email?: string;
+  inactive?: boolean;
+  npi?: string;
+  specialty_code?: string;
+  nexhealth_specialty?: string;
+}
+
+interface NexHealthOperatory {
+  id: number;
+  name: string;
+  location_id: number;
+  active: boolean;
+}
+
+const NEXHEALTH_API_BASE_URL = process.env.NEXHEALTH_API_BASE_URL!;
+const MASTER_NEXHEALTH_API_KEY = process.env.NEXHEALTH_API_KEY!; // The master key
+
+const TOKEN_CACHE_ID = "singleton"; // Fixed ID for the single token entry
+const TOKEN_EXPIRY_BUFFER_SECONDS = 300; // 5 minutes buffer
+const DEFAULT_TOKEN_LIFETIME_SECONDS = 55 * 60; // 55 minutes (safe for 1-hour tokens)
+
+async function fetchNewBearerToken(): Promise<{ accessToken: string; expiresAt: Date }> {
+  if (!MASTER_NEXHEALTH_API_KEY) {
+    throw new Error("NEXHEALTH_API_KEY is not configured in environment variables.");
+  }
+
+  const authUrl = `${NEXHEALTH_API_BASE_URL}/authenticates`;
+  console.log("Fetching new NexHealth bearer token...");
+
+  try {
+    const response = await fetch(authUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/vnd.Nexhealth+json;version=2',
+        // NexHealth expects the raw master key for /authenticates endpoint
+        'Authorization': MASTER_NEXHEALTH_API_KEY,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("Failed to fetch NexHealth bearer token:", response.status, errorBody);
+      throw new Error(`NexHealth Authentication failed: ${response.status} - ${errorBody}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.data || !result.data.token) {
+      console.error("NexHealth /authenticates response missing token:", result);
+      throw new Error("Invalid token response from NexHealth /authenticates");
+    }
+
+    const accessToken = result.data.token;
+    const now = new Date();
+    
+    // If NexHealth provides expiry in response, use it. Otherwise, use default lifetime.
+    // Most JWT tokens have 1-hour validity, we use 55 minutes to be safe
+    let expiresAt: Date;
+    
+    if (result.data.exp) {
+      // If exp is provided as UNIX timestamp (seconds)
+      expiresAt = new Date(result.data.exp * 1000);
+    } else {
+      // Default to 55 minutes from now
+      expiresAt = addSeconds(now, DEFAULT_TOKEN_LIFETIME_SECONDS);
+    }
+
+    console.log(`New NexHealth token expires at: ${expiresAt.toISOString()}`);
+
+    // Cache the token in database
+    await prisma.nexhealthTokenCache.upsert({
+      where: { id: TOKEN_CACHE_ID },
+      update: { accessToken, expiresAt },
+      create: { id: TOKEN_CACHE_ID, accessToken, expiresAt },
+    });
+
+    return { accessToken, expiresAt };
+  } catch (error) {
+    console.error('Error fetching NexHealth bearer token:', error);
+    throw error;
+  }
+}
+
+export async function getNexhealthBearerToken(): Promise<string> {
+  try {
+    // Check for cached token
+    const cachedToken = await prisma.nexhealthTokenCache.findUnique({
+      where: { id: TOKEN_CACHE_ID },
+    });
+
+    if (cachedToken) {
+      const now = new Date();
+      const tokenStillValidUntil = addSeconds(now, TOKEN_EXPIRY_BUFFER_SECONDS);
+      
+      if (cachedToken.expiresAt > tokenStillValidUntil) {
+        console.log("Using cached NexHealth bearer token.");
+        return cachedToken.accessToken;
+      }
+      console.log("Cached NexHealth token expired or nearing expiry.");
+    } else {
+      console.log("No cached NexHealth token found.");
+    }
+
+    // Fetch new token if none cached or expired
+    const { accessToken } = await fetchNewBearerToken();
+    return accessToken;
+  } catch (error) {
+    console.error('Error getting NexHealth bearer token:', error);
+    throw error;
+  }
+}
+
+// Export the generic API function for use in tools and other modules
+export async function fetchNexhealthAPI(
+  path: string, // e.g., "/appointment_types"
+  subdomain: string, // Practice-specific subdomain
+  params?: Record<string, string | number | string[]>,
+  method: string = 'GET',
+  body?: unknown
+) {
+  // Get valid bearer token
+  const bearerToken = await getNexhealthBearerToken();
+  
+  const url = new URL(`${NEXHEALTH_API_BASE_URL}${path}`);
+  
+  // Add subdomain for data API calls (not for /authenticates)
+  if (path !== '/authenticates' && !params?.subdomain) {
+    url.searchParams.append('subdomain', subdomain);
+  }
+  
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach(v => url.searchParams.append(key, v.toString()));
+      } else {
+        url.searchParams.append(key, value.toString());
+      }
+    });
+  }
+
+  const options: RequestInit = {
+    method,
+    headers: {
+      'Accept': 'application/vnd.Nexhealth+json;version=2',
+      'Authorization': `Bearer ${bearerToken}`, // Use bearer token for data APIs
+      'Content-Type': 'application/json',
+    },
+  };
+
+  if (body && method !== 'GET') {
+    options.body = JSON.stringify(body);
+  }
+
+  console.log(`Fetching from NexHealth: ${method} ${url.toString()} for subdomain ${subdomain}`);
+
+  try {
+    const response = await fetch(url.toString(), options);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`NexHealth API error (${response.status}):`, errorText);
+      
+      // If we get 401, the token might be invalid - clear cache and retry once
+      if (response.status === 401) {
+        console.log("Got 401, clearing token cache and retrying...");
+        await prisma.nexhealthTokenCache.deleteMany({
+          where: { id: TOKEN_CACHE_ID }
+        });
+        
+        // Retry with fresh token (recursive call - but only once due to cache clear)
+        return fetchNexhealthAPI(path, subdomain, params, method, body);
+      }
+      
+      throw new Error(`NexHealth API error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('NexHealth API error:', error);
+    throw error;
+  }
+}
+
+export async function getAppointmentTypes(subdomain: string, locationId: string): Promise<NexHealthAppointmentType[]> {
+  if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
+  
+  const data = await fetchNexhealthAPI(
+    '/appointment_types',
+    subdomain,
+    { location_id: locationId }
+  );
+  
+  console.log("Raw NexHealth appointment_types response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let appointmentTypes = null;
+  
+  if (Array.isArray(data)) {
+    appointmentTypes = data;
+  } else if (data?.data?.appointment_types && Array.isArray(data.data.appointment_types)) {
+    appointmentTypes = data.data.appointment_types;
+  } else if (data?.appointment_types && Array.isArray(data.appointment_types)) {
+    appointmentTypes = data.appointment_types;
+  } else if (data?.data && Array.isArray(data.data)) {
+    appointmentTypes = data.data;
+  } else {
+    console.warn("Unexpected appointment_types response structure:", data);
+    appointmentTypes = [];
+  }
+  
+  console.log(`Parsed ${appointmentTypes.length} appointment types`);
+  return appointmentTypes;
+}
+
+export async function getProviders(subdomain: string, locationId: string): Promise<NexHealthProvider[]> {
+  if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
+  
+  const data = await fetchNexhealthAPI(
+    '/providers',
+    subdomain,
+    { location_id: locationId, inactive: 'false', page: '1', per_page: '300' }
+  );
+  
+  console.log("Raw NexHealth providers response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let providers = null;
+  
+  if (Array.isArray(data)) {
+    providers = data;
+  } else if (data?.data?.providers && Array.isArray(data.data.providers)) {
+    providers = data.data.providers;
+  } else if (data?.providers && Array.isArray(data.providers)) {
+    providers = data.providers;
+  } else if (data?.data && Array.isArray(data.data)) {
+    providers = data.data;
+  } else {
+    console.warn("Unexpected providers response structure:", data);
+    providers = [];
+  }
+  
+  console.log(`Parsed ${providers.length} providers`);
+  return providers;
+}
+
+export async function getOperatories(subdomain: string, locationId: string): Promise<NexHealthOperatory[]> {
+  if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
+  
+  const data = await fetchNexhealthAPI(
+    '/operatories',
+    subdomain,
+    { location_id: locationId, page: '1', per_page: '300' }
+  );
+  
+  console.log("Raw NexHealth operatories response:", JSON.stringify(data, null, 2));
+  
+  // Handle different possible response structures
+  let operatories = null;
+  
+  if (Array.isArray(data)) {
+    operatories = data;
+  } else if (data?.data?.operatories && Array.isArray(data.data.operatories)) {
+    operatories = data.data.operatories;
+  } else if (data?.operatories && Array.isArray(data.operatories)) {
+    operatories = data.operatories;
+  } else if (data?.data && Array.isArray(data.data)) {
+    operatories = data.data;
+  } else {
+    console.warn("Unexpected operatories response structure:", data);
+    operatories = [];
+  }
+  
+  console.log(`Parsed ${operatories.length} operatories`);
+  return operatories.filter((op: NexHealthOperatory) => op.active !== false);
+}
+
+// Availability-related interfaces and functions
+interface NexHealthAvailability {
+  id: number;
+  provider_id: number;
+  location_id: number;
+  operatory_id?: number;
+  begin_time: string;
+  end_time: string;
+  days: string[];
+  specific_date?: string;
+  custom_recurrence?: {
+    num: number;
+    unit: string;
+    ref: string;
+  };
+  tz_offset: string;
+  active: boolean;
+  synced: boolean;
+  appointment_types: Array<{
+    id: number;
+    name: string;
+    parent_type: string;
+    parent_id: number;
+    minutes: number;
+    bookable_online: boolean;
+  }>;
+}
+
+interface CreateAvailabilityData {
+  provider_id: number;
+  operatory_id?: number;
+  days: string[];
+  begin_time: string;
+  end_time: string;
+  appointment_type_ids: number[];
+  active?: boolean;
+}
+
+interface UpdateAvailabilityData {
+  provider_id?: number;
+  operatory_id?: number;
+  days?: string[];
+  begin_time?: string;
+  end_time?: string;
+  appointment_type_ids?: number[];
+  active?: boolean;
+}
+
+export async function createNexhealthAvailability(
+  subdomain: string, 
+  locationId: string, 
+  availabilityData: CreateAvailabilityData
+): Promise<NexHealthAvailability> {
+  if (!subdomain || !locationId) {
+    throw new Error("Subdomain and Location ID are required.");
+  }
+
+  const data = await fetchNexhealthAPI(
+    '/availabilities',
+    subdomain,
+    { location_id: locationId },
+    'POST',
+    { availability: availabilityData }
+  );
+
+  console.log("Raw NexHealth create availability response:", JSON.stringify(data, null, 2));
+
+  // Handle response structure
+  let availability = null;
+  
+  if (data?.data) {
+    availability = data.data;
+  } else if (data?.availability) {
+    availability = data.availability;
+  } else {
+    console.warn("Unexpected create availability response structure:", data);
+    throw new Error("Invalid response structure from NexHealth create availability");
+  }
+
+  console.log(`Created availability with ID: ${availability.id}`);
+  return availability;
+}
+
+export async function updateNexhealthAvailability(
+  subdomain: string,
+  nexhealthAvailabilityId: string,
+  availabilityData: UpdateAvailabilityData
+): Promise<NexHealthAvailability> {
+  if (!subdomain || !nexhealthAvailabilityId) {
+    throw new Error("Subdomain and availability ID are required.");
+  }
+
+  const data = await fetchNexhealthAPI(
+    `/availabilities/${nexhealthAvailabilityId}`,
+    subdomain,
+    {},
+    'PATCH',
+    { availability: availabilityData }
+  );
+
+  console.log("Raw NexHealth update availability response:", JSON.stringify(data, null, 2));
+
+  // Handle response structure
+  let availability = null;
+  
+  if (data?.data) {
+    availability = data.data;
+  } else if (data?.availability) {
+    availability = data.availability;
+  } else {
+    console.warn("Unexpected update availability response structure:", data);
+    throw new Error("Invalid response structure from NexHealth update availability");
+  }
+
+  console.log(`Updated availability with ID: ${availability.id}`);
+  return availability;
+}
+
+export async function deleteNexhealthAvailability(
+  subdomain: string,
+  nexhealthAvailabilityId: string
+): Promise<void> {
+  if (!subdomain || !nexhealthAvailabilityId) {
+    throw new Error("Subdomain and availability ID are required.");
+  }
+
+  await fetchNexhealthAPI(
+    `/availabilities/${nexhealthAvailabilityId}`,
+    subdomain,
+    {},
+    'DELETE'
+  );
+
+  console.log(`Deleted availability with ID: ${nexhealthAvailabilityId}`);
+}
+
+================
+File: prisma/schema.prisma
+================
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Practice {
+  id                      String @id @default(cuid())
+  clerkUserId             String @unique // Links to Clerk User ID
+  name                    String?       // Optional practice name entered by user
+
+  // NexHealth specific identifiers for this practice instance
+  nexhealthSubdomain      String?       // User-provided NexHealth subdomain
+  nexhealthLocationId     String?       // User-provided NexHealth Location ID
+
+  // Webhook synchronization tracking
+  webhookLastSyncAt       DateTime?     // Last time webhooks were synchronized
+
+  // New fields for additional practice information
+  address                 String?       // Practice physical address
+  acceptedInsurances      String?       // Comma-separated list of accepted insurances
+  serviceCostEstimates    String?       // Service cost estimates string
+
+  // VAPI Assistant relationship - moved to separate config table for better modularity
+  assistantConfig   PracticeAssistantConfig? // One-to-one relation
+  nexhealthWebhookSubscriptions NexhealthWebhookSubscription[] // One-to-many
+
+  appointmentTypes AppointmentType[]
+  providers        Provider[]
+  callLogs         CallLog[] // For VAPI call logging
+  toolLogs         ToolLog[] // For tool execution logging
+
+  // Add new relationships for scheduling preferences
+  savedProviders      SavedProvider[]
+  savedOperatories    SavedOperatory[]
+  manualAvailabilities ManualAvailability[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A practice is uniquely identified by its Clerk user for our app's purposes.
+  // Subdomain + LocationID identify it for NexHealth API calls.
+  // If a user could manage multiple NexHealth locations, this model would need adjustment.
+  // For now, one Clerk user maps to one set of NexHealth subdomain/locationId.
+}
+
+model SavedProvider {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  providerId          String   // References Provider.id from our synced data
+  provider            Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  
+  isDefault           Boolean  @default(false) // Mark primary/default provider
+  isActive            Boolean  @default(true)  // Allow enabling/disabling
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@unique([practiceId, providerId]) // Prevent duplicate saves
+  @@map("saved_providers")
+}
+
+model SavedOperatory {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  nexhealthOperatoryId String  // NexHealth operatory ID
+  name                String  // Display name for operatory
+  isDefault           Boolean @default(false) // Mark primary/default operatory
+  isActive            Boolean @default(true)  // Allow enabling/disabling
+  
+  // Add relationship to manual availabilities
+  manualAvailabilities ManualAvailability[]
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@unique([practiceId, nexhealthOperatoryId]) // Prevent duplicate saves
+  @@map("saved_operatories")
+}
+
+model PracticeAssistantConfig {
+  id                  String @id @default(cuid())
+  practiceId          String @unique
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  vapiAssistantId     String? @unique // The ID of the assistant on VAPI's platform
+  
+  // Customizable fields by practice
+  voiceProvider       String   @default("11labs") // e.g., "11labs", "openai", "playht"
+  voiceId             String   @default("burt")   // e.g., "burt" for 11labs, "alloy" for openai
+  // voiceModel is often tied to provider/voiceId, can be added if needed
+
+  systemPrompt        String   @default("You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient.")
+  firstMessage        String   @default("Hello! This is Laine from your dental office. How can I help you today?")
+
+  // Potentially store other VAPI settings if customization is expanded
+  // serverUrl for tool calls will be derived from NEXT_PUBLIC_APP_URL
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// For storing details about the global NexHealth webhook endpoint managed by the SaaS
+model GlobalNexhealthWebhookEndpoint {
+  id                  String    @id @default("singleton") // Ensures only one record
+  nexhealthEndpointId String    @unique // The ID from NexHealth API after creating the endpoint
+  secretKey           String    // The secret key provided by NexHealth for this endpoint
+  targetUrl           String    // The URL registered with NexHealth (e.g., https://laine-integrated.vercel.app/api/nexhealth-webhook)
+  isEnabled           Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+}
+
+// For tracking which practices are subscribed to which NexHealth events
+model NexhealthWebhookSubscription {
+  id                          String   @id @default(cuid())
+  practiceId                  String
+  practice                    Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  nexhealthWebhookEndpointId  String   // Foreign key to the global endpoint ID from NexHealth
+  nexhealthSubscriptionId     String   @unique // The ID of this specific subscription from NexHealth API
+  resourceType                String   // e.g., "Appointment", "Patient"
+  eventName                   String   // e.g., "appointment_insertion.complete", "patient_created"
+  isActive                    Boolean  @default(true)
+
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@unique([practiceId, resourceType, eventName]) // A practice should only have one active sub for a specific event
+}
+
+// For VAPI call logging, as per blueprint
+model CallLog {
+  id                            String    @id @default(cuid()) // Or use vapi_call_id as PK if always present early
+  vapiCallId                    String    @unique // From VAPI
+  practiceId                    String
+  practice                      Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  callTimestampStart            DateTime?
+  callStatus                    String?   // e.g., INITIATED, IN_PROGRESS, FORWARDING, ENDED
+  transcriptText                String?   @db.Text
+  summary                       String?   @db.Text // End of call report summary
+  vapiTranscriptUrl             String?   // URL to audio recording
+
+  // Fields for tracking tool usage and outcomes within a call
+  detectedIntent                String?
+  nexhealthPatientId            String?   // If patient identified/created
+  bookedAppointmentNexhealthId  String?   // If appointment booked
+
+  // Enhanced fields as per refactoring plan
+  assistantId                   String?   // VAPI assistant ID
+  endedReason                   String?   // From end-of-call-report
+  callDurationSeconds           Int?      // Duration in seconds
+  cost                          Decimal?  // Call cost if available
+
+  toolLogs                      ToolLog[] // One-to-many relationship
+
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+}
+
+// New model for tracking individual tool executions
+model ToolLog {
+  id                String    @id @default(cuid())
+  practiceId        String
+  practice          Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  
+  vapiCallId        String?   // Optional - tools might be called outside of calls
+  callLog           CallLog?  @relation(fields: [vapiCallId], references: [vapiCallId], onDelete: Cascade)
+  
+  toolName          String    // Name of the tool executed
+  toolCallId        String    // VAPI tool call ID
+  arguments         String?   @db.Text // JSON string of (redacted) arguments
+  result            String?   @db.Text // JSON string of result
+  success           Boolean   // Whether execution succeeded
+  error             String?   // Error message if failed
+  executionTimeMs   Int?      // Execution time in milliseconds
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([practiceId, toolName])
+  @@index([vapiCallId])
+}
+
+model AppointmentType {
+  id                          String @id @default(cuid())
+  practiceId                  String
+  practice                    Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthAppointmentTypeId  String // ID from NexHealth
+  name                        String
+  duration                    Int    // Duration in minutes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([practiceId, nexhealthAppointmentTypeId])
+}
+
+model Provider {
+  id                  String @id @default(cuid())
+  practiceId          String
+  practice            Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthProviderId String // ID from NexHealth
+  firstName           String?
+  lastName            String
+
+  // Add new relationship
+  savedByPractices    SavedProvider[]
+  manualAvailabilities ManualAvailability[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([practiceId, nexhealthProviderId])
+}
+
+model NexhealthTokenCache {
+  id          String   @id @default("singleton") // Fixed ID for single token entry
+  accessToken String   @db.Text // The bearer token can be long
+  expiresAt   DateTime // Timestamp when the token expires
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ManualAvailability {
+  id                  String    @id @default(cuid())
+  practiceId          String
+  practice            Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  nexhealthAvailabilityId String?   @unique // ID from NexHealth once created, optional as it might not be synced yet or sync failed
+
+  providerId          String    // References our local Provider.id
+  provider            Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  operatoryId         String?   // References our local SavedOperatory.id (nexhealthOperatoryId is on SavedOperatory)
+  savedOperatory      SavedOperatory? @relation(fields: [operatoryId], references: [id], onDelete: SetNull) // Optional, if operatory is deleted, set this to null
+
+  // For recurring weekly availability
+  daysOfWeek          String[]  // Array of strings like ["Monday", "Tuesday", "Friday"]
+  beginTime           String    // HH:MM format, e.g., "09:00"
+  endTime             String    // HH:MM format, e.g., "17:00"
+
+  // For specific date availability (can be an alternative to daysOfWeek)
+  // specificDate        DateTime? @db.Date // YYYY-MM-DD, mutually exclusive with daysOfWeek for simplicity in V1
+
+  appointmentTypeIds  String[]  // Array of nexhealthAppointmentTypeId strings from our AppointmentType model
+
+  isActive            Boolean   @default(true)
+
+  lastSyncWithNexhealthAt DateTime? // Timestamp of the last successful sync with NexHealth
+  syncError               String?   // Store any error message from the last sync attempt
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([practiceId, providerId])
+}
+
+================
+File: app/practice-config/page.tsx
+================
+"use client";
+
+import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
+import { Toaster, toast } from "sonner";
+import { ProviderSelection } from "./provider-selection";
+import { OperatorySelection } from "./operatory-selection";
+import { AvailabilityManager } from "./availability-manager";
+import { CheckAppointmentSlots } from "./check-appointment-slots";
+
+interface ManualAvailabilityData {
+  id: string;
+  nexhealthAvailabilityId: string | null;
+  provider: {
+    id: string;
+    firstName: string | null;
+    lastName: string;
+    nexhealthProviderId: string;
+  };
+  savedOperatory: {
+    id: string;
+    name: string;
+    nexhealthOperatoryId: string;
+  } | null;
+  daysOfWeek: string[];
+  beginTime: string;
+  endTime: string;
+  appointmentTypeIds: string[];
+  isActive: boolean;
+  lastSyncWithNexhealthAt: string | null;
+  syncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Practice {
+  id: string;
+  name: string | null;
+  nexhealthSubdomain: string | null;
+  nexhealthLocationId: string | null;
+  webhookLastSyncAt: string | null;
+  address: string | null;
+  acceptedInsurances: string | null;
+  serviceCostEstimates: string | null;
+  appointmentTypes: Array<{
+    id: string;
+    nexhealthAppointmentTypeId: string;
+    name: string;
+    duration: number;
+  }>;
+  providers: Array<{
+    id: string;
+    nexhealthProviderId: string;
+    firstName: string | null;
+    lastName: string;
+  }>;
+  savedProviders: Array<{
+    id: string;
+    providerId: string;
+    isDefault: boolean;
+    isActive: boolean;
+    provider: {
+      id: string;
+      nexhealthProviderId: string;
+      firstName: string | null;
+      lastName: string;
+    };
+  }>;
+  savedOperatories: Array<{
+    id: string;
+    nexhealthOperatoryId: string;
+    name: string;
+    isDefault: boolean;
+    isActive: boolean;
+  }>;
+  manualAvailabilities: ManualAvailabilityData[];
+  nexhealthWebhookSubscriptions: Array<{
+    resourceType: string;
+    eventName: string;
+    nexhealthSubscriptionId: string;
+  }>;
+}
+
+interface GlobalWebhookEndpoint {
+  id: string;
+}
+
+export default function PracticeConfigPage() {
+  const { userId, isLoaded } = useAuth();
+  const [practice, setPractice] = useState<Practice | null>(null);
+  const [globalWebhookEndpoint, setGlobalWebhookEndpoint] = useState<GlobalWebhookEndpoint | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+
+  useEffect(() => {
+    if (isLoaded && !userId) {
+      redirect("/sign-in");
+    }
+  }, [isLoaded, userId]);
+
+  useEffect(() => {
+    if (isLoaded && userId) {
+      fetchPracticeData();
+    }
+  }, [isLoaded, userId]);
+
+  const fetchPracticeData = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/practice-config/data');
+      if (response.ok) {
+        const data = await response.json();
+        setPractice(data.practice);
+        setGlobalWebhookEndpoint(data.globalWebhookEndpoint);
+      } else {
+        console.error('Failed to fetch practice data');
+      }
+    } catch (error) {
+      console.error('Error fetching practice data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfigSave = async (formData: FormData) => {
+    setConfigLoading(true);
+    try {
+      const response = await fetch('/api/practice-config/basic', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        if (result.webhookSync?.success) {
+          toast.success('Configuration saved and webhooks synchronized successfully!');
+        } else if (result.webhookSync?.message) {
+          toast.success('Configuration saved successfully!');
+          toast.warning(`Webhook sync: ${result.webhookSync.message}`);
+        } else {
+          toast.success('Configuration saved successfully!');
+        }
+        
+        await fetchPracticeData(); // Refresh data
+      } else {
+        toast.error('Failed to save configuration');
+      }
+    } catch (error) {
+      console.error('Error saving config:', error);
+      toast.error('Failed to save configuration');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncLoading(true);
+    try {
+      const response = await fetch('/api/sync-nexhealth', {
+        method: 'POST'
+      });
+
+      if (response.ok) {
+        toast.success('NexHealth data synced successfully!');
+        await fetchPracticeData(); // Refresh data
+      } else {
+        toast.error('Failed to sync NexHealth data');
+      }
+    } catch (error) {
+      console.error('Error syncing data:', error);
+      toast.error('Failed to sync NexHealth data');
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const refreshPracticeData = async () => {
+    await fetchPracticeData();
+  };
+
+  if (!isLoaded || loading) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="text-center">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!userId) {
+    return null; // Will redirect
+  }
+
+  return (
+    <>
+      <Toaster position="top-right" />
+      <div className="max-w-4xl mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">Practice Configuration</h1>
+        
+        {/* Basic Information Section */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Basic Information</h2>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            await handleConfigSave(formData);
+          }} className="space-y-4">
+            <div>
+              <label htmlFor="practiceName" className="block text-sm font-medium text-gray-700 mb-1">
+                Practice Name (Optional)
+              </label>
+              <input
+                type="text"
+                id="practiceName"
+                name="practiceName"
+                defaultValue={practice?.name || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter your practice name"
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="nexhealthSubdomain" className="block text-sm font-medium text-gray-700 mb-1">
+                NexHealth Subdomain *
+              </label>
+              <input
+                type="text"
+                id="nexhealthSubdomain"
+                name="nexhealthSubdomain"
+                defaultValue={practice?.nexhealthSubdomain || ""}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., testdental"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Your NexHealth subdomain (the part before .nexhealth.com)
+              </p>
+            </div>
+            
+            <div>
+              <label htmlFor="nexhealthLocationId" className="block text-sm font-medium text-gray-700 mb-1">
+                NexHealth Location ID *
+              </label>
+              <input
+                type="text"
+                id="nexhealthLocationId"
+                name="nexhealthLocationId"
+                defaultValue={practice?.nexhealthLocationId || ""}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 123"
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Your NexHealth Location ID number
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="practiceAddress" className="block text-sm font-medium text-gray-700 mb-1">
+                Practice Address
+              </label>
+              <input
+                type="text"
+                id="practiceAddress"
+                name="practiceAddress"
+                defaultValue={practice?.address || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 123 Dental St, Smileytown, CA 98765"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="acceptedInsurances" className="block text-sm font-medium text-gray-700 mb-1">
+                Accepted Insurances (comma-separated)
+              </label>
+              <input
+                type="text"
+                id="acceptedInsurances"
+                name="acceptedInsurances"
+                defaultValue={practice?.acceptedInsurances || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Cigna, Delta Dental, MetLife"
+              />
+              <p className="text-sm text-gray-500 mt-1">Enter insurance names separated by commas.</p>
+            </div>
+
+            <div>
+              <label htmlFor="serviceCostEstimates" className="block text-sm font-medium text-gray-700 mb-1">
+                Service Cost Estimates (comma-separated)
+              </label>
+              <input
+                type="text"
+                id="serviceCostEstimates"
+                name="serviceCostEstimates"
+                defaultValue={practice?.serviceCostEstimates || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Cleaning: $120, Exam: $80, X-Ray: $50"
+              />
+              <p className="text-sm text-gray-500 mt-1">Format as &apos;Service Name: $Cost&apos;, separated by commas.</p>
+            </div>
+            
+            <button
+              type="submit"
+              disabled={configLoading}
+              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {configLoading ? 'Saving...' : 'Save Basic Info & Sync Webhooks'}
+            </button>
+          </form>
+        </div>
+
+        {practice?.nexhealthSubdomain && practice?.nexhealthLocationId && (
+          <>
+            {/* NexHealth Data Sync Section */}
+            <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <h2 className="text-lg font-semibold mb-4">NexHealth Data Sync</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Appointment Types</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {practice.appointmentTypes.length} synced
+                  </p>
+                  {practice.appointmentTypes.length > 0 && (
+                    <ul className="text-sm space-y-1">
+                      {practice.appointmentTypes.slice(0, 5).map((type) => (
+                        <li key={type.id} className="text-gray-700">
+                          {type.name} ({type.duration} min)
+                        </li>
+                      ))}
+                      {practice.appointmentTypes.length > 5 && (
+                        <li className="text-gray-500">
+                          ... and {practice.appointmentTypes.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+                
+                <div>
+                  <h3 className="font-medium text-gray-900 mb-2">Providers</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    {practice.providers.length} synced
+                  </p>
+                  {practice.providers.length > 0 && (
+                    <ul className="text-sm space-y-1">
+                      {practice.providers.slice(0, 5).map((provider) => (
+                        <li key={provider.id} className="text-gray-700">
+                          {provider.firstName} {provider.lastName}
+                        </li>
+                      ))}
+                      {practice.providers.length > 5 && (
+                        <li className="text-gray-500">
+                          ... and {practice.providers.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              </div>
+              
+              <div className="mt-6">
+                <button
+                  onClick={handleSync}
+                  disabled={syncLoading}
+                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {syncLoading ? 'Syncing...' : 'Sync NexHealth Data'}
+                </button>
+              </div>
+            </div>
+
+            {/* Provider Selection Section */}
+            {practice.providers.length > 0 && (
+              <div className="mb-6">
+                <ProviderSelection
+                  providers={practice.providers}
+                  savedProviders={practice.savedProviders}
+                  onUpdate={refreshPracticeData}
+                />
+              </div>
+            )}
+
+            {/* Operatory Selection Section */}
+            <div className="mb-6">
+              <OperatorySelection
+                practice={{
+                  nexhealthSubdomain: practice.nexhealthSubdomain,
+                  nexhealthLocationId: practice.nexhealthLocationId
+                }}
+                savedOperatories={practice.savedOperatories}
+                onUpdate={refreshPracticeData}
+              />
+            </div>
+
+            {/* Manual Availability Configuration Section */}
+            {practice.providers.length > 0 && practice.appointmentTypes.length > 0 && (
+              <div className="mb-6">
+                <AvailabilityManager
+                  practiceId={practice.id}
+                  providers={practice.providers}
+                  savedOperatories={practice.savedOperatories}
+                  appointmentTypes={practice.appointmentTypes}
+                  initialAvailabilities={practice.manualAvailabilities || []}
+                  onUpdate={refreshPracticeData}
+                />
+              </div>
+            )}
+
+            {/* Check Appointment Slots Section */}
+            {practice.appointmentTypes.length > 0 && practice.savedProviders.length > 0 && (
+              <div className="mb-6">
+                <CheckAppointmentSlots
+                  appointmentTypes={practice.appointmentTypes}
+                  savedProviders={practice.savedProviders}
+                  savedOperatories={practice.savedOperatories}
+                />
+              </div>
+            )}
+
+            {/* Webhook Management Section */}
+            <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <h2 className="text-lg font-semibold mb-4">Webhook Integration</h2>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Webhooks allow Laine to receive real-time updates from NexHealth when appointments are created, 
+                    updated, or when patients are modified.
+                  </p>
+                  
+                  {/* Last Sync Status */}
+                  {practice.webhookLastSyncAt && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                        <span className="text-sm font-medium text-blue-800">
+                          Last webhook sync: {new Date(practice.webhookLastSyncAt).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs text-blue-600 mt-1">
+                        Webhooks are automatically synchronized when you save practice configuration
+                      </p>
+                    </div>
+                  )}
+                  
+                  {!globalWebhookEndpoint ? (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                      <p className="text-sm text-yellow-800">
+                        ⚠️ Global webhook endpoint not configured. Contact support to enable webhook functionality.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <h3 className="font-medium text-gray-900 mb-3">Subscription Status</h3>
+                      {practice.nexhealthWebhookSubscriptions && practice.nexhealthWebhookSubscriptions.length > 0 ? (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {practice.nexhealthWebhookSubscriptions.map((sub) => (
+                              <div key={`${sub.resourceType}-${sub.eventName}`} className="flex items-center gap-2 text-sm bg-green-50 border border-green-200 rounded-md p-2">
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                <span className="text-gray-700 font-medium">
+                                  {sub.resourceType}.{sub.eventName}
+                                </span>
+                                <span className="text-xs text-gray-500 ml-auto">
+                                  ID: {sub.nexhealthSubscriptionId}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="bg-green-50 border border-green-200 rounded-md p-3">
+                            <p className="text-sm text-green-800">
+                              ✅ {practice.nexhealthWebhookSubscriptions.length} webhook subscription(s) active. 
+                              Laine will receive real-time updates from NexHealth.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-orange-50 border border-orange-200 rounded-md p-3">
+                          <p className="text-sm text-orange-800">
+                            ⚠️ No active webhook subscriptions found. Webhooks will be automatically configured when you save your practice configuration above.
+                          </p>
+                          <p className="text-xs text-orange-600 mt-2">
+                            If webhooks are still missing after saving, check that your NexHealth subdomain and location ID are correct.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Scheduling Configuration Summary */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+              <h2 className="text-lg font-semibold mb-4 text-blue-900">Scheduling Configuration Summary</h2>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Appointment Types:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.appointmentTypes.length} available
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Saved Providers:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.savedProviders.length} configured for scheduling
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Saved Operatories:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.savedOperatories.length} configured for scheduling
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-blue-800">Manual Availabilities:</span>
+                  <span className="font-medium text-blue-900">
+                    {practice.manualAvailabilities?.length || 0} configured
+                  </span>
+                </div>
+                
+                {practice.appointmentTypes.length > 0 && practice.savedProviders.length > 0 ? (
+                  <div className="bg-green-100 border border-green-300 rounded-md p-3 mt-4">
+                    <p className="text-green-800 font-medium">
+                      ✅ Your practice is ready for AI voice scheduling!
+                    </p>
+                    <p className="text-green-700 text-xs mt-1">
+                      Laine can now help patients find appointments, check availability, and schedule visits.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-yellow-100 border border-yellow-300 rounded-md p-3 mt-4">
+                    <p className="text-yellow-800 font-medium">
+                      ⚠️ Configuration incomplete
+                    </p>
+                    <p className="text-yellow-700 text-xs mt-1">
+                      Please sync NexHealth data and select providers to enable scheduling.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+
+
+
+================================================================
+End of Codebase
+================================================================

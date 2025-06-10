@@ -8,6 +8,7 @@ import { ProviderSelection } from "./provider-selection";
 import { OperatorySelection } from "./operatory-selection";
 import { AvailabilityManager } from "./availability-manager";
 import { CheckAppointmentSlots } from "./check-appointment-slots";
+import { AppointmentTypeManager } from "./appointment-type-manager";
 
 interface ManualAvailabilityData {
   id: string;
@@ -48,6 +49,12 @@ interface Practice {
     nexhealthAppointmentTypeId: string;
     name: string;
     duration: number;
+    bookableOnline: boolean | null;
+    parentType: string | null;
+    parentId: string | null;
+    lastSyncError: string | null;
+    createdAt: string;
+    updatedAt: string;
   }>;
   providers: Array<{
     id: string;
@@ -370,6 +377,27 @@ export default function PracticeConfigPage() {
                 </button>
               </div>
             </div>
+
+            {/* Appointment Types Management Section */}
+            {practice.nexhealthSubdomain && practice.nexhealthLocationId && (
+              <div className="mb-6">
+                <AppointmentTypeManager
+                  initialAppointmentTypes={practice.appointmentTypes.map(at => ({
+                    id: at.id,
+                    nexhealthAppointmentTypeId: at.nexhealthAppointmentTypeId,
+                    name: at.name,
+                    duration: at.duration,
+                    bookableOnline: at.bookableOnline,
+                    parentType: at.parentType,
+                    parentId: at.parentId,
+                    lastSyncError: at.lastSyncError,
+                    createdAt: at.createdAt,
+                    updatedAt: at.updatedAt
+                  }))}
+                  onUpdate={refreshPracticeData}
+                />
+              </div>
+            )}
 
             {/* Provider Selection Section */}
             {practice.providers.length > 0 && (
