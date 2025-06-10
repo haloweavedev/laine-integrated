@@ -48,33 +48,7 @@ Examples: "john at gmail dot com" → "john@gmail.com"`),
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: `Creates new patient record in EHR system. Collects first/last name, DOB, phone, email. Optionally collects the patient's dental insurance company name. Use only when the caller is confirmed as a new patient and you have at least the core required information (name, DOB, phone, email).
-
-🚨 CRITICAL: ONLY call when you have ALL required information:
-- First/last name (spelled letter by letter)
-- Date of birth
-- Phone number (10+ digits) 
-- Valid email address
-
-Optional:
-- Insurance company name (if mentioned by patient)
-
-DO NOT call if ANY required field is missing. Ask for missing info first.
-
-IMPORTANT: Empty strings ("") = MISSING. Do not call with empty strings.
-
-FLOW:
-1. Missing name/DOB → Ask "Could you spell your first and last name letter by letter, then give me your date of birth?"
-2. Missing phone → Ask "I need your phone number to create your patient record. What's your phone number?"
-3. Missing email → Ask "Finally, I need your email address. What's your email address?"
-4. ONLY when ALL required info collected → Call this tool
-
-Examples WHEN NOT TO CALL:
-- phone: "" → Ask for phone first
-- email: "" → Ask for email first
-- firstName: "" → Ask for name first
-
-Use only when caller is new patient AND you have ALL required information.`,
+  description: `Creates new patient record in EHR system. Collects first/last name, DOB, phone, email. Optionally collects insurance company name. CRITICAL: ONLY call when you have ALL required information (first name, last name, date of birth, phone number 10+ digits, valid email address). DO NOT call if ANY field is missing or empty strings. Ask for missing info first. Insurance name is optional.`,
   schema: createNewPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
