@@ -138,12 +138,19 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           if (currentType && otherTypes.length > 0) {
             console.log(`[checkAvailableSlots] Current appointment type: ${currentType.name} (${args.appointmentTypeId})`);
             console.log(`[checkAvailableSlots] Other available types:`, otherTypes.map(t => `${t.name} (${t.nexhealthAppointmentTypeId})`));
+            suggestionMessage = `I don't see any available slots for a ${currentType.name} on ${formatDate(args.requestedDate)}.`;
+            suggestionMessage += ` Would you like me to check a different date, or perhaps try a different type of appointment?`;
+          } else {
             suggestionMessage += ` Would you like me to check availability for a different type of appointment, or would you prefer to call the office?`;
           }
+        } else {
+          suggestionMessage += ` Would you like me to check a different date, or would you prefer to call the office?`;
         }
         
         // Also suggest checking different dates
-        suggestionMessage += ` You can also ask me to check a different date.`;
+        if (!suggestionMessage.includes('different date')) {
+          suggestionMessage += ` You can also ask me to check a different date.`;
+        }
 
         return {
           success: true,

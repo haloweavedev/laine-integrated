@@ -20,7 +20,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
         return {
           success: true, // Tool ran, but no configuration data available
           error_code: "COST_CONFIG_MISSING",
-          message_to_patient: "I don't have specific cost information on file in my system. The office staff can provide you with an estimate when you speak with them.",
+          message_to_patient: "I don't have specific cost information on file in my system. The office staff can provide you with an estimate. Would you like to schedule an appointment, and they can discuss costs with you?",
           data: { 
             serviceName: args.serviceName,
             found: false,
@@ -71,7 +71,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       if (matchedService) {
         return {
           success: true,
-          message_to_patient: `For a ${matchedService.service}, the estimated cost is ${matchedService.cost}.`,
+          message_to_patient: `For a ${matchedService.service}, the estimated cost is ${matchedService.cost}. Does that sound okay, or would you like to discuss scheduling?`,
           data: {
             serviceName: args.serviceName,
             estimate: matchedService.cost,
@@ -95,7 +95,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       )) {
         return {
           success: true,
-          message_to_patient: `While I don't have a specific estimate for ${args.serviceName}, we do have a ${specialOffer.service} for ${specialOffer.cost} which typically covers an initial exam and necessary x-rays. Would that be something you're interested in?`,
+          message_to_patient: `While I don't have a specific estimate for ${args.serviceName}, we do have a ${specialOffer.service} for ${specialOffer.cost} which typically covers an initial exam and necessary x-rays. Would that be something you're interested in, or would you prefer I check for other options?`,
           data: {
             serviceName: args.serviceName,
             estimate: specialOffer.cost,
@@ -109,7 +109,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       // No match found
       return {
         success: true,
-        message_to_patient: `I couldn't find a specific cost estimate for ${args.serviceName} in my system. Our team at the office can provide you with more detailed pricing information.`,
+        message_to_patient: `I couldn't find a specific cost estimate for ${args.serviceName} in my system. Our team at the office can provide you with more detailed pricing information. Would you like to proceed with scheduling an appointment, and they can discuss costs with you then?`,
         data: {
           serviceName: args.serviceName,
           found: false,

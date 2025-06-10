@@ -17,14 +17,14 @@ const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = 
         return {
           success: false,
           error_code: "PRACTICE_DETAIL_MISSING",
-          message_to_patient: "I don't have the specific address details on file right now. However, the office can provide that to you when you speak with them.",
+          message_to_patient: "I don't have the specific address details readily available in my system right now. However, our office team can certainly provide that to you. Were you looking to schedule an appointment?",
           details: "Practice address is not configured."
         };
       }
 
       return {
         success: true,
-        message_to_patient: `Our practice is located at ${practice.address}.`,
+        message_to_patient: `Our practice is located at ${practice.address}. Is there anything else about our location you'd like to know?`,
         data: { 
           address: practice.address 
         }

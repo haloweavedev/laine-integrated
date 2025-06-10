@@ -20,7 +20,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
         return {
           success: true, // Tool ran, but no configuration data available
           error_code: "INSURANCE_CONFIG_MISSING",
-          message_to_patient: `This practice hasn't specified which insurances they accept in my system. It would be best to confirm directly with the office staff regarding your ${args.insuranceProviderName} plan.`,
+          message_to_patient: `This practice hasn't specified which insurances they accept in my system. It would be best to confirm directly with the office staff regarding your ${args.insuranceProviderName} plan. Would you like to proceed with scheduling for now, and we can clarify the insurance later?`,
           data: { 
             insuranceProviderName: args.insuranceProviderName,
             participation: "unknown_configuration",
@@ -47,7 +47,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
       if (isInNetwork) {
         return {
           success: true,
-          message_to_patient: `Great news! We are in-network with ${args.insuranceProviderName}.`,
+          message_to_patient: `Great news! We are in-network with ${args.insuranceProviderName}. We can proceed with scheduling if you're ready. What type of appointment were you thinking of?`,
           data: {
             insuranceProviderName: args.insuranceProviderName,
             participation: "in-network",
@@ -57,7 +57,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
       } else {
         return {
           success: true,
-          message_to_patient: `Based on the information I have, we might be out-of-network with ${args.insuranceProviderName}. You are still welcome to be seen here, but you would be responsible for the cost of the visit out-of-pocket. Would you like an estimate for the service if you decide to proceed?`,
+          message_to_patient: `Based on the information I have, we might be out-of-network with ${args.insuranceProviderName}. You are still welcome to be seen here, but you would be responsible for the cost of the visit out-of-pocket. Would you like an estimate for the service you're considering, or would you like to discuss scheduling options?`,
           data: {
             insuranceProviderName: args.insuranceProviderName,
             participation: "out-of-network",

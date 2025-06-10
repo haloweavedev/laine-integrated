@@ -158,12 +158,13 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       // Format confirmation message
       const formattedPhone = formatPhoneForDisplay(args.phone);
 
-      // Create success message acknowledging insurance if provided
-      let successMessage = `Perfect! I've created your patient record. Welcome to ${practice.name || 'our practice'}, ${args.firstName}!`;
+      // Create context-aware success message based on insurance information
+      let successMessage: string;
       if (args.insurance_name && args.insurance_name.trim() !== "") {
-        successMessage += ` I've also noted your ${args.insurance_name} insurance information.`;
+        successMessage = `Perfect! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. I've also noted your ${args.insurance_name} insurance. To make sure we have all the details, could you provide the subscriber's full name on that policy?`;
+      } else {
+        successMessage = `Perfect! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. Welcome to ${practice.name || 'Royal Oak Family Dental'}! Now, what type of appointment were you looking to schedule today?`;
       }
-      successMessage += ` Now, what type of appointment would you like to schedule?`;
 
       return {
         success: true,
@@ -191,7 +192,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
           message = "There was an issue with the information provided. Let me help you with the registration process.";
         } else if (error.message.includes("409") || error.message.includes("duplicate")) {
           errorCode = "DUPLICATE_PATIENT";
-          message = "It looks like you might already be in our system. Let me search for your existing record instead.";
+          message = `It looks like you're already in our system, ${args.firstName}! I've found your existing record. Will you be using the same insurance we have on file, or has anything changed?`;
         } else if (error.message.includes("401")) {
           errorCode = "AUTH_ERROR";
           message = "There's an authentication issue with our system. Please contact the office to register.";
