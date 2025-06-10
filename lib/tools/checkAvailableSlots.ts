@@ -125,45 +125,33 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         // No slots found - let's provide more helpful information
         console.log(`[checkAvailableSlots] No slots found for appointment type ${args.appointmentTypeId} on ${args.requestedDate}`);
         
-        // Check if this is a systemic issue or specific to this appointment type
-        // by testing with a different appointment type that's known to have availability
-        let suggestionMessage = `I don't see any available slots for ${formatDate(args.requestedDate)}.`;
+        // Create a more conversational and proactive message for no slots found
+        const appointmentTypeName = practice.appointmentTypes?.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || "that appointment type";
+        const friendlyDate = formatDate(args.requestedDate);
         
-        // Try to find alternative appointment types that might have availability
-        const allAppointmentTypes = practice.appointmentTypes || [];
-        if (allAppointmentTypes.length > 1) {
-          const currentType = allAppointmentTypes.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId);
-          const otherTypes = allAppointmentTypes.filter(at => at.nexhealthAppointmentTypeId !== args.appointmentTypeId);
-          
-          if (currentType && otherTypes.length > 0) {
-            console.log(`[checkAvailableSlots] Current appointment type: ${currentType.name} (${args.appointmentTypeId})`);
-            console.log(`[checkAvailableSlots] Other available types:`, otherTypes.map(t => `${t.name} (${t.nexhealthAppointmentTypeId})`));
-            suggestionMessage = `I don't see any available slots for a ${currentType.name} on ${formatDate(args.requestedDate)}.`;
-            suggestionMessage += ` Would you like me to check a different date, or perhaps try a different type of appointment?`;
-          } else {
-            suggestionMessage += ` Would you like me to check availability for a different type of appointment, or would you prefer to call the office?`;
-          }
+        let messageToPatient = `I'm sorry, I don't see any available slots for a ${appointmentTypeName} on ${friendlyDate}.`;
+
+        const otherAppointmentTypesExist = (practice.appointmentTypes?.length || 0) > 1;
+
+        if (otherAppointmentTypesExist) {
+          messageToPatient += ` Would you like me to check for a different type of appointment on that day, or perhaps look for ${appointmentTypeName} on another date?`;
         } else {
-          suggestionMessage += ` Would you like me to check a different date, or would you prefer to call the office?`;
-        }
-        
-        // Also suggest checking different dates
-        if (!suggestionMessage.includes('different date')) {
-          suggestionMessage += ` You can also ask me to check a different date.`;
+          messageToPatient += ` Would you like me to check for ${appointmentTypeName} on a different date?`;
         }
 
         return {
           success: true,
-          message_to_patient: suggestionMessage,
+          message_to_patient: messageToPatient,
           data: {
             requested_date: args.requestedDate,
             requested_appointment_type_id: args.appointmentTypeId,
+            appointment_type_name: appointmentTypeName, // Add for context
             available_slots: [],
             has_availability: false,
             debug_info: {
               providers_checked: providers.length,
               operatories_checked: operatories.length,
-              appointment_type_name: allAppointmentTypes.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || 'Unknown'
+              appointment_type_name: appointmentTypeName
             }
           }
         };
@@ -193,21 +181,41 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         };
       });
 
-      // Create a comprehensive list of times for TTS-friendly presentation
-      const timeList = formattedSlots.map(slot => slot.display_time);
-      const timeOptions = timeList.length > 1 
-        ? timeList.slice(0, -1).join(', ') + ', and ' + timeList[timeList.length - 1]
-        : timeList[0];
+      // Create more conversational message with appointment type and limited initial options
+      const appointmentTypeName = practice.appointmentTypes?.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || "your appointment";
+      const friendlyDate = formatDate(args.requestedDate);
+
+      // Offer a limited number of slots initially for voice, e.g., 3 or 4
+      const slotsToOfferCount = Math.min(formattedSlots.length, 3); // Offer up to 3 slots
+      const offeredTimeList = formattedSlots.slice(0, slotsToOfferCount).map(slot => slot.display_time);
+      
+      let timeOptionsMessage = "";
+      if (offeredTimeList.length === 1) {
+        timeOptionsMessage = offeredTimeList[0];
+      } else if (offeredTimeList.length > 1) {
+        timeOptionsMessage = offeredTimeList.slice(0, -1).join(', ') + (offeredTimeList.length > 1 ? ', or ' : '') + offeredTimeList[offeredTimeList.length - 1];
+      }
+
+      let finalMessageToPatient = `Okay! For a ${appointmentTypeName} on ${friendlyDate}, I have ${timeOptionsMessage} available.`;
+
+      if (formattedSlots.length > slotsToOfferCount) {
+        finalMessageToPatient += ` I also have a few other times that day. Do any of those I mentioned work, or would you like to hear more options for ${friendlyDate}?`;
+      } else if (formattedSlots.length > 0) {
+        finalMessageToPatient += ` Which of those times works best for you?`;
+      } else { // Should not happen if availableSlots.length > 0, but as a fallback
+        finalMessageToPatient = `I found some availability on ${friendlyDate} for a ${appointmentTypeName}. Which time would you prefer from the options I mentioned?`;
+      }
 
       return {
         success: true,
-        message_to_patient: `Great! I have these times available for ${formatDate(args.requestedDate)}: ${timeOptions}. Which time would you prefer?`,
+        message_to_patient: finalMessageToPatient,
         data: {
           requested_date: args.requestedDate,
-          available_slots: formattedSlots,
+          appointment_type_name: appointmentTypeName, // Add for context
+          available_slots: formattedSlots, // Send all found slots in data
           has_availability: true,
           total_slots_found: availableSlots.length,
-          formatted_times: timeList
+          formatted_times: formattedSlots.map(slot => slot.display_time) // All formatted times
         }
       };
 
@@ -230,7 +238,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
   messages: {
     start: "Let me check our availability for you...",
-    success: "I found some great options for you!",
+    success: "Okay, I have the latest availability information for you.",
     fail: "I'm having trouble checking our schedule right now."
   }
 };
