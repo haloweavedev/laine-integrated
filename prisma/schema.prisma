@@ -26,6 +26,11 @@ model Practice {
   // Webhook synchronization tracking
   webhookLastSyncAt       DateTime?     // Last time webhooks were synchronized
 
+  // New fields for additional practice information
+  address                 String?       // Practice physical address
+  acceptedInsurances      String?       // Comma-separated list of accepted insurances
+  serviceCostEstimates    String?       // Service cost estimates string
+
   // VAPI Assistant relationship - moved to separate config table for better modularity
   assistantConfig   PracticeAssistantConfig? // One-to-one relation
   nexhealthWebhookSubscriptions NexhealthWebhookSubscription[] // One-to-many

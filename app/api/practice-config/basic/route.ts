@@ -14,6 +14,9 @@ export async function POST(req: NextRequest) {
     const name = formData.get("practiceName") as string | null;
     const subdomain = formData.get("nexhealthSubdomain") as string;
     const locationId = formData.get("nexhealthLocationId") as string;
+    const address = formData.get("practiceAddress") as string | null;
+    const acceptedInsurances = formData.get("acceptedInsurances") as string | null;
+    const serviceCostEstimates = formData.get("serviceCostEstimates") as string | null;
 
     if (!subdomain || !locationId) {
       return NextResponse.json(
@@ -29,6 +32,9 @@ export async function POST(req: NextRequest) {
         name, 
         nexhealthSubdomain: subdomain, 
         nexhealthLocationId: locationId,
+        address,
+        acceptedInsurances,
+        serviceCostEstimates,
         webhookLastSyncAt: new Date() // Update sync timestamp
       },
       create: { 
@@ -36,6 +42,9 @@ export async function POST(req: NextRequest) {
         name, 
         nexhealthSubdomain: subdomain, 
         nexhealthLocationId: locationId,
+        address,
+        acceptedInsurances,
+        serviceCostEstimates,
         webhookLastSyncAt: new Date() // Set initial sync timestamp
       },
     });

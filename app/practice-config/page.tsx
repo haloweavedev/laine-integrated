@@ -13,6 +13,9 @@ interface Practice {
   nexhealthSubdomain: string | null;
   nexhealthLocationId: string | null;
   webhookLastSyncAt: string | null;
+  address: string | null;
+  acceptedInsurances: string | null;
+  serviceCostEstimates: string | null;
   appointmentTypes: Array<{
     id: string;
     name: string;
@@ -224,13 +227,57 @@ export default function PracticeConfigPage() {
                 Your NexHealth Location ID number
               </p>
             </div>
+
+            <div>
+              <label htmlFor="practiceAddress" className="block text-sm font-medium text-gray-700 mb-1">
+                Practice Address
+              </label>
+              <input
+                type="text"
+                id="practiceAddress"
+                name="practiceAddress"
+                defaultValue={practice?.address || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., 123 Dental St, Smileytown, CA 98765"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="acceptedInsurances" className="block text-sm font-medium text-gray-700 mb-1">
+                Accepted Insurances (comma-separated)
+              </label>
+              <input
+                type="text"
+                id="acceptedInsurances"
+                name="acceptedInsurances"
+                defaultValue={practice?.acceptedInsurances || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Cigna, Delta Dental, MetLife"
+              />
+              <p className="text-sm text-gray-500 mt-1">Enter insurance names separated by commas.</p>
+            </div>
+
+            <div>
+              <label htmlFor="serviceCostEstimates" className="block text-sm font-medium text-gray-700 mb-1">
+                Service Cost Estimates (comma-separated)
+              </label>
+              <input
+                type="text"
+                id="serviceCostEstimates"
+                name="serviceCostEstimates"
+                defaultValue={practice?.serviceCostEstimates || ""}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Cleaning: $120, Exam: $80, X-Ray: $50"
+              />
+              <p className="text-sm text-gray-500 mt-1">Format as &apos;Service Name: $Cost&apos;, separated by commas.</p>
+            </div>
             
             <button
               type="submit"
               disabled={configLoading}
               className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {configLoading ? 'Saving...' : 'Save Configuration'}
+              {configLoading ? 'Saving...' : 'Save Basic Info & Sync Webhooks'}
             </button>
           </form>
         </div>

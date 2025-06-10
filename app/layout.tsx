@@ -82,7 +82,7 @@ export default function RootLayout({
           className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-50`}
         >
           <Header />
-          <main>
+          <main className="pt-20">
             {children}
           </main>
         </body>
