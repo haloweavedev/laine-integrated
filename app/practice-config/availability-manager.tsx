@@ -326,11 +326,18 @@ export function AvailabilityManager({
                     <div className="md:col-span-2">
                       <span className="font-medium text-gray-700">Appointment Types:</span>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {availability.appointmentTypeNames?.map((typeName, index) => (
-                          <span key={index} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
-                            {typeName}
-                          </span>
-                        ))}
+                        {availability.appointmentTypeIds.length > 0 ? (
+                          availability.appointmentTypeIds.map(typeId => {
+                            const apptType = appointmentTypes.find(at => at.nexhealthAppointmentTypeId === typeId);
+                            return (
+                              <span key={typeId} className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded">
+                                {apptType ? `${apptType.name} (ID: ${typeId})` : `Unknown Type (ID: ${typeId})`}
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <span className="text-xs text-gray-500">No specific types (applies to all)</span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -398,7 +405,7 @@ export function AvailabilityManager({
                     <option value="">Select a provider</option>
                     {providers.map(provider => (
                       <option key={provider.id} value={provider.id}>
-                        {provider.firstName} {provider.lastName}
+                        {provider.firstName} {provider.lastName} (ID: {provider.nexhealthProviderId})
                       </option>
                     ))}
                   </select>
@@ -417,7 +424,7 @@ export function AvailabilityManager({
                     <option value="">Any operatory</option>
                     {savedOperatories.map(operatory => (
                       <option key={operatory.id} value={operatory.id}>
-                        {operatory.name}
+                        {operatory.name} (ID: {operatory.nexhealthOperatoryId})
                       </option>
                     ))}
                   </select>
@@ -485,7 +492,7 @@ export function AvailabilityManager({
                           onChange={() => handleAppointmentTypeToggle(type.nexhealthAppointmentTypeId)}
                           className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                         />
-                        {type.name} ({type.duration} min)
+                        {type.name} (ID: {type.nexhealthAppointmentTypeId}) ({type.duration} min)
                       </label>
                     ))}
                   </div>

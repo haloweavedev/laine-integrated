@@ -84,7 +84,7 @@ export function ProviderSelection({ providers, savedProviders, onUpdate }: Provi
                 className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
               />
               <label htmlFor={`provider-${provider.id}`} className="flex-1 text-sm">
-                {provider.firstName} {provider.lastName}
+                {provider.firstName} {provider.lastName} (ID: {provider.nexhealthProviderId})
                 {isSaved && (
                   <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
                     Currently Saved

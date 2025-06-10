@@ -10,18 +10,6 @@ interface NexhealthSlot {
   [key: string]: unknown;
 }
 
-interface NexhealthProviderData {
-  pid: number;
-  lid: number;
-  slots?: NexhealthSlot[];
-  [key: string]: unknown;
-}
-
-interface NexhealthSlotsResponse {
-  data?: NexhealthProviderData[];
-  [key: string]: unknown;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
@@ -51,29 +39,37 @@ export async function POST(req: NextRequest) {
 
     if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
       return NextResponse.json({ 
-        error: "Practice configuration missing. Please set up NexHealth subdomain and location ID." 
+        error: "NexHealth configuration incomplete. Please configure subdomain and location ID." 
       }, { status: 400 });
     }
 
-    const { 
-      appointmentTypeId, 
-      requestedDate, 
-      days = 1, 
-      providerIds = [], 
-      operatoryIds = [] 
+    const {
+      requestedDate,
+      appointmentTypeId,
+      providerIds,
+      operatoryIds,
+      daysToSearch = 1
     } = await req.json();
 
     // Validate required fields
-    if (!appointmentTypeId || !requestedDate) {
+    if (!requestedDate || !appointmentTypeId || !providerIds || !Array.isArray(providerIds)) {
       return NextResponse.json({ 
-        error: "Missing required fields: appointmentTypeId, requestedDate" 
+        error: "Missing required fields: requestedDate, appointmentTypeId, providerIds (array)" 
       }, { status: 400 });
     }
 
-    // Validate date format
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(requestedDate)) {
       return NextResponse.json({ 
-        error: "Date must be in YYYY-MM-DD format" 
+        error: "requestedDate must be in YYYY-MM-DD format" 
+      }, { status: 400 });
+    }
+
+    // Validate daysToSearch is a positive number
+    if (typeof daysToSearch !== 'number' || daysToSearch < 1 || daysToSearch > 30) {
+      return NextResponse.json({ 
+        error: "daysToSearch must be a number between 1 and 30" 
       }, { status: 400 });
     }
 
@@ -96,7 +92,7 @@ export async function POST(req: NextRequest) {
 
     // Filter operatories based on selection or use all active
     let activeOperatories = practice.savedOperatories.filter(so => so.isActive);
-    if (operatoryIds.length > 0) {
+    if (operatoryIds && Array.isArray(operatoryIds) && operatoryIds.length > 0) {
       activeOperatories = activeOperatories.filter(so => operatoryIds.includes(so.id));
     }
 
@@ -106,35 +102,31 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get provider and operatory arrays
+    // Get provider arrays
     const providers = activeProviders.map(sp => sp.provider.nexhealthProviderId);
-    const operatories = activeOperatories.map(so => so.nexhealthOperatoryId);
 
-    // Build search params object for NexHealth API
-    const searchParams: Record<string, string | string[]> = {
+    // Build NexHealth API parameters
+    const params: Record<string, string | number | string[]> = {
       start_date: requestedDate,
-      days: days.toString(),
-      appointment_type_id: appointmentTypeId,
+      days: daysToSearch,
       'lids[]': [practice.nexhealthLocationId],
-      'pids[]': providers
+      'pids[]': providers,
+      appointment_type_id: appointmentTypeId
     };
 
-    // Add operatory IDs if configured
-    if (operatories.length > 0) {
-      searchParams['operatory_ids[]'] = operatories;
+    // Add operatory IDs if provided
+    if (operatoryIds && Array.isArray(operatoryIds) && operatoryIds.length > 0) {
+      params['operatory_ids[]'] = operatoryIds;
     }
 
-    console.log(`[check-slots] Checking ${requestedDate} for appointment type ${appointmentTypeId}`);
-    console.log(`[check-slots] Using providers:`, activeProviders.map(sp => `${sp.provider.firstName} ${sp.provider.lastName} (${sp.provider.nexhealthProviderId})`));
-    console.log(`[check-slots] Using operatories:`, activeOperatories.map(so => `${so.name} (${so.nexhealthOperatoryId})`));
+    console.log("Checking appointment slots with params:", params);
 
+    // Call NexHealth API
     const slotsResponse = await fetchNexhealthAPI(
       '/appointment_slots',
       practice.nexhealthSubdomain,
-      searchParams
-    ) as NexhealthSlotsResponse;
-
-    console.log(`[check-slots] API response:`, JSON.stringify(slotsResponse, null, 2));
+      params
+    );
 
     // Parse response and extract slots
     const availableSlots: Array<NexhealthSlot & { provider_id: number; location_id: number }> = [];
@@ -143,7 +135,7 @@ export async function POST(req: NextRequest) {
       // Extract all slots from all providers
       for (const providerData of slotsResponse.data) {
         if (providerData.slots && Array.isArray(providerData.slots)) {
-          availableSlots.push(...providerData.slots.map((slot) => ({
+          availableSlots.push(...providerData.slots.map((slot: NexhealthSlot) => ({
             ...slot,
             provider_id: providerData.pid,
             location_id: providerData.lid
@@ -225,6 +217,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      params: params,
+      response: slotsResponse,
       data: {
         requested_date: requestedDate,
         appointment_type: {
@@ -255,7 +249,10 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Error checking appointment slots:", error);
     return NextResponse.json(
-      { error: "Failed to check appointment slots" },
+      { 
+        error: "Failed to check appointment slots", 
+        details: error instanceof Error ? error.message : "Unknown error"
+      },
       { status: 500 }
     );
   }

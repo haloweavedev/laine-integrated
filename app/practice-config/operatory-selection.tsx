@@ -147,7 +147,7 @@ export function OperatorySelection({ practice, savedOperatories, onUpdate }: Ope
                   className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                 />
                 <label htmlFor={`operatory-${operatory.id}`} className="flex-1 text-sm">
-                  {operatory.name}
+                  {operatory.name} (ID: {operatory.id})
                   {isSaved && (
                     <span className="ml-2 px-2 py-1 text-xs bg-green-100 text-green-800 rounded">
                       Currently Saved
