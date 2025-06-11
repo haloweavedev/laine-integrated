@@ -56,14 +56,11 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
       }
     };
 
-    // Add tool-specific messages if defined
-    if (tool.messages) {
+    // Add only the start message - success/fail messages will be dynamic from tool execution
+    if (tool.messages?.start) {
       vapiTool.messages = [
-        tool.messages.start ? { type: "request-start", content: tool.messages.start } : null,
-        tool.messages.delay ? { type: "request-response-delayed", content: tool.messages.delay, timingMilliseconds: 2000 } : null,
-        tool.messages.success ? { type: "request-complete", content: tool.messages.success } : null,
-        tool.messages.fail ? { type: "request-failed", content: tool.messages.fail } : null,
-      ].filter(Boolean) as VapiToolSchema["messages"];
+        { type: "request-start", content: tool.messages.start }
+      ];
     }
     
     console.log(`Built VAPI tool: ${tool.name} -> ${vapiTool.server.url}`);
