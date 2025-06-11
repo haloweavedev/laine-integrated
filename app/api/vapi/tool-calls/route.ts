@@ -739,37 +739,28 @@ export async function POST(req: NextRequest) {
       
       let vapiToolResponseItem: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-      if (tool.name === "get_practice_details") {
-        if (toolResult.success) {
-          vapiToolResponseItem = {
-            toolCallId,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            result: JSON.stringify((toolResult as any).data || {}), // Data for LLM context
-            message: {
-              type: "request-complete", // Vapi specific type
-              content: toolResult.message_to_patient, // Dynamic message to be spoken
-            },
-          };
-          console.log(`[ToolCallHandler] Prepared success response for Vapi (get_practice_details) with immediate message:`, vapiToolResponseItem.message.content);
-        } else {
-          vapiToolResponseItem = {
-            toolCallId,
-            error: toolResult.details || toolResult.error_code || "Tool execution failed", // Error info for LLM
-            message: {
-              type: "request-failed", // Vapi specific type
-              content: toolResult.message_to_patient, // Dynamic error message to be spoken
-            },
-          };
-          console.log(`[ToolCallHandler] Prepared failure response for Vapi (get_practice_details) with immediate message:`, vapiToolResponseItem.message.content);
-        }
-      } else {
-        // Existing/Old way for other tools
+      // Apply dynamic message structure for ALL tools
+      if (toolResult.success) {
         vapiToolResponseItem = {
           toolCallId,
-          result: JSON.stringify(toolResult) // This sends the whole ToolResult (including message_to_patient) as data to the LLM
-                                            // and relies on static messages defined in buildVapiTools.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          result: JSON.stringify((toolResult as any).data || {}), // Data for LLM context
+          message: {
+            type: "request-complete", // Vapi specific type
+            content: toolResult.message_to_patient, // Dynamic message to be spoken
+          },
         };
-        console.log(`[ToolCallHandler] Prepared standard response for Vapi (tool: ${tool.name})`);
+        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared SUCCESS response for Vapi with immediate message:`, toolResult.message_to_patient);
+      } else {
+        vapiToolResponseItem = {
+          toolCallId,
+          error: toolResult.error_code || toolResult.details || "Tool execution failed", // Error info for LLM
+          message: {
+            type: "request-failed", // Vapi specific type
+            content: toolResult.message_to_patient, // Dynamic error message to be spoken
+          },
+        };
+        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared FAILURE response for Vapi with immediate message:`, toolResult.message_to_patient);
       }
 
       results.push(vapiToolResponseItem);

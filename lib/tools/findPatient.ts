@@ -157,7 +157,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
 
   messages: {
     start: "Let me look that up for you...",
-    success: "Perfect! I found your information.",
+    success: "The patient search is complete.",
     fail: "I'm having trouble finding that record. Let me help you with that."
   }
 };

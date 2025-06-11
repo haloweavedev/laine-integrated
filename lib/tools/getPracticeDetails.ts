@@ -44,7 +44,7 @@ const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = 
 
   messages: {
     start: "Let me get those practice details for you...",
-    success: "Here are the details about our practice.",
+    success: "The practice details lookup is complete.",
     fail: "I couldn't retrieve the practice details at the moment."
   }
 };

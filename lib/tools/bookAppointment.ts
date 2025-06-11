@@ -247,7 +247,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
  messages: {
    start: "Perfect! Let me book that appointment for you...",
-   success: "Excellent! Your appointment has been confirmed.",
+   success: "The appointment booking is complete.",
    fail: "I'm having trouble booking that time. Let me see what else is available."
  }
 };

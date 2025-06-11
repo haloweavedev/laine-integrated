@@ -131,7 +131,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
 
   messages: {
     start: "Let me check on that cost estimate for you...",
-    success: "I have some information on the cost.",
+    success: "The cost estimate check is complete.",
     fail: "I'm unable to retrieve cost estimates right now."
   }
 };

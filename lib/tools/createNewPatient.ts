@@ -210,7 +210,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
 
   messages: {
     start: "Let me gather the information needed to create your patient record...",
-    success: "Perfect! I've created your patient record and you're all set.",
+    success: "The patient record creation is complete.",
     fail: "I need some additional information to complete your registration."
   }
 };

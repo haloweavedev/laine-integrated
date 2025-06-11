@@ -80,7 +80,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
 
   messages: {
     start: "Let me check that insurance for you...",
-    success: "I've checked that insurance information.",
+    success: "The insurance check is complete.",
     fail: "I had a little trouble checking the insurance. Please bear with me."
   }
 };

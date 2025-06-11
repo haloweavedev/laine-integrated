@@ -238,7 +238,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
   messages: {
     start: "Let me check our availability for you...",
-    success: "Okay, I have the latest availability information for you.",
+    success: "The availability check is complete.",
     fail: "I'm having trouble checking our schedule right now."
   }
 };
