@@ -105,9 +105,36 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
     alert("Re-fetching latest call log - not yet implemented in this phase. Call data updates after a new call ends and page reloads or via live updates if implemented.");
   };
 
+  const handlePhoneCall = () => {
+    window.open('tel:+19203927291', '_self');
+  };
 
   return (
     <div className="space-y-8">
+      {/* Phone Call Component */}
+      <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 rounded-xl shadow-lg">
+        <div className="flex items-center justify-center space-x-4">
+          <div className="flex items-center space-x-3">
+            <div className="bg-white/20 p-3 rounded-full">
+              <span className="text-2xl">📞</span>
+            </div>
+            <div>
+              <h3 className="text-xl font-semibold text-white mb-1">Talk to Laine on the Phone</h3>
+              <p className="text-blue-100 text-sm">Experience our AI dental assistant over the phone</p>
+            </div>
+          </div>
+          <button
+            onClick={handlePhoneCall}
+            className="bg-white text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-lg font-semibold transition-all duration-200 hover:scale-105 shadow-md"
+          >
+            <div className="flex items-center space-x-2">
+              <span className="text-lg">📱</span>
+              <span>+1 (920) 392-7291</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <div className="bg-white p-6 rounded-lg shadow-md">
         <h2 className="text-xl font-semibold mb-4 text-slate-700">Test Your Laine Assistant</h2>
         <p className="text-sm text-gray-600 mb-1">Assistant ID: <span className="font-mono text-blue-600">{vapiAssistantId}</span></p>
