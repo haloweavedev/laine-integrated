@@ -643,18 +643,85 @@ export async function POST(req: NextRequest) {
       let callSummaryForNote: string | undefined = undefined; // Initialize here
 
       if (tool.name === "book_appointment") {
-        const partialTranscript = payload.message.call.artifact?.transcript;
-        if (partialTranscript && typeof partialTranscript === 'string' && partialTranscript.trim() !== "") {
+        // Debug: Log the call artifact structure to understand the payload
+        console.log("[ToolCallHandler] Call artifact structure:", JSON.stringify(payload.message.call.artifact || payload.message.call, null, 2));
+        
+        let extractedTranscript = payload.message.call.artifact?.transcript;
+
+        if (!extractedTranscript || typeof extractedTranscript !== 'string' || extractedTranscript.trim() === "") {
+          console.warn("[ToolCallHandler] `artifact.transcript` is empty or missing. Checking alternative paths and constructing from messages.");
+          
+          // Try alternative paths for transcript
+          const alternativePaths = [
+            payload.message.call.transcript,
+            payload.message.call.artifact?.messages,
+            payload.message.call.artifact?.messagesOpenAIFormatted,
+            payload.message.artifact?.transcript,
+            payload.message.artifact?.messages,
+            payload.message.artifact?.messagesOpenAIFormatted
+          ];
+          
+          // Check for direct transcript in alternative locations
+          for (const path of alternativePaths.slice(0, 1)) { // First check direct transcript paths
+            if (path && typeof path === 'string' && path.trim() !== '') {
+              extractedTranscript = path;
+              console.log(`[ToolCallHandler] Found transcript in alternative path. Length: ${extractedTranscript.length}`);
+              break;
+            }
+          }
+          
+          // If still no transcript, try to construct from messages
+          if (!extractedTranscript || extractedTranscript.trim() === "") {
+            const messagesArrays = [
+              payload.message.call.artifact?.messages,
+              payload.message.call.artifact?.messagesOpenAIFormatted,
+              payload.message.artifact?.messages,
+              payload.message.artifact?.messagesOpenAIFormatted
+            ];
+            
+            for (const messages of messagesArrays) {
+              if (Array.isArray(messages) && messages.length > 0) {
+                console.log(`[ToolCallHandler] Constructing transcript from messages array with ${messages.length} items.`);
+                console.log("[ToolCallHandler] Messages structure sample:", JSON.stringify(messages.slice(0, 3), null, 2));
+                
+                extractedTranscript = messages
+                  .filter(msg => {
+                    // Handle different message structures
+                    const hasMessage = (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'bot') && 
+                                     (typeof msg.message === 'string' || typeof msg.content === 'string');
+                    return hasMessage;
+                  })
+                  .map(msg => {
+                    const role = msg.role === 'bot' ? 'assistant' : msg.role; // Normalize 'bot' to 'assistant'
+                    const content = msg.message || msg.content || '';
+                    return `${role}: ${content}`;
+                  })
+                  .join('\n');
+                
+                if (extractedTranscript.trim()) {
+                  console.log(`[ToolCallHandler] Successfully constructed transcript from messages. Length: ${extractedTranscript.length}`);
+                  break;
+                } else {
+                  console.warn("[ToolCallHandler] Constructed transcript from messages is empty, trying next messages array.");
+                }
+              }
+            }
+          }
+        } else {
+          console.log(`[ToolCallHandler] Using provided artifact.transcript. Length: ${extractedTranscript.length}`);
+        }
+
+        if (extractedTranscript && typeof extractedTranscript === 'string' && extractedTranscript.trim() !== "") {
           try {
-            console.log(`[ToolCallHandler] Generating summary for book_appointment. Transcript length: ${partialTranscript.length}`);
-            callSummaryForNote = await generateCallSummaryForNote(partialTranscript);
+            console.log(`[ToolCallHandler] Generating summary for book_appointment. Transcript used (first 500 chars): \n"""\n${extractedTranscript.substring(0, 500)}${extractedTranscript.length > 500 ? '...' : ''}\n"""`);
+            callSummaryForNote = await generateCallSummaryForNote(extractedTranscript);
             console.log("[ToolCallHandler] Generated summary for note:", callSummaryForNote);
           } catch (summaryError) {
             console.error("[ToolCallHandler] Failed to generate call summary for note:", summaryError);
-            callSummaryForNote = "AI summary generation failed for appointment note."; // Fallback
+            callSummaryForNote = "AI summary generation failed for appointment note.";
           }
         } else {
-          console.warn("[ToolCallHandler] No partial transcript available in payload for book_appointment summary.");
+          console.warn("[ToolCallHandler] No transcript available (neither direct nor constructed) for book_appointment summary.");
           callSummaryForNote = "No transcript available for summary note.";
         }
       }

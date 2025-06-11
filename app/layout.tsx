@@ -48,6 +48,12 @@ async function Header() {
               >
                 Laine Assistant
               </a>
+              <a 
+                href="/test" 
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Test
+              </a>
               <UserButton afterSignOutUrl="/" />
             </div>
           ) : (
