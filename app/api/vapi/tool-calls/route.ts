@@ -3,6 +3,7 @@ import { getToolByName } from "@/lib/tools";
 import { prisma } from "@/lib/prisma";
 import { ToolExecutionContext, ToolDefinition } from "@/lib/tools/types";
 import { getErrorCode, getPatientMessage } from "@/lib/utils/error-messages";
+import { generateCallSummaryForNote } from "@/lib/ai/summarization";
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -639,12 +640,32 @@ export async function POST(req: NextRequest) {
       
       console.log(`✅ Found tool: ${tool.name}`);
       
+      let callSummaryForNote: string | undefined = undefined; // Initialize here
+
+      if (tool.name === "book_appointment") {
+        const partialTranscript = payload.message.call.artifact?.transcript;
+        if (partialTranscript && typeof partialTranscript === 'string' && partialTranscript.trim() !== "") {
+          try {
+            console.log(`[ToolCallHandler] Generating summary for book_appointment. Transcript length: ${partialTranscript.length}`);
+            callSummaryForNote = await generateCallSummaryForNote(partialTranscript);
+            console.log("[ToolCallHandler] Generated summary for note:", callSummaryForNote);
+          } catch (summaryError) {
+            console.error("[ToolCallHandler] Failed to generate call summary for note:", summaryError);
+            callSummaryForNote = "AI summary generation failed for appointment note."; // Fallback
+          }
+        } else {
+          console.warn("[ToolCallHandler] No partial transcript available in payload for book_appointment summary.");
+          callSummaryForNote = "No transcript available for summary note.";
+        }
+      }
+      
       // Create execution context
       const context: ToolExecutionContext = {
         practice,
         vapiCallId,
         toolCallId,
-        assistantId: assistantId || "unknown"
+        assistantId: assistantId || "unknown",
+        callSummaryForNote, // Pass the summary
       };
       
       const toolResult = await executeToolSafely(tool, toolCall, context);

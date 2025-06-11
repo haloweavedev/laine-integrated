@@ -15,6 +15,7 @@ export interface ToolExecutionContext {
   vapiCallId: string;
   toolCallId: string;
   assistantId: string;
+  callSummaryForNote?: string; // ADD THIS LINE for bookAppointment tool
 }
 
 // Standardized tool result format

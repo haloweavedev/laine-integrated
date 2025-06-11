@@ -36,7 +36,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
   schema: bookAppointmentSchema,
   
   async run({ args, context }): Promise<ToolResult> {
-    const { practice, vapiCallId } = context;
+    const { practice, vapiCallId, callSummaryForNote } = context;
     
     if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
       return {
@@ -122,6 +122,20 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      const appointmentType = practice.appointmentTypes?.find(
        at => at.nexhealthAppointmentTypeId === args.appointmentTypeId
      );
+     const appointmentTypeNameForNote = appointmentType?.name || "Appointment";
+
+     let finalNote = `${appointmentTypeNameForNote} - Scheduled via LAINE AI.`;
+     if (callSummaryForNote && callSummaryForNote.trim() !== "" && !callSummaryForNote.toLowerCase().includes("failed") && !callSummaryForNote.toLowerCase().includes("not available")) {
+       finalNote = `${callSummaryForNote} (Booked via LAINE AI)`;
+     } else if (callSummaryForNote) {
+       // If summary generation failed or was unavailable, append that info.
+       finalNote = `${appointmentTypeNameForNote} - Scheduled via LAINE AI. (${callSummaryForNote})`;
+     }
+     
+     // Ensure note is not excessively long for EHR systems
+     if (finalNote.length > 250) { // Example limit, adjust as needed
+       finalNote = finalNote.substring(0, 247) + "...";
+     }
 
      // Prepare booking data
      const bookingData = {
@@ -130,10 +144,10 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        appointment_type_id: parseInt(args.appointmentTypeId),
        operatory_id: parseInt(operatory.nexhealthOperatoryId),
        start_time: startTime,
-       note: appointmentType ? `${appointmentType.name} - Scheduled via LAINE AI Assistant` : "Scheduled via LAINE AI Assistant"
+       note: finalNote // USE THE FINAL NOTE
      };
 
-     console.log(`[bookAppointment] Booking data:`, JSON.stringify(bookingData, null, 2));
+     console.log(`[bookAppointment] Booking data with note:`, JSON.stringify(bookingData, null, 2));
 
      // Make the booking API call
      const bookingResponse = await fetchNexhealthAPI(
@@ -205,7 +219,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
          appointment_type: appointmentTypeName,
          provider_name: providerName,
          location_name: practice.name,
-         booking_source: "laine_ai"
+         booking_source: "laine_ai",
+         note_sent_to_ehr: finalNote // Add this for logging/verification
        }
      };
 
