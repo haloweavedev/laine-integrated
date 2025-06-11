@@ -54,6 +54,12 @@ async function Header() {
               >
                 Test
               </a>
+              <a 
+                href="/tool-calls" 
+                className="text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              >
+                Tool Calls
+              </a>
               <UserButton afterSignOutUrl="/" />
             </div>
           ) : (
