@@ -5,7 +5,7 @@ export const getPracticeDetailsSchema = z.object({});
 
 const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = {
   name: "get_practice_details",
-  description: "Retrieves specific logistical details about the dental practice, such as its full address. Use this typically towards the end of a call when providing confirmation and directions, or if a patient asks specifically for the practice's address or location information.",
+  description: "Retrieves practice details like address and location info. Use when patient asks for practice address or location information, or when providing confirmation and directions.",
   schema: getPracticeDetailsSchema,
   
   async run({ context }): Promise<ToolResult> {
@@ -17,7 +17,7 @@ const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = 
         return {
           success: false,
           error_code: "PRACTICE_DETAIL_MISSING",
-          message_to_patient: "I don't have the specific address details readily available in my system right now. However, our office team can certainly provide that to you. Were you looking to schedule an appointment?",
+          message_to_patient: "I don't have the specific address details available in my system right now. However, our office team can certainly provide that to you. Were you looking to schedule an appointment?",
           details: "Practice address is not configured."
         };
       }
@@ -44,8 +44,8 @@ const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = 
 
   messages: {
     start: "Let me get those practice details for you...",
-    success: "The practice details lookup is complete.",
-    fail: "I couldn't retrieve the practice details at the moment."
+    success: "Okay, practice details processed.",
+    fail: "There was an issue retrieving the practice details."
   }
 };
 

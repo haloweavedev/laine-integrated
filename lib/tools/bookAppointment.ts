@@ -6,33 +6,24 @@ import { DateTime } from "luxon";
 export const bookAppointmentSchema = z.object({
   selectedTime: z.string()
     .min(1)
-    .describe(`Extract time patient selected from available options.
-
-Examples: "I'll take 8 AM" → "8:00 AM", "The 2:30 slot" → "2:30 PM", "10 o'clock" → "10:00 AM"
-
-Rules: Include :00/:30 for minutes, include AM/PM, match format presented to patient`),
+    .describe(`Time patient selected from available options. Include AM/PM. Examples: "I'll take 8 AM" → "8:00 AM", "The 2:30 slot" → "2:30 PM"`),
   patientId: z.string()
     .min(1)
-    .describe(`CRITICAL: This MUST be the numeric patient ID (e.g., "381872342") obtained from the successful result of a PREVIOUS 'find_patient_in_ehr' or 'create_new_patient' tool call. 
-DO NOT use the patient's name (e.g., "Alex Dan"). 
-DO NOT invent an ID. 
-If a new patient was just created, use the 'patient_id' provided in the data output of the 'create_new_patient' tool. 
-If an existing patient was found, use the 'patient_id' from the 'find_patient_in_ehr' tool.
-This ID is essential for linking the appointment to the correct patient record in the EHR.`),
+    .describe(`CRITICAL: Numeric patient ID (e.g., "381872342") from previous find_patient_in_ehr or create_new_patient tool call. NOT patient name. Required for EHR linking.`),
   appointmentTypeId: z.string()
     .min(1)
-    .describe("The appointment type ID (e.g., '1014017') from the data.appointment_type_id field of a successful 'find_appointment_type' tool call"),
+    .describe("Appointment type ID from successful find_appointment_type tool call data.appointment_type_id field"),
   requestedDate: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe("The requested appointment date in YYYY-MM-DD format, typically confirmed after a 'check_available_slots' tool call or directly from user input if a specific date was requested and validated"),
+    .describe("Appointment date in YYYY-MM-DD format from check_available_slots or user input"),
   durationMinutes: z.number()
     .min(1)
-    .describe("The duration of the appointment in minutes (e.g., 90) from the data.duration_minutes field of a successful 'find_appointment_type' tool call")
+    .describe("Appointment duration in minutes from find_appointment_type tool call data.duration_minutes field")
 });
 
 const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
   name: "book_appointment",
-  description: "Books the actual appointment after the patient has selected a specific time. Use this after showing available slots and getting the patient's time preference.",
+  description: "Books the actual appointment after patient selects a specific time from available slots. Use after showing available slots and getting patient's time preference.",
   schema: bookAppointmentSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -198,58 +189,50 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      }
 
      // Update call log with booking information
-     await updateCallLogWithBooking(vapiCallId, bookingResponse.data.id, args.requestedDate, startTime);
+     const appointmentId = bookingResponse.data?.id || bookingResponse.data?.appointment?.id;
+     if (appointmentId) {
+       await updateCallLogWithBooking(vapiCallId, String(appointmentId), args.requestedDate, args.selectedTime);
+     }
 
-     // Format confirmation message
-     const appointmentTypeName = appointmentType?.name || "appointment";
+     // Format appointment details for confirmation
      const formattedDate = formatDate(args.requestedDate);
      const formattedTime = args.selectedTime;
-     const providerName = provider.provider.firstName 
-       ? `${provider.provider.firstName} ${provider.provider.lastName}`
-       : `Dr. ${provider.provider.lastName}`;
+     const providerName = provider.provider.firstName ? 
+       `${provider.provider.firstName} ${provider.provider.lastName || ''}`.trim() : 
+       provider.provider.lastName || 'your provider';
+     const appointmentTypeName = appointmentType?.name || "your appointment";
 
      return {
        success: true,
-       message_to_patient: `Excellent! I've successfully booked your ${appointmentTypeName} for ${formattedDate} at ${formattedTime} with ${providerName}. You'll receive a confirmation text shortly. Is there anything else I can help you with today?`,
+       message_to_patient: `Excellent! I've successfully booked your ${appointmentTypeName} for ${formattedDate} at ${formattedTime} with ${providerName}. You should receive a confirmation shortly. Is there anything else I can help you with today?`,
        data: {
-         appointment_id: bookingResponse.data.id,
-         confirmation_number: bookingResponse.data.id,
-         appointment_date: args.requestedDate,
-         appointment_time: args.selectedTime,
+         appointment_id: String(appointmentId),
+         patient_id: args.patientId,
          appointment_type: appointmentTypeName,
+         date: args.requestedDate,
+         time: args.selectedTime,
          provider_name: providerName,
-         location_name: practice.name,
-         booking_source: "laine_ai",
-         note_sent_to_ehr: finalNote // Add this for logging/verification
+         booked: true
        }
      };
 
-   } catch (error) {
-     console.error(`[bookAppointment] Error:`, error);
-     
-     let message = "I'm having trouble completing your booking right now. Please contact the office directly to schedule your appointment.";
-     if (error instanceof Error) {
-       if (error.message.includes("401")) {
-         message = "There's an authentication issue with the booking system. Please contact the office for assistance.";
-       } else if (error.message.includes("conflict") || error.message.includes("409")) {
-         message = "It looks like that time slot just became unavailable. Would you like me to show you other available times?";
-       }
-     }
-     
-     return {
-       success: false,
-       error_code: "BOOKING_ERROR",
-       message_to_patient: message,
-       details: error instanceof Error ? error.message : "Unknown error"
-     };
-   }
- },
+    } catch (error) {
+      console.error(`[bookAppointment] Error:`, error);
+      
+      return {
+        success: false,
+        error_code: "BOOKING_ERROR",
+        message_to_patient: "I'm having trouble completing your booking right now. Please contact the office directly to schedule your appointment.",
+        details: error instanceof Error ? error.message : "Unknown error"
+      };
+    }
+  },
 
- messages: {
-   start: "Perfect! Let me book that appointment for you...",
-   success: "The appointment booking is complete.",
-   fail: "I'm having trouble booking that time. Let me see what else is available."
- }
+  messages: {
+    start: "Let me book that appointment for you...",
+    success: "Okay, booking processed.",
+    fail: "There was an issue with the booking."
+  }
 };
 
 /**

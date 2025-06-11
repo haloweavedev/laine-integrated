@@ -17,27 +17,18 @@ function getCurrentDateContext(): string {
 export const findPatientSchema = z.object({
   firstName: z.string()
     .min(1)
-    .describe(`Extract patient's first name. If spelled letter by letter (B-O-B), convert to proper name (Bob).
-
-Examples: "My name is Bob Ross" → "Bob", "First name B-O-B" → "Bob"`),
+    .describe(`Patient's first name. If spelled out (B-O-B), convert to proper form (Bob). Example: "My name is Bob Ross" → "Bob"`),
   lastName: z.string()
     .min(1)
-    .describe(`Extract patient's last name. If spelled letter by letter (R-O-S-S), convert to proper name (Ross).
-
-Examples: "Bob Ross" → "Ross", "last name R-O-S-S" → "Ross"`),
+    .describe(`Patient's last name. If spelled out (R-O-S-S), convert to proper form (Ross). Example: "Bob Ross" → "Ross"`),
   dateOfBirth: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe(`Convert date of birth to YYYY-MM-DD format.
-
-${getCurrentDateContext()}
-
-Examples: "October 30, 1998" → "1998-10-30", "10/30/98" → "1998-10-30"
-For 2-digit years: 50-99 → 1900s, 00-49 → 2000s`)
+    .describe(`Date of birth in YYYY-MM-DD format. ${getCurrentDateContext()} Examples: "October 30, 1998" → "1998-10-30", "10/30/98" → "1998-10-30"`)
 });
 
 const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
   name: "find_patient_in_ehr",
-  description: "Searches for an existing patient in the Electronic Health Record using first name, last name, and date of birth. Use this before any appointment scheduling to verify patient identity.",
+  description: "Use when an existing patient provides their full name and date of birth to verify their identity and retrieve their record before scheduling appointments or accessing their information. Only call when you have all three pieces: first name, last name, and complete date of birth.",
   schema: findPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -47,7 +38,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I'm sorry, I can't access patient records right now. Please contact the office directly at your convenience."
+        message_to_patient: "I'm sorry, I can't access patient records right now. Please contact the office directly for assistance."
       };
     }
 
@@ -97,7 +88,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
         
         return {
           success: true,
-          message_to_patient: `I couldn't find a patient record for ${args.firstName} ${args.lastName} with date of birth ${friendlyDob}. Are you a new patient with us, or would you like to try different information?`,
+          message_to_patient: `I couldn't find a patient record for ${args.firstName} ${args.lastName} with date of birth ${friendlyDob}. Are you a new patient with us, or would you like to double-check that information?`,
           data: { 
             found_patients: [], 
             patient_exists: false,
@@ -125,7 +116,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       
       return {
         success: true,
-        message_to_patient: `Great! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${friendlyDob}. What type of appointment would you like to schedule today?`,
+        message_to_patient: `Perfect! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${friendlyDob}. What type of appointment would you like to schedule today?`,
         data: {
           found_patients: [{
             id: patient.id,
@@ -157,8 +148,8 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
 
   messages: {
     start: "Let me look that up for you...",
-    success: "The patient search is complete.",
-    fail: "I'm having trouble finding that record. Let me help you with that."
+    success: "Okay, patient lookup processed.",
+    fail: "There was an issue with that lookup."
   }
 };
 

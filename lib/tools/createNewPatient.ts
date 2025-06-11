@@ -16,39 +16,26 @@ function getCurrentDateContext(): string {
 export const createNewPatientSchema = z.object({
   firstName: z.string()
     .min(1)
-    .describe(`Extract patient's first name. If spelled letter by letter (B-O-B), convert to proper name (Bob).
-
-Examples: "My name is Sarah" → "Sarah", "V-A-P-I" → "Vapi"`),
+    .describe(`Patient's first name. If spelled out (B-O-B), convert to proper form (Bob). Example: "My name is Sarah" → "Sarah"`),
   lastName: z.string()
     .min(1)
-    .describe(`Extract patient's last name. If spelled letter by letter (T-E-S-T), convert to proper name (Test).
-
-Examples: "Last name is Johnson" → "Johnson", "Smith, S-M-I-T-H" → "Smith"`),
+    .describe(`Patient's last name. If spelled out (T-E-S-T), convert to proper form (Test). Example: "Last name is Johnson" → "Johnson"`),
   dateOfBirth: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe(`Convert date of birth to YYYY-MM-DD format.
-
-${getCurrentDateContext()}
-
-Examples: "January 20, 1990" → "1990-01-20", "1/20/90" → "1990-01-20"
-For 2-digit years: 50-99 → 1900s, 00-49 → 2000s`),
+    .describe(`Date of birth in YYYY-MM-DD format. ${getCurrentDateContext()} Example: "January 20, 1990" → "1990-01-20"`),
   phone: z.string()
     .min(10)
-    .describe(`Extract phone number as digits only.
-
-Examples: "313-555-1200" → "3135551200", "(313) 555-1200" → "3135551200"`),
+    .describe(`Phone number as digits only. Example: "313-555-1200" → "3135551200"`),
   email: z.string()
     .email()
-    .describe(`Extract email address. Convert spoken format to proper syntax.
-
-Examples: "john at gmail dot com" → "john@gmail.com"`),
+    .describe(`Email address. Convert spoken format. Example: "john at gmail dot com" → "john@gmail.com"`),
   insurance_name: z.string().optional()
-    .describe("Patient's dental insurance company name (e.g., Cigna, MetLife). This is optional. If provided, it will be added to the patient's record.")
+    .describe("Dental insurance company name if provided (e.g., Cigna, MetLife). Optional.")
 });
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: `Creates new patient record in EHR system. Collects first/last name, DOB, phone, email. Optionally collects insurance company name. CRITICAL: ONLY call when you have ALL required information (first name, last name, date of birth, phone number 10+ digits, valid email address). DO NOT call if ANY field is missing or empty strings. Ask for missing info first. Insurance name is optional.`,
+  description: `Creates new patient record when all required information is collected: first name, last name, date of birth, phone (10+ digits), and valid email. Insurance name is optional. CRITICAL: Only call when you have ALL required fields - do not call with missing or empty values.`,
   schema: createNewPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -161,9 +148,9 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       // Create context-aware success message based on insurance information
       let successMessage: string;
       if (args.insurance_name && args.insurance_name.trim() !== "") {
-        successMessage = `Perfect! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. I've also noted your ${args.insurance_name} insurance. To make sure we have all the details, could you provide the subscriber's full name on that policy?`;
+        successMessage = `Excellent! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. I've also noted your ${args.insurance_name} insurance. To make sure we have all the details, could you provide the subscriber's full name on that policy?`;
       } else {
-        successMessage = `Perfect! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. Welcome to ${practice.name || 'Royal Oak Family Dental'}! Now, what type of appointment were you looking to schedule today?`;
+        successMessage = `Excellent! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. Welcome to ${practice.name || 'our practice'}! Now, what type of appointment were you looking to schedule today?`;
       }
 
       return {
@@ -210,8 +197,8 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
 
   messages: {
     start: "Let me gather the information needed to create your patient record...",
-    success: "The patient record creation is complete.",
-    fail: "I need some additional information to complete your registration."
+    success: "Okay, patient registration processed.",
+    fail: "There was an issue with the registration."
   }
 };
 

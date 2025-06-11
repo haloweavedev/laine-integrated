@@ -19,27 +19,14 @@ export const checkAvailableSlotsSchema = z.object({
       const parsedDate = new Date(date);
       return !isNaN(parsedDate.getTime()) && date === parsedDate.toISOString().split('T')[0];
     }, "Date must be in YYYY-MM-DD format and be a valid date")
-    .describe(`Convert patient's date request to YYYY-MM-DD format.
-
-Current date: ${getCurrentDate()}
-
-Examples:
-- "December 23rd" → "2025-12-23"
-- "next Friday" → calculate next Friday from ${getCurrentDate()}
-- "tomorrow" → calculate tomorrow from ${getCurrentDate()}
-
-Rules:
-1. Return YYYY-MM-DD format
-2. If no year specified, use next occurrence
-3. For relative dates, calculate from ${getCurrentDate()}
-4. If ambiguous, ask for clarification`),
-  appointmentTypeId: z.string().min(1).describe("The appointment type ID from the previous tool call"),
+    .describe(`Patient's requested date in YYYY-MM-DD format. Today: ${getCurrentDate()}. Examples: "December 23rd" → "2025-12-23", "next Friday" → calculate from ${getCurrentDate()}, "tomorrow" → calculate from ${getCurrentDate()}`),
+  appointmentTypeId: z.string().min(1).describe("Appointment type ID from previous find_appointment_type tool call"),
   days: z.number().min(1).max(7).default(1).describe("Number of days to check (default 1)")
 });
 
 const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> = {
   name: "check_available_slots",
-  description: "Checks available appointment slots for a specific date and appointment type. Use this after confirming patient identity and appointment type to show available times.",
+  description: "Checks available appointment slots for a specific date and appointment type. Use after confirming patient identity and appointment type when patient requests a specific date.",
   schema: checkAvailableSlotsSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -134,7 +121,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         const otherAppointmentTypesExist = (practice.appointmentTypes?.length || 0) > 1;
 
         if (otherAppointmentTypesExist) {
-          messageToPatient += ` Would you like me to check for a different type of appointment on that day, or perhaps look for ${appointmentTypeName} on another date?`;
+          messageToPatient += ` Would you like me to check a different date for the ${appointmentTypeName}, or perhaps look at other appointment types for that day?`;
         } else {
           messageToPatient += ` Would you like me to check for ${appointmentTypeName} on a different date?`;
         }
@@ -196,14 +183,12 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         timeOptionsMessage = offeredTimeList.slice(0, -1).join(', ') + (offeredTimeList.length > 1 ? ', or ' : '') + offeredTimeList[offeredTimeList.length - 1];
       }
 
-      let finalMessageToPatient = `Okay! For a ${appointmentTypeName} on ${friendlyDate}, I have ${timeOptionsMessage} available.`;
+      let finalMessageToPatient = `Great! For a ${appointmentTypeName} on ${friendlyDate}, I have ${timeOptionsMessage} available.`;
 
       if (formattedSlots.length > slotsToOfferCount) {
-        finalMessageToPatient += ` I also have a few other times that day. Do any of those I mentioned work, or would you like to hear more options for ${friendlyDate}?`;
-      } else if (formattedSlots.length > 0) {
-        finalMessageToPatient += ` Which of those times works best for you?`;
-      } else { // Should not happen if availableSlots.length > 0, but as a fallback
-        finalMessageToPatient = `I found some availability on ${friendlyDate} for a ${appointmentTypeName}. Which time would you prefer from the options I mentioned?`;
+        finalMessageToPatient += " Do any of those work, or would you like to hear more options?";
+      } else {
+        finalMessageToPatient += " Do any of those times work for you?";
       }
 
       return {
@@ -211,50 +196,42 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         message_to_patient: finalMessageToPatient,
         data: {
           requested_date: args.requestedDate,
-          appointment_type_name: appointmentTypeName, // Add for context
-          available_slots: formattedSlots, // Send all found slots in data
+          requested_appointment_type_id: args.appointmentTypeId,
+          appointment_type_name: appointmentTypeName,
+          available_slots: formattedSlots,
           has_availability: true,
           total_slots_found: availableSlots.length,
-          formatted_times: formattedSlots.map(slot => slot.display_time) // All formatted times
+          slots_offered: slotsToOfferCount
         }
       };
 
     } catch (error) {
       console.error(`[checkAvailableSlots] Error:`, error);
       
-      let message = "I'm having trouble checking availability right now. Please try again or call the office.";
-      if (error instanceof Error && error.message.includes("401")) {
-        message = "There's an authentication issue with the scheduling system. Please contact support.";
-      }
-      
       return {
         success: false,
-        error_code: "AVAILABILITY_CHECK_ERROR",
-        message_to_patient: message,
+        error_code: "SLOT_CHECK_ERROR",
+        message_to_patient: "I'm having trouble checking availability right now. Please contact the office for scheduling assistance.",
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
   },
 
   messages: {
-    start: "Let me check our availability for you...",
-    success: "The availability check is complete.",
-    fail: "I'm having trouble checking our schedule right now."
+    start: "Let me check what's available...",
+    success: "Okay, availability check processed.",
+    fail: "There was an issue checking availability."
   }
 };
 
 function formatDate(dateString: string): string {
-  try {
-    const date = new Date(dateString + 'T00:00:00');
-    return date.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  } catch {
-    return dateString;
-  }
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', { 
+    weekday: 'long', 
+    month: 'long', 
+    day: 'numeric', 
+    year: 'numeric' 
+  });
 }
 
 export default checkAvailableSlotsTool; 

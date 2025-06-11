@@ -4,23 +4,12 @@ import { ToolDefinition, ToolResult } from "./types";
 export const findAppointmentTypeSchema = z.object({
   userRequest: z.string()
     .min(1)
-    .describe(`Extract appointment type patient is requesting.
-
-Common variations:
-- Cleaning: "cleaning", "teeth cleaning", "hygiene", "prophy"
-- Checkup: "checkup", "exam", "routine visit"
-- Emergency: "tooth pain", "broken tooth", "urgent"
-- Filling: "cavity", "filling", "tooth repair"
-- Crown: "crown", "cap"
-- Root Canal: "root canal", "nerve treatment"
-- Extraction: "pull tooth", "remove tooth"
-
-Examples: "I need a cleaning" → "cleaning", "My tooth hurts" → "tooth pain"`)
+    .describe(`Patient's requested service type. Common variations: cleaning/hygiene/prophy, checkup/exam, emergency/pain, filling/cavity, crown/cap, root canal, extraction/pull tooth. Example: "I need a cleaning" → "cleaning"`)
 });
 
 const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {
   name: "find_appointment_type",
-  description: "Matches the patient's request for service to available appointment types in the practice. Use this after confirming patient identity to determine what type of appointment they need.",
+  description: "Matches patient's service request to available appointment types. Use after confirming patient identity when they mention what type of appointment they need (cleaning, checkup, filling, etc.).",
   schema: findAppointmentTypeSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -122,7 +111,7 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
           
         return {
           success: true,
-          message_to_patient: `I want to make sure I schedule the right appointment for you. We offer ${typeOptions}. Which of these best describes what you need?`,
+          message_to_patient: `I want to make sure I schedule the right appointment for you. We offer ${typeOptions}. Which of these sounds like what you need?`,
           data: {
             matched: false,
             available_types: availableTypes.map(t => ({
@@ -138,7 +127,7 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
       // Good match found - confirm and move forward
       return {
         success: true,
-        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. What day would you like to come in?`,
+        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. What day would work best for you?`,
         data: {
           matched: true,
           appointment_type_id: bestMatch.id,
@@ -162,8 +151,8 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
 
   messages: {
     start: "Let me find the right appointment type for you...",
-    success: "The appointment type search is complete.",
-    fail: "Let me check what appointment types we have available."
+    success: "Okay, appointment type search processed.",
+    fail: "There was an issue with the appointment type search."
   }
 };
 

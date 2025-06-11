@@ -3,12 +3,12 @@ import { ToolDefinition, ToolResult } from "./types";
 
 export const checkInsuranceParticipationSchema = z.object({
   insuranceProviderName: z.string().min(1)
-    .describe("The name of the dental insurance provider the patient mentioned (e.g., 'Cigna', 'Healthplex', 'Renaissance'). Extract the primary name of the insurer.")
+    .describe("Dental insurance provider name patient mentioned (e.g., 'Cigna', 'Healthplex', 'Renaissance'). Extract primary insurer name.")
 });
 
 const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParticipationSchema> = {
   name: "check_insurance_participation",
-  description: "Checks if the dental practice is in-network or out-of-network with a patient's stated dental insurance provider. Use this after the patient mentions their insurance company.",
+  description: "Checks if practice is in-network with patient's dental insurance provider. Use after patient mentions their insurance company name.",
   schema: checkInsuranceParticipationSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -20,7 +20,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
         return {
           success: true, // Tool ran, but no configuration data available
           error_code: "INSURANCE_CONFIG_MISSING",
-          message_to_patient: `This practice hasn't specified which insurances they accept in my system. It would be best to confirm directly with the office staff regarding your ${args.insuranceProviderName} plan. Would you like to proceed with scheduling for now, and we can clarify the insurance later?`,
+          message_to_patient: `This practice hasn't specified which insurances they accept in my system. It would be best to confirm directly with the office regarding your ${args.insuranceProviderName} plan. Would you like to proceed with scheduling for now?`,
           data: { 
             insuranceProviderName: args.insuranceProviderName,
             participation: "unknown_configuration",
@@ -57,7 +57,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
       } else {
         return {
           success: true,
-          message_to_patient: `Based on the information I have, we might be out-of-network with ${args.insuranceProviderName}. You are still welcome to be seen here, but you would be responsible for the cost of the visit out-of-pocket. Would you like an estimate for the service you're considering, or would you like to discuss scheduling options?`,
+          message_to_patient: `Based on the information I have, we might be out-of-network with ${args.insuranceProviderName}. You are still welcome to be seen here, but you would be responsible for the cost out-of-pocket. Would you like an estimate for the service you're considering?`,
           data: {
             insuranceProviderName: args.insuranceProviderName,
             participation: "out-of-network",
@@ -72,7 +72,7 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
       return {
         success: false,
         error_code: "EXECUTION_ERROR",
-        message_to_patient: "I had a little trouble checking the insurance. Please contact the office to verify your insurance coverage.",
+        message_to_patient: "I had trouble checking the insurance. Please contact the office to verify your insurance coverage.",
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
@@ -80,8 +80,8 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
 
   messages: {
     start: "Let me check that insurance for you...",
-    success: "The insurance check is complete.",
-    fail: "I had a little trouble checking the insurance. Please bear with me."
+    success: "Okay, insurance check processed.",
+    fail: "There was an issue with the insurance check."
   }
 };
 

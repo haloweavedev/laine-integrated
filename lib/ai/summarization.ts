@@ -37,10 +37,10 @@ export async function generateCallSummaryForNote(transcript: string): Promise<st
 
   try {
     const { text, finishReason, usage } = await generateText({
-      model: openai('gpt-4o'), // Using GPT-4o as specified
+      model: openai('gpt-4o-mini'), // Using GPT-4o as specified
       messages,
       temperature: 0.3, // Lower temperature for more factual summary
-      maxTokens: 150,   // Max tokens for the summary itself
+      maxTokens: 330,   // Max tokens for the summary itself
     });
     console.log(`[Summarization] Summary generated. Finish reason: ${finishReason}, Usage: ${JSON.stringify(usage)}`);
     return text.trim();
