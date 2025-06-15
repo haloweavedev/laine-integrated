@@ -9,6 +9,19 @@ interface NexHealthAppointmentDescriptor {
   name: string;
   code: string;
   descriptor_type: string;
+  active?: boolean;
+  location_id?: number;
+  foreign_id?: string;
+  foreign_id_type?: string;
+  last_sync_time?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  data?: {
+    AbbrDesc?: string;
+    ProcTime?: string;
+    PaintType?: number;
+    TreatArea?: number;
+  };
 }
 
 interface NexHealthAppointmentDescriptorsResponse {
