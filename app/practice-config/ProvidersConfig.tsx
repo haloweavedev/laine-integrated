@@ -35,9 +35,7 @@ interface SavedOperatory {
 
 interface ProviderSettings {
   acceptedAppointmentTypeIds: string[];
-  defaultAppointmentTypeId: string | null;
-  defaultOperatoryId: string | null;
-  assignedOperatoryIds: string[]; // NEW: Multiple operatories
+  assignedOperatoryIds: string[];
 }
 
 interface ProvidersConfigProps {
@@ -79,8 +77,6 @@ export function ProvidersConfig({
           ...prev,
           [savedProviderId]: {
             acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypes) ? settings.acceptedAppointmentTypes.map((at: { id: string }) => at.id) : [],
-            defaultAppointmentTypeId: settings.defaultAppointmentTypeId || null,
-            defaultOperatoryId: settings.defaultOperatoryId || null,
             assignedOperatoryIds: Array.isArray(settings.assignedOperatories) ? settings.assignedOperatories.map((op: { id: string }) => op.id) : []
           }
         }));
@@ -90,8 +86,6 @@ export function ProvidersConfig({
           ...prev,
           [savedProviderId]: {
             acceptedAppointmentTypeIds: [],
-            defaultAppointmentTypeId: null,
-            defaultOperatoryId: null,
             assignedOperatoryIds: []
           }
         }));
@@ -133,10 +127,6 @@ export function ProvidersConfig({
       newAcceptedTypes = [...(currentSettings?.acceptedAppointmentTypeIds || []), appointmentTypeId];
     } else {
       newAcceptedTypes = (currentSettings?.acceptedAppointmentTypeIds || []).filter(id => id !== appointmentTypeId);
-      // If we're removing the default appointment type, clear it
-      if (currentSettings?.defaultAppointmentTypeId === appointmentTypeId) {
-        updateProviderSetting(savedProviderId, 'defaultAppointmentTypeId', null);
-      }
     }
     
     updateProviderSetting(savedProviderId, 'acceptedAppointmentTypeIds', newAcceptedTypes);
@@ -150,10 +140,6 @@ export function ProvidersConfig({
       newAssignedOperatories = [...(currentSettings?.assignedOperatoryIds || []), operatoryId];
     } else {
       newAssignedOperatories = (currentSettings?.assignedOperatoryIds || []).filter(id => id !== operatoryId);
-      // If we're removing the default operatory, clear it
-      if (currentSettings?.defaultOperatoryId === operatoryId) {
-        updateProviderSetting(savedProviderId, 'defaultOperatoryId', null);
-      }
     }
     
     updateProviderSetting(savedProviderId, 'assignedOperatoryIds', newAssignedOperatories);
@@ -166,8 +152,6 @@ export function ProvidersConfig({
     // Ensure data types are correct before sending
     const payload = {
       acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypeIds) ? settings.acceptedAppointmentTypeIds : [],
-      defaultAppointmentTypeId: settings.defaultAppointmentTypeId || null,
-      defaultOperatoryId: settings.defaultOperatoryId || null,
       assignedOperatoryIds: Array.isArray(settings.assignedOperatoryIds) ? settings.assignedOperatoryIds : []
     };
 
@@ -212,11 +196,7 @@ export function ProvidersConfig({
     return `${provider.firstName || ''} ${provider.lastName}`.trim() || 'Unnamed Provider';
   };
 
-  const getAcceptedAppointmentTypes = (savedProviderId: string) => {
-    const settings = providerSettings[savedProviderId];
-    if (!settings) return [];
-    return allAppointmentTypes.filter(at => settings.acceptedAppointmentTypeIds.includes(at.id));
-  };
+
 
   const handleSyncNexHealth = async () => {
     setSyncLoading(true);
@@ -412,22 +392,7 @@ export function ProvidersConfig({
                         </div>
                       </div>
 
-                      {/* Default Appointment Type */}
-                      <div>
-                        <h4 className="font-medium text-gray-900 mb-3">Default Appointment Type</h4>
-                        <select
-                          value={providerSettings[savedProvider.id]?.defaultAppointmentTypeId || ''}
-                          onChange={(e) => updateProviderSetting(savedProvider.id, 'defaultAppointmentTypeId', e.target.value || null)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="">Select default appointment type</option>
-                          {getAcceptedAppointmentTypes(savedProvider.id).map((appointmentType) => (
-                            <option key={appointmentType.id} value={appointmentType.id}>
-                              {appointmentType.name} ({appointmentType.duration} min)
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+
 
                       {/* Assigned Operatories */}
                       <div>
@@ -449,24 +414,7 @@ export function ProvidersConfig({
                         </div>
                       </div>
 
-                      {/* Default Operatory */}
-                      <div>
-                        <h4 className="font-medium text-gray-900 mb-3">Default Operatory</h4>
-                        <select
-                          value={providerSettings[savedProvider.id]?.defaultOperatoryId || ''}
-                          onChange={(e) => updateProviderSetting(savedProvider.id, 'defaultOperatoryId', e.target.value || null)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="">Select default operatory</option>
-                          {allOperatories
-                            .filter(op => op.isActive && (providerSettings[savedProvider.id]?.assignedOperatoryIds.includes(op.id) || false))
-                            .map((operatory) => (
-                              <option key={operatory.id} value={operatory.id}>
-                                {operatory.name} (ID: {operatory.nexhealthOperatoryId})
-                              </option>
-                            ))}
-                        </select>
-                      </div>
+
 
                       {/* Save Button */}
                       <div className="flex justify-end pt-4">

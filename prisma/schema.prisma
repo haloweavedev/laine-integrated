@@ -65,13 +65,6 @@ model SavedProvider {
 
   isActive Boolean @default(true) // Allow enabling/disabling
 
-  // New fields for provider configuration
-  defaultAppointmentTypeId String? // Optional default appointment type for this provider
-  defaultAppointmentType   AppointmentType? @relation("DefaultProviderAppointmentType", fields: [defaultAppointmentTypeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
-  defaultOperatoryId String? // Optional default operatory for this provider
-  defaultOperatory   SavedOperatory? @relation("DefaultProviderOperatory", fields: [defaultOperatoryId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
   // Relationship to accepted appointment types
   acceptedAppointmentTypes ProviderAcceptedAppointmentType[]
 
@@ -123,9 +116,6 @@ model SavedOperatory {
   nexhealthOperatoryId String // NexHealth operatory ID
   name                 String // Display name for operatory
   isActive             Boolean @default(true) // Allow enabling/disabling
-
-  // Reverse relation for default operatory feature
-  defaultForProviders SavedProvider[] @relation("DefaultProviderOperatory")
 
   // Reverse relation for provider assignments
   assignedToProviders ProviderOperatoryAssignment[]
@@ -259,7 +249,6 @@ model AppointmentType {
   lastSyncError String? // Error tracking for sync operations
 
   // Reverse relations for provider configuration
-  defaultForProviders SavedProvider[]                   @relation("DefaultProviderAppointmentType")
   acceptedByProviders ProviderAcceptedAppointmentType[] @relation("ProviderAcceptedTypes")
 
   createdAt DateTime @default(now())

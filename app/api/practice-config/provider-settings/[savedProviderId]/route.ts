@@ -9,9 +9,7 @@ interface RouteParams {
 
 const updateProviderSettingsSchema = z.object({
   acceptedAppointmentTypeIds: z.array(z.string()).optional(),
-  defaultAppointmentTypeId: z.string().nullable().optional(),
-  defaultOperatoryId: z.string().nullable().optional(),
-  assignedOperatoryIds: z.array(z.string()).optional() // NEW: Multiple operatories
+  assignedOperatoryIds: z.array(z.string()).optional()
 });
 
 export async function GET(
@@ -47,22 +45,6 @@ export async function GET(
             nexhealthProviderId: true,
             firstName: true,
             lastName: true
-          }
-        },
-        defaultAppointmentType: {
-          select: {
-            id: true,
-            name: true,
-            nexhealthAppointmentTypeId: true,
-            duration: true,
-            groupCode: true
-          }
-        },
-        defaultOperatory: {
-          select: {
-            id: true,
-            name: true,
-            nexhealthOperatoryId: true
           }
         },
         acceptedAppointmentTypes: {
@@ -103,8 +85,6 @@ export async function GET(
       id: savedProvider.id,
       provider: savedProvider.provider,
       isActive: savedProvider.isActive,
-      defaultAppointmentType: savedProvider.defaultAppointmentType,
-      defaultOperatory: savedProvider.defaultOperatory,
       acceptedAppointmentTypes: savedProvider.acceptedAppointmentTypes.map((relation: { appointmentType: { id: string; name: string; nexhealthAppointmentTypeId: string; duration: number; groupCode: string | null } }) => relation.appointmentType),
       assignedOperatories: savedProvider.assignedOperatories?.map((assignment: { savedOperatory: { id: string; name: string; nexhealthOperatoryId: string } }) => assignment.savedOperatory) || [],
       createdAt: savedProvider.createdAt,
@@ -156,7 +136,7 @@ export async function PUT(
       }, { status: 400 });
     }
 
-    const { acceptedAppointmentTypeIds, defaultAppointmentTypeId, defaultOperatoryId, assignedOperatoryIds } = validationResult.data;
+    const { acceptedAppointmentTypeIds, assignedOperatoryIds } = validationResult.data;
 
     const practice = await prisma.practice.findUnique({
       where: { clerkUserId: userId }
@@ -196,39 +176,6 @@ export async function PUT(
       }
     }
 
-    // Validate default appointment type belongs to practice if provided
-    if (defaultAppointmentTypeId) {
-      const defaultAppointmentType = await prisma.appointmentType.findFirst({
-        where: {
-          id: defaultAppointmentTypeId,
-          practiceId: practice.id
-        }
-      });
-
-      if (!defaultAppointmentType) {
-        return NextResponse.json({
-          error: "Default appointment type doesn't belong to this practice"
-        }, { status: 400 });
-      }
-    }
-
-    // Validate default operatory belongs to practice if provided
-    if (defaultOperatoryId) {
-      const defaultOperatory = await prisma.savedOperatory.findFirst({
-        where: {
-          id: defaultOperatoryId,
-          practiceId: practice.id,
-          isActive: true
-        }
-      });
-
-      if (!defaultOperatory) {
-        return NextResponse.json({
-          error: "Default operatory doesn't belong to this practice or is not active"
-        }, { status: 400 });
-      }
-    }
-
     // Validate assigned operatory IDs belong to practice if provided
     if (assignedOperatoryIds && assignedOperatoryIds.length > 0) {
       const validOperatories = await prisma.savedOperatory.findMany({
@@ -248,14 +195,7 @@ export async function PUT(
 
     // Use transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
-      // Update the SavedProvider record with defaults
-      const updated = await tx.savedProvider.update({
-        where: { id: savedProviderId },
-        data: {
-          defaultAppointmentTypeId: defaultAppointmentTypeId !== undefined ? defaultAppointmentTypeId : undefined,
-          defaultOperatoryId: defaultOperatoryId !== undefined ? defaultOperatoryId : undefined
-        }
-      });
+      // No need to update SavedProvider record since we removed default fields
 
       // Manage accepted appointment types if provided
       if (acceptedAppointmentTypeIds !== undefined) {
@@ -292,8 +232,6 @@ export async function PUT(
           });
         }
       }
-
-      return updated;
     });
 
     // Fetch the updated provider with all related data for response
@@ -306,22 +244,6 @@ export async function PUT(
             nexhealthProviderId: true,
             firstName: true,
             lastName: true
-          }
-        },
-        defaultAppointmentType: {
-          select: {
-            id: true,
-            name: true,
-            nexhealthAppointmentTypeId: true,
-            duration: true,
-            groupCode: true
-          }
-        },
-        defaultOperatory: {
-          select: {
-            id: true,
-            name: true,
-            nexhealthOperatoryId: true
           }
         },
         acceptedAppointmentTypes: {

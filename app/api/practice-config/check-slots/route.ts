@@ -33,7 +33,6 @@ export async function POST(req: NextRequest) {
         savedProviders: {
           include: {
             provider: true,
-            defaultOperatory: true,
             acceptedAppointmentTypes: {
               include: {
                 appointmentType: true
@@ -120,31 +119,21 @@ export async function POST(req: NextRequest) {
 
     for (const savedProvider of eligibleProviders) {
       if (operatoryIds.length > 0) {
-        // If specific operatories were requested, check if provider's default operatory is in the list
-        if (savedProvider.defaultOperatoryId && operatoryIds.includes(savedProvider.defaultOperatoryId)) {
+        // If specific operatories were requested, use the first requested operatory
+        const firstRequestedOperatory = practice.savedOperatories.find(so => 
+          operatoryIds.includes(so.id) && so.isActive
+        );
+        if (firstRequestedOperatory) {
           providerOperatoryPairs.push({
             provider: savedProvider.provider,
-            operatoryId: savedProvider.defaultOperatoryId
+            operatoryId: firstRequestedOperatory.id
           });
-        } else {
-          // If provider's default operatory is not in the requested list, 
-          // we could either skip this provider or use the first requested operatory
-          // For now, we'll use the first requested operatory if available
-          const firstRequestedOperatory = practice.savedOperatories.find(so => 
-            operatoryIds.includes(so.id) && so.isActive
-          );
-          if (firstRequestedOperatory) {
-            providerOperatoryPairs.push({
-              provider: savedProvider.provider,
-              operatoryId: firstRequestedOperatory.id
-            });
-          }
         }
       } else {
-        // No specific operatories requested, use provider's default operatory if available
+        // No specific operatories requested, provider can use any active operatory
         providerOperatoryPairs.push({
           provider: savedProvider.provider,
-          operatoryId: savedProvider.defaultOperatoryId
+          operatoryId: null // Will use any available operatory
         });
       }
     }
@@ -215,12 +204,7 @@ export async function POST(req: NextRequest) {
       providerLookup.set(sp.provider.nexhealthProviderId, {
         id: sp.provider.id,
         nexhealthProviderId: sp.provider.nexhealthProviderId,
-        name: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim(),
-        defaultOperatory: sp.defaultOperatory ? {
-          id: sp.defaultOperatory.id,
-          name: sp.defaultOperatory.name,
-          nexhealthOperatoryId: sp.defaultOperatory.nexhealthOperatoryId
-        } : null
+        name: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim()
       });
     });
 
@@ -309,7 +293,7 @@ export async function POST(req: NextRequest) {
             id: sp.provider.id,
             name: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim(),
             nexhealthProviderId: sp.provider.nexhealthProviderId,
-            defaultOperatory: sp.defaultOperatory ? sp.defaultOperatory.name : null,
+
             acceptedAppointmentTypesCount: sp.acceptedAppointmentTypes.length
           })),
           operatories_used: uniqueOperatoryIds.map(id => {
