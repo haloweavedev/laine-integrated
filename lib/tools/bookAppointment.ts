@@ -33,7 +33,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I can't complete the booking right now. Please contact the office directly to finalize your appointment."
+        message_to_patient: "I can't book appointments right now. Please contact the office directly."
       };
     }
 
@@ -90,17 +90,51 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        };
      }
 
-     if (activeOperatories.length === 0) {
+     // Find the appointment type to help with provider selection
+     const appointmentType = practice.appointmentTypes?.find(
+       at => at.nexhealthAppointmentTypeId === args.appointmentTypeId
+     );
+
+     // IMPROVED LOGIC: Select provider based on accepted appointment types
+     let selectedProvider = activeProviders[0]; // Fallback to first
+     
+     if (appointmentType) {
+       // Try to find a provider that accepts this appointment type
+       const providersForType = activeProviders.filter(sp => {
+         // If no accepted types configured, provider accepts all (backward compatibility)
+         if (!sp.acceptedAppointmentTypes || sp.acceptedAppointmentTypes.length === 0) {
+           return true;
+         }
+         // Check if provider accepts this appointment type
+         return sp.acceptedAppointmentTypes.some(
+           relation => relation.appointmentType.id === appointmentType.id
+         );
+       });
+
+       if (providersForType.length > 0) {
+         selectedProvider = providersForType[0];
+       }
+     }
+
+     // IMPROVED LOGIC: Select operatory based on provider's default or first available
+     let selectedOperatory = activeOperatories[0]; // Fallback
+
+     if (selectedProvider.defaultOperatoryId) {
+       const defaultOperatory = activeOperatories.find(
+         op => op.id === selectedProvider.defaultOperatoryId
+       );
+       if (defaultOperatory) {
+         selectedOperatory = defaultOperatory;
+       }
+     }
+
+     if (!selectedOperatory) {
        return {
          success: false,
          error_code: "NO_ACTIVE_OPERATORIES",
          message_to_patient: "I need to assign a room but none are available. Please contact the office to complete your booking."
        };
      }
-
-     // Get the first active provider and operatory
-     const provider = activeProviders[0];
-     const operatory = activeOperatories[0];
 
      // Convert selected time to proper start_time format
      const { startTime } = parseSelectedTimeToNexHealthFormat(
@@ -110,9 +144,6 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      );
 
      // Get appointment type name for notes
-     const appointmentType = practice.appointmentTypes?.find(
-       at => at.nexhealthAppointmentTypeId === args.appointmentTypeId
-     );
      const appointmentTypeNameForNote = appointmentType?.name || "Appointment";
 
      let finalNote = `${appointmentTypeNameForNote} - Scheduled via LAINE AI.`;
@@ -131,11 +162,11 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      // Prepare booking data
      const bookingData = {
        patient_id: parseInt(args.patientId),
-       provider_id: parseInt(provider.provider.nexhealthProviderId),
+       provider_id: parseInt(selectedProvider.provider.nexhealthProviderId),
        appointment_type_id: parseInt(args.appointmentTypeId),
-       operatory_id: parseInt(operatory.nexhealthOperatoryId),
+       operatory_id: parseInt(selectedOperatory.nexhealthOperatoryId),
        start_time: startTime,
-       note: finalNote // USE THE FINAL NOTE
+       note: finalNote
      };
 
      console.log(`[bookAppointment] Booking data with note:`, JSON.stringify(bookingData, null, 2));
@@ -144,47 +175,16 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      const bookingResponse = await fetchNexhealthAPI(
        '/appointments',
        practice.nexhealthSubdomain,
-       {
-         location_id: practice.nexhealthLocationId,
-         notify_patient: 'false'
-       },
-       'POST',
-       { appt: bookingData }
+       bookingData,
+       'POST'
      );
 
-     console.log(`[bookAppointment] Booking response:`, JSON.stringify(bookingResponse, null, 2));
-
-     // Check if booking was successful
-     if (!bookingResponse || bookingResponse.error || !bookingResponse.data) {
-       console.error(`[bookAppointment] Booking failed:`, bookingResponse);
-       
-       // Enhanced error handling for specific booking failures
-       let errorMessage = "I wasn't able to complete your booking. Please contact the office directly to schedule your appointment.";
-       let errorCode = "BOOKING_FAILED";
-       
-       if (bookingResponse?.error) {
-         const errorString = typeof bookingResponse.error === 'string' ? bookingResponse.error : JSON.stringify(bookingResponse.error);
-         
-         if (errorString.includes('patient') && errorString.includes('not found')) {
-           errorCode = "PATIENT_NOT_FOUND";
-           errorMessage = "I couldn't find your patient record in our system. Let me help you create a patient record first.";
-         } else if (errorString.includes('appointment_type')) {
-           errorCode = "INVALID_APPOINTMENT_TYPE";
-           errorMessage = "There's an issue with the appointment type. Let me help you select a different type of appointment.";
-         } else if (errorString.includes('provider')) {
-           errorCode = "PROVIDER_UNAVAILABLE";
-           errorMessage = "The provider is no longer available for this time. Let me show you other available times.";
-         } else if (errorString.includes('operatory')) {
-           errorCode = "ROOM_UNAVAILABLE";
-           errorMessage = "The treatment room is no longer available. Let me check for other available times.";
-         }
-       }
-       
+     if (!bookingResponse?.id) {
+       console.error('[bookAppointment] Booking failed: Invalid response format');
        return {
          success: false,
-         error_code: errorCode,
-         message_to_patient: errorMessage,
-         details: bookingResponse?.error || "Unknown booking error"
+         error_code: "BOOKING_FAILED",
+         message_to_patient: "I'm having trouble booking your appointment. Please contact the office to complete your booking."
        };
      }
 
@@ -197,9 +197,9 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      // Format appointment details for confirmation
      const formattedDate = formatDate(args.requestedDate);
      const formattedTime = args.selectedTime;
-     const providerName = provider.provider.firstName ? 
-       `${provider.provider.firstName} ${provider.provider.lastName || ''}`.trim() : 
-       provider.provider.lastName || 'your provider';
+     const providerName = selectedProvider.provider.firstName ? 
+       `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
+       selectedProvider.provider.lastName || 'your provider';
      const appointmentTypeName = appointmentType?.name || "your appointment";
 
      return {

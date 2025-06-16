@@ -12,43 +12,50 @@ export async function GET() {
     const practice = await prisma.practice.findUnique({ 
       where: { clerkUserId: userId },
       include: {
-        appointmentTypes: true,
-        providers: true,
+        appointmentTypes: {
+          select: {
+            id: true,
+            nexhealthAppointmentTypeId: true,
+            name: true,
+            duration: true,
+            bookableOnline: true,
+            groupCode: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        },
+        providers: {
+          select: {
+            id: true,
+            nexhealthProviderId: true,
+            firstName: true,
+            lastName: true
+          }
+        },
         savedProviders: {
-          include: {
-            provider: true
+          select: {
+            id: true,
+            providerId: true,
+            isActive: true,
+            provider: {
+              select: {
+                id: true,
+                nexhealthProviderId: true,
+                firstName: true,
+                lastName: true
+              }
+            }
           },
           where: { isActive: true }
         },
         savedOperatories: {
-          where: { isActive: true }
-        },
-        manualAvailabilities: {
-          include: {
-            provider: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                nexhealthProviderId: true
-              }
-            },
-            savedOperatory: {
-              select: {
-                id: true,
-                name: true,
-                nexhealthOperatoryId: true
-              }
-            }
+          select: {
+            id: true,
+            nexhealthOperatoryId: true,
+            name: true,
+            isActive: true
           },
-          orderBy: { createdAt: 'desc' }
-        },
-        nexhealthWebhookSubscriptions: {
-          where: { isActive: true },
-          orderBy: [
-            { resourceType: 'asc' },
-            { eventName: 'asc' }
-          ]
+          where: { isActive: true }
         }
       }
     });

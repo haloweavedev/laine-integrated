@@ -40,22 +40,32 @@ export async function POST(req: NextRequest) {
     }
     
     if (!signature) {
-      console.error("Missing webhook signature");
+      console.error("Missing webhook signature - potential unauthorized request");
       return NextResponse.json({ error: "Missing signature" }, { status: 401 });
     }
     
-    // Verify signature
+    // Verify signature with enhanced security logging
     const expectedSignature = crypto
       .createHmac("sha256", globalWebhookConfig.secretKey)
       .update(rawBody)
       .digest("hex");
     
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+    // Use timing-safe comparison to prevent timing attacks
+    const signatureMatches = crypto.timingSafeEqual(
+      Buffer.from(signature, 'hex'), 
+      Buffer.from(expectedSignature, 'hex')
+    );
+    
+    if (!signatureMatches) {
       console.error("Signature verification failed");
-      console.error("Expected:", expectedSignature);
-      console.error("Received:", signature);
+      // Log truncated signatures for debugging without exposing full secrets
+      console.error("Expected signature (first 8 chars):", expectedSignature.substring(0, 8));
+      console.error("Received signature (first 8 chars):", signature.substring(0, 8));
+      console.error("Request body hash (for debugging):", crypto.createHash('sha256').update(rawBody).digest('hex').substring(0, 16));
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
+    
+    console.log("✅ Signature verification successful");
     
     // Parse and validate JSON
     let event;
@@ -63,76 +73,100 @@ export async function POST(req: NextRequest) {
       event = JSON.parse(rawBody.toString());
     } catch (parseError) {
       console.error("JSON parsing failed:", parseError);
-      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
     }
     
     console.log("Webhook event received:", {
       resource_type: event.resource_type,
       event_name: event.event_name,
       subdomain: event.subdomain,
-      institution_id: event.institution_id
+      institution_id: event.institution_id,
+      timestamp: new Date().toISOString()
     });
     
     const { resource_type, event_name, subdomain, institution_id, data } = event;
 
+    // Validate required event fields
+    if (!resource_type || !event_name || !subdomain) {
+      console.error("Missing required event fields:", { resource_type, event_name, subdomain });
+      return NextResponse.json({ error: "Invalid event structure" }, { status: 400 });
+    }
+
     // Find the practice associated with this subdomain/institution_id
-    // Note: A practice might have a subdomain but events might come with institution_id.
-    // Ensure your Practice model can be looked up by either, or that you store institution_id.
-    // For now, assuming subdomain is the primary link from webhook to your Practice model.
     const practice = await prisma.practice.findFirst({
-      where: { nexhealthSubdomain: subdomain }, // Or use institution_id if that's more reliable
+      where: { nexhealthSubdomain: subdomain },
     });
 
     if (!practice) {
       console.warn(`NexHealth Webhook: Received event for unknown subdomain/institution: ${subdomain}/${institution_id}`);
       // Still return 200 to NexHealth to acknowledge receipt and prevent retries for unknown practices.
-      return NextResponse.json({ message: "Received, but practice not found." }, { status: 200 });
+      return NextResponse.json({ message: "Event received but practice not found" }, { status: 200 });
     }
 
-    // --- Handle specific events ---
-    // For Phase 2, we'll log events. Actual data processing (e.g., updating local DB) will be in later phases.
+    console.log(`Processing event for practice: ${practice.id} (${practice.name || 'Unnamed'})`);
+
+    // --- Handle specific events with enhanced logging ---
     
     if (resource_type === "Patient") {
       if (event_name === "patient_created") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+        console.log(`✅ Practice ${practice.id} - Patient created in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
         // TODO: Upsert patient data into local Patient table
       } else if (event_name === "patient_updated") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - Patient updated in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
+        console.log(`✅ Practice ${practice.id} - Patient updated in NexHealth. Patient ID: ${data?.patients?.[0]?.id}`);
         // TODO: Update local patient data
+      } else {
+        console.log(`ℹ️ Practice ${practice.id} - Unhandled Patient event: ${event_name}`);
       }
     } else if (resource_type === "Appointment") {
       if (event_name === "appointment_created") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment created in EHR. Appointment ID: ${data?.appointment?.id}`);
+        console.log(`✅ Practice ${practice.id} - Appointment created in EHR. Appointment ID: ${data?.appointment?.id}`);
         // TODO: Sync new appointment to local database
       } else if (event_name === "appointment_updated") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment updated in EHR. Appointment ID: ${data?.appointment?.id}`);
+        console.log(`✅ Practice ${practice.id} - Appointment updated in EHR. Appointment ID: ${data?.appointment?.id}`);
         // TODO: Update local appointment data
       } else if (event_name === "appointment_insertion.complete") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion complete (Laine booking succeeded). Appointment ID: ${data?.appointment?.id}`);
+        console.log(`🎉 Practice ${practice.id} - Appointment insertion complete (Laine booking succeeded). Appointment ID: ${data?.appointment?.id}`);
         // TODO: Mark appointment as confirmed in local DB
       } else if (event_name === "appointment_insertion.failed") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - Appointment insertion failed (Laine booking failed). Error: ${data?.error}`);
+        console.error(`❌ Practice ${practice.id} - Appointment insertion failed (Laine booking failed). Error: ${data?.error}`);
         // TODO: Handle booking failure, notify practice or retry
+      } else {
+        console.log(`ℹ️ Practice ${practice.id} - Unhandled Appointment event: ${event_name}`);
       }
     } else if (resource_type === "SyncStatus") {
       if (event_name === "sync_status_read_change") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - EHR read functionality came back online. Status: ${data?.read_status}`);
+        console.log(`📊 Practice ${practice.id} - EHR read functionality status change. Status: ${data?.read_status}`);
         // TODO: Update system monitoring, resume read operations if needed
       } else if (event_name === "sync_status_write_change") {
-        console.log(`NexHealth Webhook: Practice ${practice.id} - EHR write functionality came back online. Status: ${data?.write_status}`);
+        console.log(`📊 Practice ${practice.id} - EHR write functionality status change. Status: ${data?.write_status}`);
         // TODO: Update system monitoring, resume write operations if needed
+      } else {
+        console.log(`ℹ️ Practice ${practice.id} - Unhandled SyncStatus event: ${event_name}`);
       }
     } else {
-      console.log(`NexHealth Webhook: Practice ${practice.id} - Received unhandled event: ${resource_type}.${event_name}`);
+      console.log(`ℹ️ Practice ${practice.id} - Received unhandled event: ${resource_type}.${event_name}`);
     }
 
-    return NextResponse.json({ success: true });
+    // Update webhook last sync timestamp
+    await prisma.practice.update({
+      where: { id: practice.id },
+      data: { 
+        webhookLastSyncAt: new Date(),
+        webhookLastSuccessfulSyncAt: new Date(),
+        webhookSyncErrorMsg: null
+      }
+    });
+
+    return NextResponse.json({ success: true, message: "Event processed successfully" });
     
   } catch (error) {
-    console.error("Webhook processing error:", error);
+    console.error("❌ Webhook processing error:", error);
+    console.error("Error stack:", error instanceof Error ? error.stack : 'No stack trace');
+    
     return NextResponse.json({ 
       error: "Internal server error",
-      details: error instanceof Error ? error.message : "Unknown error"
+      details: error instanceof Error ? error.message : "Unknown error",
+      timestamp: new Date().toISOString()
     }, { status: 500 });
   }
 } 

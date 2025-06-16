@@ -61,10 +61,41 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         };
       }
 
-      console.log(`[checkAvailableSlots] Checking ${args.requestedDate} for appointment type ${args.appointmentTypeId}`);
+      // NEW LOGIC: Filter providers who accept this appointment type
+      const appointmentType = practice.appointmentTypes?.find(
+        at => at.nexhealthAppointmentTypeId === args.appointmentTypeId
+      );
 
-      // Get provider and operatory arrays
-      const providers = activeProviders.map(sp => sp.provider.nexhealthProviderId);
+      if (!appointmentType) {
+        return {
+          success: false,
+          error_code: "INVALID_APPOINTMENT_TYPE",
+          message_to_patient: "I couldn't find that appointment type. Please contact the office for assistance."
+        };
+      }
+
+      // Filter providers who accept this appointment type
+      const eligibleProviders = activeProviders.filter(sp => {
+        // If provider has no accepted appointment types configured, include them (backward compatibility)
+        if (!sp.acceptedAppointmentTypes || sp.acceptedAppointmentTypes.length === 0) {
+          return true;
+        }
+        // Otherwise, check if they accept this specific appointment type
+        return sp.acceptedAppointmentTypes.some(
+          relation => relation.appointmentType.id === appointmentType.id
+        );
+      });
+
+      if (eligibleProviders.length === 0) {
+        return {
+          success: false,
+          error_code: "NO_PROVIDERS_FOR_TYPE",
+          message_to_patient: `I don't see any providers available for ${appointmentType.name} appointments. Please contact the office for assistance.`
+        };
+      }
+
+      // Get provider and operatory arrays from eligible providers
+      const providers = eligibleProviders.map(sp => sp.provider.nexhealthProviderId);
       const operatories = activeOperatories.map(so => so.nexhealthOperatoryId);
 
       // Build search params object for NexHealth API
@@ -88,8 +119,6 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         searchParams
       );
 
-      console.log(`[checkAvailableSlots] API response:`, JSON.stringify(slotsResponse, null, 2));
-
       // Parse response
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const availableSlots: any[] = [];
@@ -110,9 +139,6 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
       if (availableSlots.length === 0) {
         // No slots found - let's provide more helpful information
-        console.log(`[checkAvailableSlots] No slots found for appointment type ${args.appointmentTypeId} on ${args.requestedDate}`);
-        
-        // Create a more conversational and proactive message for no slots found
         const appointmentTypeName = practice.appointmentTypes?.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || "that appointment type";
         const friendlyDate = formatDate(args.requestedDate);
         

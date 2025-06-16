@@ -169,8 +169,6 @@ export async function fetchNexhealthAPI(
     options.body = JSON.stringify(body);
   }
 
-  console.log(`Fetching from NexHealth: ${method} ${url.toString()} for subdomain ${subdomain}`);
-
   try {
     const response = await fetch(url.toString(), options);
     
@@ -209,8 +207,6 @@ export async function getAppointmentTypes(subdomain: string, locationId: string)
     { location_id: locationId }
   );
   
-  console.log("Raw NexHealth appointment_types response:", JSON.stringify(data, null, 2));
-  
   // Handle different possible response structures
   let appointmentTypes = null;
   
@@ -226,8 +222,6 @@ export async function getAppointmentTypes(subdomain: string, locationId: string)
     console.warn("Unexpected appointment_types response structure:", data);
     appointmentTypes = [];
   }
-  
-  console.log(`Parsed ${appointmentTypes.length} appointment types`);
   return appointmentTypes;
 }
 
@@ -239,8 +233,6 @@ export async function getProviders(subdomain: string, locationId: string): Promi
     subdomain,
     { location_id: locationId, inactive: 'false', page: '1', per_page: '300' }
   );
-  
-  console.log("Raw NexHealth providers response:", JSON.stringify(data, null, 2));
   
   // Handle different possible response structures
   let providers = null;
@@ -257,8 +249,6 @@ export async function getProviders(subdomain: string, locationId: string): Promi
     console.warn("Unexpected providers response structure:", data);
     providers = [];
   }
-  
-  console.log(`Parsed ${providers.length} providers`);
   return providers;
 }
 

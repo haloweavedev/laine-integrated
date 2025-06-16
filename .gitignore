@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+ceo-notes.txt
+
+tool-call-issues.txt

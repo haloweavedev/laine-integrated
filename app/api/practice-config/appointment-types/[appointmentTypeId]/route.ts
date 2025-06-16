@@ -5,10 +5,18 @@ import {
   updateNexhealthAppointmentType, 
   deleteNexhealthAppointmentType 
 } from "@/lib/nexhealth";
+import { z } from "zod";
 
 interface RouteParams {
   appointmentTypeId: string;
 }
+
+const updateAppointmentTypeSchema = z.object({
+  name: z.string().min(1, "Name must be a non-empty string").optional(),
+  minutes: z.number().positive("Minutes must be a positive number").optional(),
+  bookableOnline: z.boolean().optional(),
+  groupCode: z.string().nullable().optional()
+});
 
 export async function PUT(
   req: NextRequest,
@@ -50,57 +58,91 @@ export async function PUT(
       }, { status: 404 });
     }
 
-    const { name, minutes, bookableOnline } = await req.json();
+    const body = await req.json();
 
-    // Build update data object with only provided fields
-    const updateData: {
+    // Validate input using Zod
+    const validationResult = updateAppointmentTypeSchema.safeParse(body);
+    if (!validationResult.success) {
+      return NextResponse.json({
+        error: "Invalid input",
+        details: validationResult.error.issues
+      }, { status: 400 });
+    }
+
+    const { name, minutes, bookableOnline, groupCode } = validationResult.data;
+
+    // Build update data object with only provided fields for NexHealth
+    const nexhealthUpdateData: {
       name?: string;
       minutes?: number;
       bookable_online?: boolean;
     } = {};
 
     if (name !== undefined) {
-      if (typeof name !== 'string' || name.trim().length === 0) {
-        return NextResponse.json({
-          error: "Name must be a non-empty string"
-        }, { status: 400 });
-      }
-      updateData.name = name.trim();
+      nexhealthUpdateData.name = name.trim();
     }
 
     if (minutes !== undefined) {
-      if (typeof minutes !== 'number' || minutes <= 0) {
-        return NextResponse.json({
-          error: "Minutes must be a positive number"
-        }, { status: 400 });
-      }
-      updateData.minutes = minutes;
+      nexhealthUpdateData.minutes = minutes;
     }
 
     if (bookableOnline !== undefined) {
-      updateData.bookable_online = bookableOnline;
+      nexhealthUpdateData.bookable_online = bookableOnline;
     }
 
     try {
-      // Update appointment type in NexHealth
-      const nexhealthResponse = await updateNexhealthAppointmentType(
-        practice.nexhealthSubdomain,
-        localAppointmentType.nexhealthAppointmentTypeId,
-        practice.nexhealthLocationId,
-        updateData
-      );
+      // Build local update data (includes groupCode which is Laine-specific)
+      const localUpdateData: {
+        name?: string;
+        duration?: number;
+        bookableOnline?: boolean;
+        groupCode?: string | null;
+        parentType?: string;
+        parentId?: string;
+        lastSyncError?: null;
+      } = {};
+
+      // Update appointment type in NexHealth (only if there are NexHealth-relevant fields)
+      if (Object.keys(nexhealthUpdateData).length > 0) {
+        const nexhealthResponse = await updateNexhealthAppointmentType(
+          practice.nexhealthSubdomain,
+          localAppointmentType.nexhealthAppointmentTypeId,
+          practice.nexhealthLocationId,
+          nexhealthUpdateData
+        );
+
+        // Update local data with NexHealth response
+        if (nexhealthResponse.name !== localAppointmentType.name) {
+          localUpdateData.name = nexhealthResponse.name;
+        }
+        if (nexhealthResponse.minutes !== localAppointmentType.duration) {
+          localUpdateData.duration = nexhealthResponse.minutes;
+        }
+        if (nexhealthResponse.bookable_online !== localAppointmentType.bookableOnline) {
+          localUpdateData.bookableOnline = nexhealthResponse.bookable_online;
+        }
+        if (nexhealthResponse.parent_type !== localAppointmentType.parentType) {
+          localUpdateData.parentType = nexhealthResponse.parent_type;
+        }
+        if (nexhealthResponse.parent_id.toString() !== localAppointmentType.parentId) {
+          localUpdateData.parentId = nexhealthResponse.parent_id.toString();
+        }
+      }
+
+      // Add groupCode update if provided (Laine-specific field)
+      if (groupCode !== undefined) {
+        localUpdateData.groupCode = groupCode;
+      }
+
+      // Clear any previous sync errors if we made changes
+      if (Object.keys(localUpdateData).length > 0) {
+        localUpdateData.lastSyncError = null;
+      }
 
       // Update appointment type in local database
       const updatedLocalAppointmentType = await prisma.appointmentType.update({
         where: { id: appointmentTypeId },
-        data: {
-          name: nexhealthResponse.name,
-          duration: nexhealthResponse.minutes,
-          bookableOnline: nexhealthResponse.bookable_online,
-          parentType: nexhealthResponse.parent_type,
-          parentId: nexhealthResponse.parent_id.toString(),
-          lastSyncError: null // Clear any previous errors
-        }
+        data: localUpdateData
       });
 
       return NextResponse.json({
@@ -111,7 +153,20 @@ export async function PUT(
     } catch (nexhealthError) {
       console.error("Error updating appointment type in NexHealth:", nexhealthError);
       
-      // Update local record with error
+      // If only groupCode was being updated and NexHealth call failed, still update locally
+      if (Object.keys(nexhealthUpdateData).length === 0 && groupCode !== undefined) {
+        const updatedLocalAppointmentType = await prisma.appointmentType.update({
+          where: { id: appointmentTypeId },
+          data: { groupCode }
+        });
+
+        return NextResponse.json({
+          success: true,
+          appointmentType: updatedLocalAppointmentType
+        });
+      }
+
+      // Update local record with error for NexHealth-related fields
       await prisma.appointmentType.update({
         where: { id: appointmentTypeId },
         data: {

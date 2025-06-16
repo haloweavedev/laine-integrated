@@ -25,6 +25,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Update webhook last sync timestamp to reflect sync attempt time
+    const syncAttemptTime = new Date();
+
     // Save the practice configuration
     const practice = await prisma.practice.upsert({
       where: { clerkUserId: userId },
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
         address,
         acceptedInsurances,
         serviceCostEstimates,
-        webhookLastSyncAt: new Date() // Update sync timestamp
+        webhookLastSyncAt: syncAttemptTime // Update sync timestamp when attempt is made
       },
       create: { 
         clerkUserId: userId, 
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
         address,
         acceptedInsurances,
         serviceCostEstimates,
-        webhookLastSyncAt: new Date() // Set initial sync timestamp
+        webhookLastSyncAt: syncAttemptTime // Set initial sync timestamp
       },
     });
 
@@ -64,22 +67,57 @@ export async function POST(req: NextRequest) {
       
       if (webhookSyncResult.success) {
         console.log(`[AutoWebhookSync] ✅ Successfully synced webhooks for ${subdomain}`);
+        
+        // Update practice with successful sync
+        await prisma.practice.update({
+          where: { id: practice.id },
+          data: {
+            webhookLastSuccessfulSyncAt: new Date(),
+            webhookSyncErrorMsg: null
+          }
+        });
       } else {
         console.warn(`[AutoWebhookSync] ⚠️ Webhook sync completed with issues: ${webhookSyncResult.message}`);
+        
+        // Update practice with error message
+        await prisma.practice.update({
+          where: { id: practice.id },
+          data: {
+            webhookSyncErrorMsg: webhookSyncResult.message
+          }
+        });
       }
     } catch (webhookError) {
       console.error(`[AutoWebhookSync] ❌ Failed to sync webhooks:`, webhookError);
+      const errorMessage = webhookError instanceof Error ? webhookError.message : "Configuration saved, but webhook sync failed";
+      
+      // Update practice with error message
+      await prisma.practice.update({
+        where: { id: practice.id },
+        data: {
+          webhookSyncErrorMsg: errorMessage
+        }
+      });
+      
       webhookSyncResult = {
         success: false,
-        message: "Configuration saved, but webhook sync failed",
+        message: errorMessage,
         successCount: 0,
         skipCount: 0,
         failCount: 0
       };
     }
 
+    // Return minimal response suitable for non-reloading save
     return NextResponse.json({ 
       success: true,
+      practice: {
+        id: practice.id,
+        name: practice.name,
+        nexhealthSubdomain: practice.nexhealthSubdomain,
+        nexhealthLocationId: practice.nexhealthLocationId,
+        webhookLastSyncAt: practice.webhookLastSyncAt
+      },
       webhookSync: webhookSyncResult
     });
 

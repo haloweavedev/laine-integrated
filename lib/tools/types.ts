@@ -5,7 +5,18 @@ import { Practice, AppointmentType, SavedProvider, SavedOperatory } from "@prism
 // Enhanced practice context with scheduling data
 export interface PracticeWithSchedulingData extends Practice {
   appointmentTypes: AppointmentType[];
-  savedProviders: (SavedProvider & { provider: { id: string; firstName: string | null; lastName: string; nexhealthProviderId: string; } })[];
+  savedProviders: (SavedProvider & { 
+    provider: { 
+      id: string; 
+      firstName: string | null; 
+      lastName: string; 
+      nexhealthProviderId: string; 
+    };
+    acceptedAppointmentTypes?: Array<{
+      appointmentType: AppointmentType;
+    }>;
+    defaultOperatoryId?: string | null;
+  })[];
   savedOperatories: SavedOperatory[];
 }
 

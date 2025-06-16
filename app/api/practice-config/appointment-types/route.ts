@@ -1,10 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { 
-  syncPracticeAppointmentTypes, 
-  createNexhealthAppointmentType 
-} from "@/lib/nexhealth";
+import { createNexhealthAppointmentType } from "@/lib/nexhealth";
+import { z } from "zod";
+
+const createAppointmentTypeSchema = z.object({
+  name: z.string().min(1, "Name is required and must be a non-empty string"),
+  minutes: z.number().positive("Minutes must be a positive number"),
+  bookableOnline: z.boolean().optional().default(true),
+  groupCode: z.string().nullable().optional()
+});
 
 export async function GET() {
   try {
@@ -26,43 +31,7 @@ export async function GET() {
       return NextResponse.json({ error: "Practice not found" }, { status: 404 });
     }
 
-    // If practice has NexHealth configuration, sync appointment types
-    if (practice.nexhealthSubdomain && practice.nexhealthLocationId) {
-      try {
-        console.log(`Syncing appointment types for practice ${practice.id}...`);
-        await syncPracticeAppointmentTypes(
-          practice.id,
-          practice.nexhealthSubdomain,
-          practice.nexhealthLocationId
-        );
-
-        // Refetch appointment types after sync
-        const updatedPractice = await prisma.practice.findUnique({
-          where: { clerkUserId: userId },
-          include: {
-            appointmentTypes: {
-              orderBy: { name: 'asc' }
-            }
-          }
-        });
-
-        return NextResponse.json({
-          success: true,
-          appointmentTypes: updatedPractice?.appointmentTypes || []
-        });
-      } catch (syncError) {
-        console.error("Error syncing appointment types:", syncError);
-        
-        // Return existing appointment types even if sync failed
-        return NextResponse.json({
-          success: true,
-          appointmentTypes: practice.appointmentTypes,
-          syncError: syncError instanceof Error ? syncError.message : 'Unknown sync error'
-        });
-      }
-    }
-
-    // Return existing appointment types if no NexHealth config
+    // Simply return existing appointment types without automatic sync
     return NextResponse.json({
       success: true,
       appointmentTypes: practice.appointmentTypes
@@ -98,36 +67,34 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { name, minutes, bookableOnline } = await req.json();
+    const body = await req.json();
 
-    // Validate required fields
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    // Validate input using Zod
+    const validationResult = createAppointmentTypeSchema.safeParse(body);
+    if (!validationResult.success) {
       return NextResponse.json({
-        error: "Name is required and must be a non-empty string"
+        error: "Invalid input",
+        details: validationResult.error.issues
       }, { status: 400 });
     }
 
-    if (!minutes || typeof minutes !== 'number' || minutes <= 0) {
-      return NextResponse.json({
-        error: "Minutes is required and must be a positive number"
-      }, { status: 400 });
-    }
+    const { name, minutes, bookableOnline, groupCode } = validationResult.data;
 
     try {
-      // Create appointment type in NexHealth
+      // Create appointment type in NexHealth (groupCode is Laine-specific, not sent to NexHealth)
       const nexhealthResponse = await createNexhealthAppointmentType(
         practice.nexhealthSubdomain,
         practice.nexhealthLocationId,
         {
           name: name.trim(),
           minutes,
-          bookable_online: bookableOnline ?? true,
+          bookable_online: bookableOnline,
           parent_type: "Location",
           parent_id: practice.nexhealthLocationId
         }
       );
 
-      // Create appointment type in local database
+      // Create appointment type in local database with groupCode
       const localAppointmentType = await prisma.appointmentType.create({
         data: {
           practiceId: practice.id,
@@ -135,6 +102,7 @@ export async function POST(req: NextRequest) {
           name: nexhealthResponse.name,
           duration: nexhealthResponse.minutes,
           bookableOnline: nexhealthResponse.bookable_online,
+          groupCode, // Store the Laine-specific group code
           parentType: nexhealthResponse.parent_type,
           parentId: nexhealthResponse.parent_id.toString()
         }
