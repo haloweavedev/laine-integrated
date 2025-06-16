@@ -98,12 +98,34 @@ export async function POST() {
       })
     );
 
-    // Execute all upserts
-    await Promise.all([...appointmentTypePromises, ...providerPromises]);
+    // Sync operatories (NEW)
+    const operatoryPromises = operatories.map((operatory: { id: number; name?: string; active?: boolean }) =>
+      prisma.savedOperatory.upsert({
+        where: {
+          practiceId_nexhealthOperatoryId: {
+            practiceId: practice.id,
+            nexhealthOperatoryId: operatory.id.toString(),
+          },
+        },
+        update: {
+          name: operatory.name || `Operatory ${operatory.id}`,
+          isActive: operatory.active !== false, // Default to true unless explicitly false
+        },
+        create: {
+          practiceId: practice.id,
+          nexhealthOperatoryId: operatory.id.toString(),
+          name: operatory.name || `Operatory ${operatory.id}`,
+          isActive: operatory.active !== false,
+        },
+      })
+    );
+
+    // Execute all upserts (including operatories)
+    await Promise.all([...appointmentTypePromises, ...providerPromises, ...operatoryPromises]);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully synced ${appointmentTypes.length} appointment types, ${providers.length} providers, and found ${operatories.length} operatories.`,
+      message: `Successfully synced ${appointmentTypes.length} appointment types, ${providers.length} providers, and ${operatories.length} operatories.`,
       data: {
         appointmentTypesCount: appointmentTypes.length,
         providersCount: providers.length,

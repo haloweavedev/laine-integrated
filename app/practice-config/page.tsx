@@ -392,6 +392,7 @@ export default function PracticeConfigPage() {
             <div className="mb-6">
               <ProvidersConfig
                 savedProviders={practice.savedProviders}
+                allProviders={practice.providers}
                 allAppointmentTypes={practice.appointmentTypes}
                 allOperatories={practice.savedOperatories}
                 onUpdate={refreshPracticeData}
