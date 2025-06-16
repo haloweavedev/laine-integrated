@@ -78,10 +78,10 @@ export function ProvidersConfig({
         setProviderSettings(prev => ({
           ...prev,
           [savedProviderId]: {
-            acceptedAppointmentTypeIds: settings.acceptedAppointmentTypes?.map((at: { appointmentTypeId: string }) => at.appointmentTypeId) || [],
-            defaultAppointmentTypeId: settings.defaultAppointmentTypeId,
-            defaultOperatoryId: settings.defaultOperatoryId,
-            assignedOperatoryIds: settings.assignedOperatories?.map((op: { id: string }) => op.id) || []
+            acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypes) ? settings.acceptedAppointmentTypes.map((at: { id: string }) => at.id) : [],
+            defaultAppointmentTypeId: settings.defaultAppointmentTypeId || null,
+            defaultOperatoryId: settings.defaultOperatoryId || null,
+            assignedOperatoryIds: Array.isArray(settings.assignedOperatories) ? settings.assignedOperatories.map((op: { id: string }) => op.id) : []
           }
         }));
       } else {
@@ -163,17 +163,26 @@ export function ProvidersConfig({
     const settings = providerSettings[savedProviderId];
     if (!settings) return;
 
+    // Ensure data types are correct before sending
+    const payload = {
+      acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypeIds) ? settings.acceptedAppointmentTypeIds : [],
+      defaultAppointmentTypeId: settings.defaultAppointmentTypeId || null,
+      defaultOperatoryId: settings.defaultOperatoryId || null,
+      assignedOperatoryIds: Array.isArray(settings.assignedOperatoryIds) ? settings.assignedOperatoryIds : []
+    };
+
+    console.log('🔍 Saving provider settings:', {
+      savedProviderId,
+      payload,
+      payloadTypes: Object.keys(payload).map(key => `${key}: ${typeof payload[key as keyof typeof payload]} (${Array.isArray(payload[key as keyof typeof payload]) ? 'array' : 'not array'})`)
+    });
+
     setLoading(prev => ({ ...prev, [savedProviderId]: true }));
     try {
       const response = await fetch(`/api/practice-config/provider-settings/${savedProviderId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          acceptedAppointmentTypeIds: settings.acceptedAppointmentTypeIds,
-          defaultAppointmentTypeId: settings.defaultAppointmentTypeId,
-          defaultOperatoryId: settings.defaultOperatoryId,
-          assignedOperatoryIds: settings.assignedOperatoryIds
-        })
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
@@ -181,7 +190,15 @@ export function ProvidersConfig({
         onUpdate();
       } else {
         const error = await response.json();
-        toast.error(`Failed to save: ${error.error || 'Unknown error'}`);
+        console.error('❌ API Error Response:', error);
+        
+        // Show more detailed error information
+        if (error.issues && Array.isArray(error.issues)) {
+          const errorMessages = error.issues.map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join(', ');
+          toast.error(`Validation failed: ${errorMessages}`);
+        } else {
+          toast.error(`Failed to save: ${error.error || 'Unknown error'}`);
+        }
       }
     } catch (error) {
       console.error('Error saving provider settings:', error);

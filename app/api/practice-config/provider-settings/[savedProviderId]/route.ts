@@ -77,6 +77,17 @@ export async function GET(
               }
             }
           }
+        },
+        assignedOperatories: {
+          include: {
+            savedOperatory: {
+              select: {
+                id: true,
+                name: true,
+                nexhealthOperatoryId: true
+              }
+            }
+          }
         }
       }
     });
@@ -95,6 +106,7 @@ export async function GET(
       defaultAppointmentType: savedProvider.defaultAppointmentType,
       defaultOperatory: savedProvider.defaultOperatory,
       acceptedAppointmentTypes: savedProvider.acceptedAppointmentTypes.map((relation: { appointmentType: { id: string; name: string; nexhealthAppointmentTypeId: string; duration: number; groupCode: string | null } }) => relation.appointmentType),
+      assignedOperatories: savedProvider.assignedOperatories?.map((assignment: { savedOperatory: { id: string; name: string; nexhealthOperatoryId: string } }) => assignment.savedOperatory) || [],
       createdAt: savedProvider.createdAt,
       updatedAt: savedProvider.updatedAt
     };
@@ -123,12 +135,24 @@ export async function PUT(
     const { savedProviderId } = await params;
     const body = await req.json();
 
+    console.log('🔍 Provider Settings Save Request:', {
+      savedProviderId,
+      body,
+      bodyKeys: Object.keys(body),
+      bodyTypes: Object.keys(body).map(key => `${key}: ${typeof body[key]}`)
+    });
+
     // Validate input
     const validationResult = updateProviderSettingsSchema.safeParse(body);
     if (!validationResult.success) {
+      console.error('❌ Validation failed:', validationResult.error.issues);
       return NextResponse.json({
-        error: "Invalid input",
-        details: validationResult.error.issues
+        error: "Validation failed",
+        issues: validationResult.error.issues.map(issue => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+          code: issue.code
+        }))
       }, { status: 400 });
     }
 
@@ -251,24 +275,23 @@ export async function PUT(
         }
       }
 
-      // TODO: Implement operatory assignments once Prisma client is properly generated
       // Manage assigned operatories if provided
-      // if (assignedOperatoryIds !== undefined) {
-      //   // Delete existing operatory assignments
-      //   await tx.providerOperatoryAssignment.deleteMany({
-      //     where: { savedProviderId }
-      //   });
+      if (assignedOperatoryIds !== undefined) {
+        // Delete existing operatory assignments
+        await tx.providerOperatoryAssignment.deleteMany({
+          where: { savedProviderId }
+        });
 
-      //   // Create new operatory assignments if any provided
-      //   if (assignedOperatoryIds.length > 0) {
-      //     await tx.providerOperatoryAssignment.createMany({
-      //       data: assignedOperatoryIds.map(savedOperatoryId => ({
-      //         savedProviderId,
-      //         savedOperatoryId
-      //       }))
-      //     });
-      //   }
-      // }
+        // Create new operatory assignments if any provided
+        if (assignedOperatoryIds.length > 0) {
+          await tx.providerOperatoryAssignment.createMany({
+            data: assignedOperatoryIds.map(savedOperatoryId => ({
+              savedProviderId,
+              savedOperatoryId
+            }))
+          });
+        }
+      }
 
       return updated;
     });
@@ -310,6 +333,17 @@ export async function PUT(
                 nexhealthAppointmentTypeId: true,
                 duration: true,
                 groupCode: true
+              }
+            }
+          }
+        },
+        assignedOperatories: {
+          include: {
+            savedOperatory: {
+              select: {
+                id: true,
+                name: true,
+                nexhealthOperatoryId: true
               }
             }
           }
