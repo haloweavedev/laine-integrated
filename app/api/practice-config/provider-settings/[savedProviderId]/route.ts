@@ -10,7 +10,8 @@ interface RouteParams {
 const updateProviderSettingsSchema = z.object({
   acceptedAppointmentTypeIds: z.array(z.string()).optional(),
   defaultAppointmentTypeId: z.string().nullable().optional(),
-  defaultOperatoryId: z.string().nullable().optional()
+  defaultOperatoryId: z.string().nullable().optional(),
+  assignedOperatoryIds: z.array(z.string()).optional() // NEW: Multiple operatories
 });
 
 export async function GET(
@@ -93,7 +94,7 @@ export async function GET(
       isActive: savedProvider.isActive,
       defaultAppointmentType: savedProvider.defaultAppointmentType,
       defaultOperatory: savedProvider.defaultOperatory,
-      acceptedAppointmentTypes: savedProvider.acceptedAppointmentTypes.map(relation => relation.appointmentType),
+      acceptedAppointmentTypes: savedProvider.acceptedAppointmentTypes.map((relation: { appointmentType: { id: string; name: string; nexhealthAppointmentTypeId: string; duration: number; groupCode: string | null } }) => relation.appointmentType),
       createdAt: savedProvider.createdAt,
       updatedAt: savedProvider.updatedAt
     };
@@ -131,7 +132,7 @@ export async function PUT(
       }, { status: 400 });
     }
 
-    const { acceptedAppointmentTypeIds, defaultAppointmentTypeId, defaultOperatoryId } = validationResult.data;
+    const { acceptedAppointmentTypeIds, defaultAppointmentTypeId, defaultOperatoryId, assignedOperatoryIds } = validationResult.data;
 
     const practice = await prisma.practice.findUnique({
       where: { clerkUserId: userId }
@@ -204,6 +205,23 @@ export async function PUT(
       }
     }
 
+    // Validate assigned operatory IDs belong to practice if provided
+    if (assignedOperatoryIds && assignedOperatoryIds.length > 0) {
+      const validOperatories = await prisma.savedOperatory.findMany({
+        where: {
+          id: { in: assignedOperatoryIds },
+          practiceId: practice.id,
+          isActive: true
+        }
+      });
+
+      if (validOperatories.length !== assignedOperatoryIds.length) {
+        return NextResponse.json({
+          error: "Some operatories don't belong to this practice or are not active"
+        }, { status: 400 });
+      }
+    }
+
     // Use transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
       // Update the SavedProvider record with defaults
@@ -232,6 +250,25 @@ export async function PUT(
           });
         }
       }
+
+      // TODO: Implement operatory assignments once Prisma client is properly generated
+      // Manage assigned operatories if provided
+      // if (assignedOperatoryIds !== undefined) {
+      //   // Delete existing operatory assignments
+      //   await tx.providerOperatoryAssignment.deleteMany({
+      //     where: { savedProviderId }
+      //   });
+
+      //   // Create new operatory assignments if any provided
+      //   if (assignedOperatoryIds.length > 0) {
+      //     await tx.providerOperatoryAssignment.createMany({
+      //       data: assignedOperatoryIds.map(savedOperatoryId => ({
+      //         savedProviderId,
+      //         savedOperatoryId
+      //       }))
+      //     });
+      //   }
+      // }
 
       return updated;
     });

@@ -75,6 +75,9 @@ model SavedProvider {
   // Relationship to accepted appointment types
   acceptedAppointmentTypes ProviderAcceptedAppointmentType[]
 
+  // Relationship to assigned operatories (many-to-many)
+  assignedOperatories ProviderOperatoryAssignment[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -97,6 +100,21 @@ model ProviderAcceptedAppointmentType {
   @@map("provider_accepted_appointment_types")
 }
 
+// Join model for many-to-many relationship between SavedProvider and SavedOperatory
+model ProviderOperatoryAssignment {
+  id              String        @id @default(cuid())
+  savedProviderId String
+  savedProvider   SavedProvider @relation(fields: [savedProviderId], references: [id], onDelete: Cascade)
+
+  savedOperatoryId String
+  savedOperatory   SavedOperatory @relation(fields: [savedOperatoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([savedProviderId, savedOperatoryId]) // Prevent duplicate assignments
+  @@map("provider_operatory_assignments")
+}
+
 model SavedOperatory {
   id         String   @id @default(cuid())
   practiceId String
@@ -108,6 +126,9 @@ model SavedOperatory {
 
   // Reverse relation for default operatory feature
   defaultForProviders SavedProvider[] @relation("DefaultProviderOperatory")
+
+  // Reverse relation for provider assignments
+  assignedToProviders ProviderOperatoryAssignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

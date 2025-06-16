@@ -37,6 +37,7 @@ interface ProviderSettings {
   acceptedAppointmentTypeIds: string[];
   defaultAppointmentTypeId: string | null;
   defaultOperatoryId: string | null;
+  assignedOperatoryIds: string[]; // NEW: Multiple operatories
 }
 
 interface ProvidersConfigProps {
@@ -79,7 +80,8 @@ export function ProvidersConfig({
           [savedProviderId]: {
             acceptedAppointmentTypeIds: settings.acceptedAppointmentTypes?.map((at: { appointmentTypeId: string }) => at.appointmentTypeId) || [],
             defaultAppointmentTypeId: settings.defaultAppointmentTypeId,
-            defaultOperatoryId: settings.defaultOperatoryId
+            defaultOperatoryId: settings.defaultOperatoryId,
+            assignedOperatoryIds: settings.assignedOperatories?.map((op: { id: string }) => op.id) || []
           }
         }));
       } else {
@@ -89,7 +91,8 @@ export function ProvidersConfig({
           [savedProviderId]: {
             acceptedAppointmentTypeIds: [],
             defaultAppointmentTypeId: null,
-            defaultOperatoryId: null
+            defaultOperatoryId: null,
+            assignedOperatoryIds: []
           }
         }));
       }
@@ -139,6 +142,23 @@ export function ProvidersConfig({
     updateProviderSetting(savedProviderId, 'acceptedAppointmentTypeIds', newAcceptedTypes);
   };
 
+  const handleOperatoryAssignmentChange = (savedProviderId: string, operatoryId: string, checked: boolean) => {
+    const currentSettings = providerSettings[savedProviderId];
+    let newAssignedOperatories: string[];
+    
+    if (checked) {
+      newAssignedOperatories = [...(currentSettings?.assignedOperatoryIds || []), operatoryId];
+    } else {
+      newAssignedOperatories = (currentSettings?.assignedOperatoryIds || []).filter(id => id !== operatoryId);
+      // If we're removing the default operatory, clear it
+      if (currentSettings?.defaultOperatoryId === operatoryId) {
+        updateProviderSetting(savedProviderId, 'defaultOperatoryId', null);
+      }
+    }
+    
+    updateProviderSetting(savedProviderId, 'assignedOperatoryIds', newAssignedOperatories);
+  };
+
   const saveProviderSettings = async (savedProviderId: string) => {
     const settings = providerSettings[savedProviderId];
     if (!settings) return;
@@ -151,7 +171,8 @@ export function ProvidersConfig({
         body: JSON.stringify({
           acceptedAppointmentTypeIds: settings.acceptedAppointmentTypeIds,
           defaultAppointmentTypeId: settings.defaultAppointmentTypeId,
-          defaultOperatoryId: settings.defaultOperatoryId
+          defaultOperatoryId: settings.defaultOperatoryId,
+          assignedOperatoryIds: settings.assignedOperatoryIds
         })
       });
 
@@ -391,6 +412,26 @@ export function ProvidersConfig({
                         </select>
                       </div>
 
+                      {/* Assigned Operatories */}
+                      <div>
+                        <h4 className="font-medium text-gray-900 mb-3">Assigned Operatories</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {allOperatories.filter(op => op.isActive).map((operatory) => (
+                            <label key={operatory.id} className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={providerSettings[savedProvider.id]?.assignedOperatoryIds.includes(operatory.id) || false}
+                                onChange={(e) => handleOperatoryAssignmentChange(savedProvider.id, operatory.id, e.target.checked)}
+                                className="mr-2"
+                              />
+                              <span className="text-sm text-gray-700">
+                                {operatory.name} (ID: {operatory.nexhealthOperatoryId})
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
                       {/* Default Operatory */}
                       <div>
                         <h4 className="font-medium text-gray-900 mb-3">Default Operatory</h4>
@@ -400,11 +441,13 @@ export function ProvidersConfig({
                           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="">Select default operatory</option>
-                          {allOperatories.filter(op => op.isActive).map((operatory) => (
-                            <option key={operatory.id} value={operatory.id}>
-                              {operatory.name}
-                            </option>
-                          ))}
+                          {allOperatories
+                            .filter(op => op.isActive && (providerSettings[savedProvider.id]?.assignedOperatoryIds.includes(op.id) || false))
+                            .map((operatory) => (
+                              <option key={operatory.id} value={operatory.id}>
+                                {operatory.name} (ID: {operatory.nexhealthOperatoryId})
+                              </option>
+                            ))}
                         </select>
                       </div>
 
