@@ -93,11 +93,26 @@ export function ProvidersConfig({
   const getStatusBadge = (status: ProviderStatus) => {
     switch (status) {
       case 'active':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>;
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
+            Active
+          </span>
+        );
       case 'inactive':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Inactive</span>;
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
+            Inactive
+          </span>
+        );
       case 'unconfigured':
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Unconfigured</span>;
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+            <div className="w-1.5 h-1.5 bg-slate-400 rounded-full"></div>
+            Unconfigured
+          </span>
+        );
     }
   };
 
@@ -106,9 +121,20 @@ export function ProvidersConfig({
       case 'active':
         return 'Edit Settings';
       case 'inactive':
-        return 'Re-configure & Activate';
+        return 'Reactivate';
       case 'unconfigured':
         return 'Configure';
+    }
+  };
+
+  const getActionButtonStyle = (status: ProviderStatus) => {
+    switch (status) {
+      case 'active':
+        return "inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
+      case 'inactive':
+        return "inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
+      case 'unconfigured':
+        return "inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
     }
   };
 
@@ -332,75 +358,121 @@ export function ProvidersConfig({
     const settingsKey = savedProvider.id;
     
     if (fetchingSettings[settingsKey]) {
-      return <div className="text-center py-4 text-gray-500">Loading settings...</div>;
+      return (
+        <div className="flex items-center justify-center py-8">
+          <div className="flex items-center gap-3 text-slate-600">
+            <div className="w-5 h-5 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin"></div>
+            <span className="text-sm font-medium">Loading settings...</span>
+          </div>
+        </div>
+      );
     }
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-8">
         {/* Laine Status Toggle */}
-        <div>
-          <h4 className="font-medium text-gray-900 mb-3">Laine Status</h4>
-          <label className="flex items-center">
-            <input
-              type="checkbox"
-              checked={providerSettings[settingsKey]?.isActive ?? true}
-              onChange={(e) => updateProviderSetting(settingsKey, 'isActive', e.target.checked)}
-              className="mr-2"
-            />
-            <span className="text-sm text-gray-700">
-              {providerSettings[settingsKey]?.isActive ? 'Active in Laine' : 'Inactive in Laine'}
-            </span>
-          </label>
+        <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900 mb-1">Laine Status</h4>
+              <p className="text-xs text-slate-600">Control whether this provider is active in Laine</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={providerSettings[settingsKey]?.isActive ?? true}
+                onChange={(e) => updateProviderSetting(settingsKey, 'isActive', e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              <span className="ml-3 text-sm font-medium text-slate-700">
+                {providerSettings[settingsKey]?.isActive ? 'Active' : 'Inactive'}
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Accepted Appointment Types */}
-        <div>
-          <h4 className="font-medium text-gray-900 mb-3">Accepted Appointment Types</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {allAppointmentTypes.map((appointmentType) => (
-              <label key={appointmentType.id} className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={providerSettings[settingsKey]?.acceptedAppointmentTypeIds.includes(appointmentType.id) || false}
-                  onChange={(e) => handleAcceptedTypesChange(settingsKey, appointmentType.id, e.target.checked)}
-                  className="mr-2"
-                />
-                <span className="text-sm text-gray-700">
-                  {appointmentType.name} ({appointmentType.duration} min)
-                </span>
-              </label>
-            ))}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-200">
+            <h4 className="text-sm font-semibold text-slate-900 mb-1">Accepted Appointment Types</h4>
+            <p className="text-xs text-slate-600">Select which appointment types this provider can handle</p>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {allAppointmentTypes.map((appointmentType) => (
+                <label key={appointmentType.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all duration-200">
+                  <input
+                    type="checkbox"
+                    checked={providerSettings[settingsKey]?.acceptedAppointmentTypeIds.includes(appointmentType.id) || false}
+                    onChange={(e) => handleAcceptedTypesChange(settingsKey, appointmentType.id, e.target.checked)}
+                    className="mt-0.5 w-4 h-4 text-blue-600 bg-white border-slate-300 rounded focus:ring-blue-500 focus:ring-2"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-slate-900 block">{appointmentType.name}</span>
+                    <span className="text-xs text-slate-500">{appointmentType.duration} minutes</span>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
         </div>
 
         {/* Assigned Operatories */}
-        <div>
-          <h4 className="font-medium text-gray-900 mb-3">Assigned Operatories</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {allOperatories.filter(op => op.isActive).map((operatory) => (
-              <label key={operatory.id} className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={providerSettings[settingsKey]?.assignedOperatoryIds.includes(operatory.id) || false}
-                  onChange={(e) => handleOperatoryAssignmentChange(settingsKey, operatory.id, e.target.checked)}
-                  className="mr-2"
-                />
-                <span className="text-sm text-gray-700">
-                  {operatory.name} (ID: {operatory.nexhealthOperatoryId})
-                </span>
-              </label>
-            ))}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-slate-200">
+            <h4 className="text-sm font-semibold text-slate-900 mb-1">Assigned Operatories</h4>
+            <p className="text-xs text-slate-600">Choose which operatories this provider can use</p>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {allOperatories.filter(op => op.isActive).map((operatory) => (
+                <label key={operatory.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 cursor-pointer transition-all duration-200">
+                  <input
+                    type="checkbox"
+                    checked={providerSettings[settingsKey]?.assignedOperatoryIds.includes(operatory.id) || false}
+                    onChange={(e) => handleOperatoryAssignmentChange(settingsKey, operatory.id, e.target.checked)}
+                    className="mt-0.5 w-4 h-4 text-emerald-600 bg-white border-slate-300 rounded focus:ring-emerald-500 focus:ring-2"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-slate-900 block">{operatory.name}</span>
+                    <span className="text-xs text-slate-500">ID: {operatory.nexhealthOperatoryId}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Save Button */}
-        <div className="flex justify-end pt-4">
+        {/* Action Buttons */}
+        <div className="flex items-center justify-between pt-6 border-t border-slate-200">
+          <button
+            onClick={() => setExpandedProvider(null)}
+            className="inline-flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-800 text-sm font-medium transition-colors duration-200"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+            Cancel
+          </button>
           <button
             onClick={() => saveProviderSettings(providerWithStatus)}
             disabled={loading[provider.id]}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading[provider.id] ? 'Saving...' : 'Save Settings'}
+            {loading[provider.id] ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                Saving...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Save Settings
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -408,71 +480,155 @@ export function ProvidersConfig({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold">Providers Configuration</h2>
-        <button
-          onClick={handleSyncNexHealth}
-          disabled={syncLoading}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-        >
-          {syncLoading ? 'Syncing...' : 'Sync from NexHealth'}
-        </button>
-      </div>
-
-      {/* Unified Provider List */}
-      {providersWithStatus.length === 0 ? (
-        <div className="text-center py-8 text-gray-500">
-          <p className="mb-4">No providers found. Please sync with NexHealth first.</p>
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+      {/* Header */}
+      <div className="px-8 py-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Providers Configuration</h2>
+            <p className="text-sm text-slate-600 mt-1">
+              Manage your practice providers and their Laine settings
+            </p>
+          </div>
           <button
             onClick={handleSyncNexHealth}
             disabled={syncLoading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white text-sm font-medium rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {syncLoading ? 'Syncing...' : 'Sync from NexHealth'}
+            {syncLoading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                Syncing...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Sync from NexHealth
+              </>
+            )}
           </button>
         </div>
-      ) : (
-        <div className="space-y-4">
-          {providersWithStatus.map((providerWithStatus) => {
-            const { provider, status } = providerWithStatus;
-            const isExpanded = expandedProvider === provider.id;
-            
-            return (
-              <div key={provider.id} className="border border-gray-200 rounded-lg">
-                <div className="flex items-center justify-between p-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-1">
-                      <h3 className="font-medium text-gray-900">
-                        {getProviderName(provider)}
-                      </h3>
-                      {getStatusBadge(status)}
-                    </div>
-                    <p className="text-sm text-gray-500">
-                      Provider ID: {provider.nexhealthProviderId}
-                    </p>
-                  </div>
-                  
-                  <button
-                    onClick={() => handleProviderConfigure(providerWithStatus)}
-                    disabled={loading[provider.id]}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                  >
-                    {loading[provider.id] ? 'Loading...' : getActionButtonText(status)}
-                  </button>
-                </div>
+      </div>
 
-                {/* Expanded Settings Panel */}
-                {isExpanded && (
-                  <div className="border-t border-gray-200 p-4">
-                    {renderProviderSettings(providerWithStatus)}
+      {/* Provider List */}
+      <div className="p-8">
+        {providersWithStatus.length === 0 ? (
+          <div className="text-center py-16">
+            <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No providers found</h3>
+            <p className="text-slate-600 mb-6">Sync with NexHealth to import your providers</p>
+            <button
+              onClick={handleSyncNexHealth}
+              disabled={syncLoading}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {syncLoading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  Sync from NexHealth
+                </>
+              )}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {providersWithStatus.map((providerWithStatus) => {
+              const { provider, status } = providerWithStatus;
+              const isExpanded = expandedProvider === provider.id;
+              
+              return (
+                <div key={provider.id} className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+                  <div className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-4 mb-2">
+                          <h3 className="text-lg font-semibold text-slate-900">
+                            {getProviderName(provider)}
+                          </h3>
+                          {getStatusBadge(status)}
+                        </div>
+                        <p className="text-sm text-slate-500 flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V4a2 2 0 114 0v2m-4 0a2 2 0 104 0m-4 0v2m0 0h4" />
+                          </svg>
+                          Provider ID: {provider.nexhealthProviderId}
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        {isExpanded && (
+                          <button
+                            onClick={() => setExpandedProvider(null)}
+                            className="inline-flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-800 text-sm font-medium transition-colors duration-200"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                            </svg>
+                            Collapse
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleProviderConfigure(providerWithStatus)}
+                          disabled={loading[provider.id]}
+                          className={getActionButtonStyle(status)}
+                        >
+                          {loading[provider.id] ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              Loading...
+                            </>
+                          ) : (
+                            <>
+                              {status === 'active' && (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              )}
+                              {status === 'inactive' && (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                              )}
+                              {status === 'unconfigured' && (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                </svg>
+                              )}
+                              {getActionButtonText(status)}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+
+                  {/* Expanded Settings Panel */}
+                  {isExpanded && (
+                    <div className="border-t border-slate-200 bg-slate-50">
+                      <div className="p-8">
+                        {renderProviderSettings(providerWithStatus)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 } 
