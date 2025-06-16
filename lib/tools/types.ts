@@ -15,7 +15,9 @@ export interface PracticeWithSchedulingData extends Practice {
     acceptedAppointmentTypes?: Array<{
       appointmentType: AppointmentType;
     }>;
-    defaultOperatoryId?: string | null;
+    assignedOperatories?: Array<{
+      savedOperatory: SavedOperatory;
+    }>;
   })[];
   savedOperatories: SavedOperatory[];
 }

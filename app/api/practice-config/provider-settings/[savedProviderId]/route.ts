@@ -9,7 +9,8 @@ interface RouteParams {
 
 const updateProviderSettingsSchema = z.object({
   acceptedAppointmentTypeIds: z.array(z.string()).optional(),
-  assignedOperatoryIds: z.array(z.string()).optional()
+  assignedOperatoryIds: z.array(z.string()).optional(),
+  isActive: z.boolean().optional()
 });
 
 export async function GET(
@@ -136,7 +137,7 @@ export async function PUT(
       }, { status: 400 });
     }
 
-    const { acceptedAppointmentTypeIds, assignedOperatoryIds } = validationResult.data;
+    const { acceptedAppointmentTypeIds, assignedOperatoryIds, isActive } = validationResult.data;
 
     const practice = await prisma.practice.findUnique({
       where: { clerkUserId: userId }
@@ -195,7 +196,13 @@ export async function PUT(
 
     // Use transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
-      // No need to update SavedProvider record since we removed default fields
+      // Update SavedProvider record if isActive is provided
+      if (isActive !== undefined) {
+        await tx.savedProvider.update({
+          where: { id: savedProviderId },
+          data: { isActive }
+        });
+      }
 
       // Manage accepted appointment types if provided
       if (acceptedAppointmentTypeIds !== undefined) {

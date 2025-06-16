@@ -80,7 +80,6 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
      // Get practice configuration
      const activeProviders = practice.savedProviders.filter(sp => sp.isActive);
-     const activeOperatories = practice.savedOperatories?.filter(so => so.isActive) || [];
 
      if (activeProviders.length === 0) {
        return {
@@ -96,45 +95,44 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      );
 
      // IMPROVED LOGIC: Select provider based on accepted appointment types
-     let selectedProvider = activeProviders[0]; // Fallback to first
-     
-     if (appointmentType) {
-       // Try to find a provider that accepts this appointment type
-       const providersForType = activeProviders.filter(sp => {
-         // If no accepted types configured, provider accepts all (backward compatibility)
-         if (!sp.acceptedAppointmentTypes || sp.acceptedAppointmentTypes.length === 0) {
-           return true;
-         }
-         // Check if provider accepts this appointment type
-         return sp.acceptedAppointmentTypes.some(
-           relation => relation.appointmentType.id === appointmentType.id
-         );
-       });
-
-       if (providersForType.length > 0) {
-         selectedProvider = providersForType[0];
+     const eligibleProviders = activeProviders.filter(sp => {
+       // If no accepted types configured, provider accepts all (backward compatibility)
+       if (!sp.acceptedAppointmentTypes || sp.acceptedAppointmentTypes.length === 0) {
+         return true;
        }
-     }
-
-     // IMPROVED LOGIC: Select operatory based on provider's default or first available
-     let selectedOperatory = activeOperatories[0]; // Fallback
-
-     if (selectedProvider.defaultOperatoryId) {
-       const defaultOperatory = activeOperatories.find(
-         op => op.id === selectedProvider.defaultOperatoryId
+       // Check if provider accepts this appointment type
+       return sp.acceptedAppointmentTypes.some(
+         relation => relation.appointmentType.id === appointmentType?.id
        );
-       if (defaultOperatory) {
-         selectedOperatory = defaultOperatory;
-       }
-     }
+     });
 
-     if (!selectedOperatory) {
+     if (eligibleProviders.length === 0) {
        return {
          success: false,
-         error_code: "NO_ACTIVE_OPERATORIES",
-         message_to_patient: "I need to assign a room but none are available. Please contact the office to complete your booking."
+         error_code: "NO_PROVIDERS_FOR_TYPE",
+         message_to_patient: `No providers are configured to handle ${appointmentType?.name || 'this appointment type'}. Please contact the office to complete your booking.`
        };
      }
+
+     // Select first eligible provider (V1 implementation)
+     const selectedProvider = eligibleProviders[0];
+
+     // IMPROVED LOGIC: Select operatory from provider's assigned operatories
+     if (!selectedProvider.assignedOperatories || selectedProvider.assignedOperatories.length === 0) {
+       return {
+         success: false,
+         error_code: "NO_ASSIGNED_OPERATORIES",
+         message_to_patient: "The selected provider doesn't have any assigned rooms configured. Please contact the office to complete your booking.",
+         details: `Provider ${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName} has no assigned operatories`
+       };
+     }
+
+     // Select first assigned operatory (V1 implementation)
+     const selectedOperatoryAssignment = selectedProvider.assignedOperatories[0];
+     const selectedOperatory = selectedOperatoryAssignment.savedOperatory;
+
+     console.log(`[bookAppointment] Selected provider: ${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName} (ID: ${selectedProvider.provider.nexhealthProviderId})`);
+     console.log(`[bookAppointment] Selected operatory: ${selectedOperatory.name} (ID: ${selectedOperatory.nexhealthOperatoryId})`);
 
      // Convert selected time to proper start_time format
      const { startTime } = parseSelectedTimeToNexHealthFormat(

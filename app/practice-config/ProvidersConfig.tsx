@@ -36,14 +36,23 @@ interface SavedOperatory {
 interface ProviderSettings {
   acceptedAppointmentTypeIds: string[];
   assignedOperatoryIds: string[];
+  isActive?: boolean;
 }
 
 interface ProvidersConfigProps {
   savedProviders: SavedProvider[];
-  allProviders: Provider[]; // Add raw providers
+  allProviders: Provider[];
   allAppointmentTypes: AppointmentType[];
   allOperatories: SavedOperatory[];
   onUpdate: () => void;
+}
+
+type ProviderStatus = 'unconfigured' | 'active' | 'inactive';
+
+interface ProviderWithStatus {
+  provider: Provider;
+  status: ProviderStatus;
+  savedProvider?: SavedProvider;
 }
 
 export function ProvidersConfig({
@@ -57,15 +66,51 @@ export function ProvidersConfig({
   const [providerSettings, setProviderSettings] = useState<{ [key: string]: ProviderSettings }>({});
   const [loading, setLoading] = useState<{ [key: string]: boolean }>({});
   const [fetchingSettings, setFetchingSettings] = useState<{ [key: string]: boolean }>({});
-  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [activationLoading, setActivationLoading] = useState(false);
 
-  const activeProviders = savedProviders.filter(sp => sp.isActive);
+  // Create unified provider list with status
+  const savedProviderMap = new Map(savedProviders.map(sp => [sp.providerId, sp]));
   
-  // Get unactivated providers (exist in allProviders but not in savedProviders)
-  const savedProviderIds = new Set(savedProviders.map(sp => sp.providerId));
-  const unactivatedProviders = allProviders.filter(p => !savedProviderIds.has(p.id));
+  const providersWithStatus: ProviderWithStatus[] = allProviders.map(provider => {
+    const savedProvider = savedProviderMap.get(provider.id);
+    let status: ProviderStatus = 'unconfigured';
+    
+    if (savedProvider) {
+      status = savedProvider.isActive ? 'active' : 'inactive';
+    }
+    
+    return {
+      provider,
+      status,
+      savedProvider
+    };
+  });
+
+  const getProviderName = (provider: Provider) => {
+    return `${provider.firstName || ''} ${provider.lastName}`.trim() || 'Unnamed Provider';
+  };
+
+  const getStatusBadge = (status: ProviderStatus) => {
+    switch (status) {
+      case 'active':
+        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>;
+      case 'inactive':
+        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Inactive</span>;
+      case 'unconfigured':
+        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">Unconfigured</span>;
+    }
+  };
+
+  const getActionButtonText = (status: ProviderStatus) => {
+    switch (status) {
+      case 'active':
+        return 'Edit Settings';
+      case 'inactive':
+        return 'Re-configure & Activate';
+      case 'unconfigured':
+        return 'Configure';
+    }
+  };
 
   const fetchProviderSettings = async (savedProviderId: string) => {
     setFetchingSettings(prev => ({ ...prev, [savedProviderId]: true }));
@@ -77,7 +122,8 @@ export function ProvidersConfig({
           ...prev,
           [savedProviderId]: {
             acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypes) ? settings.acceptedAppointmentTypes.map((at: { id: string }) => at.id) : [],
-            assignedOperatoryIds: Array.isArray(settings.assignedOperatories) ? settings.assignedOperatories.map((op: { id: string }) => op.id) : []
+            assignedOperatoryIds: Array.isArray(settings.assignedOperatories) ? settings.assignedOperatories.map((op: { id: string }) => op.id) : [],
+            isActive: settings.isActive
           }
         }));
       } else {
@@ -86,7 +132,8 @@ export function ProvidersConfig({
           ...prev,
           [savedProviderId]: {
             acceptedAppointmentTypeIds: [],
-            assignedOperatoryIds: []
+            assignedOperatoryIds: [],
+            isActive: true
           }
         }));
       }
@@ -98,29 +145,87 @@ export function ProvidersConfig({
     }
   };
 
-  const handleProviderExpand = async (savedProviderId: string) => {
-    if (expandedProvider === savedProviderId) {
-      setExpandedProvider(null);
-    } else {
-      setExpandedProvider(savedProviderId);
-      if (!providerSettings[savedProviderId]) {
-        await fetchProviderSettings(savedProviderId);
+  const handleProviderConfigure = async (providerWithStatus: ProviderWithStatus) => {
+    const { provider, status, savedProvider } = providerWithStatus;
+    
+    // If unconfigured, we need to activate first
+    if (status === 'unconfigured') {
+      try {
+        setLoading(prev => ({ ...prev, [provider.id]: true }));
+        
+        // Activate the provider first
+        const response = await fetch('/api/practice-config/providers/activate-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ providerIds: [provider.id] })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          toast.error(`Failed to activate provider: ${error.error || 'Unknown error'}`);
+          return;
+        }
+
+        // Refresh data to get the new SavedProvider record
+        onUpdate();
+        
+        // Initialize empty settings for new provider
+        setProviderSettings(prev => ({
+          ...prev,
+          [provider.id]: {
+            acceptedAppointmentTypeIds: [],
+            assignedOperatoryIds: [],
+            isActive: true
+          }
+        }));
+        
+        setExpandedProvider(provider.id);
+        
+      } catch (error) {
+        console.error('Error activating provider:', error);
+        toast.error('Failed to activate provider');
+      } finally {
+        setLoading(prev => ({ ...prev, [provider.id]: false }));
+      }
+    } else if (savedProvider) {
+      // For existing saved providers, expand and fetch settings
+      const settingsKey = savedProvider.id;
+      
+      if (expandedProvider === provider.id) {
+        setExpandedProvider(null);
+      } else {
+        setExpandedProvider(provider.id);
+        
+        // Pre-set isActive to true for inactive providers being re-configured
+        if (status === 'inactive') {
+          setProviderSettings(prev => ({
+            ...prev,
+            [settingsKey]: {
+              ...prev[settingsKey],
+              isActive: true
+            }
+          }));
+        }
+        
+        if (!providerSettings[settingsKey]) {
+          await fetchProviderSettings(settingsKey);
+        }
       }
     }
   };
 
-  const updateProviderSetting = (savedProviderId: string, field: keyof ProviderSettings, value: string | string[] | null) => {
+  const updateProviderSetting = (settingsKey: string, field: keyof ProviderSettings, value: string | string[] | boolean | null) => {
     setProviderSettings(prev => ({
       ...prev,
-      [savedProviderId]: {
-        ...prev[savedProviderId],
+      [settingsKey]: {
+        ...prev[settingsKey],
         [field]: value
       }
     }));
   };
 
-  const handleAcceptedTypesChange = (savedProviderId: string, appointmentTypeId: string, checked: boolean) => {
-    const currentSettings = providerSettings[savedProviderId];
+  const handleAcceptedTypesChange = (settingsKey: string, appointmentTypeId: string, checked: boolean) => {
+    const currentSettings = providerSettings[settingsKey];
     let newAcceptedTypes: string[];
     
     if (checked) {
@@ -129,11 +234,11 @@ export function ProvidersConfig({
       newAcceptedTypes = (currentSettings?.acceptedAppointmentTypeIds || []).filter(id => id !== appointmentTypeId);
     }
     
-    updateProviderSetting(savedProviderId, 'acceptedAppointmentTypeIds', newAcceptedTypes);
+    updateProviderSetting(settingsKey, 'acceptedAppointmentTypeIds', newAcceptedTypes);
   };
 
-  const handleOperatoryAssignmentChange = (savedProviderId: string, operatoryId: string, checked: boolean) => {
-    const currentSettings = providerSettings[savedProviderId];
+  const handleOperatoryAssignmentChange = (settingsKey: string, operatoryId: string, checked: boolean) => {
+    const currentSettings = providerSettings[settingsKey];
     let newAssignedOperatories: string[];
     
     if (checked) {
@@ -142,28 +247,33 @@ export function ProvidersConfig({
       newAssignedOperatories = (currentSettings?.assignedOperatoryIds || []).filter(id => id !== operatoryId);
     }
     
-    updateProviderSetting(savedProviderId, 'assignedOperatoryIds', newAssignedOperatories);
+    updateProviderSetting(settingsKey, 'assignedOperatoryIds', newAssignedOperatories);
   };
 
-  const saveProviderSettings = async (savedProviderId: string) => {
-    const settings = providerSettings[savedProviderId];
+  const saveProviderSettings = async (providerWithStatus: ProviderWithStatus) => {
+    const { provider, savedProvider } = providerWithStatus;
+    
+    // For newly activated providers, we need to refresh to get the savedProvider ID
+    if (!savedProvider) {
+      toast.error('Provider settings cannot be saved. Please try refreshing the page.');
+      return;
+    }
+    
+    const settingsKey = savedProvider.id;
+    const settings = providerSettings[settingsKey];
     if (!settings) return;
 
-    // Ensure data types are correct before sending
     const payload = {
       acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypeIds) ? settings.acceptedAppointmentTypeIds : [],
-      assignedOperatoryIds: Array.isArray(settings.assignedOperatoryIds) ? settings.assignedOperatoryIds : []
+      assignedOperatoryIds: Array.isArray(settings.assignedOperatoryIds) ? settings.assignedOperatoryIds : [],
+      ...(settings.isActive !== undefined && { isActive: settings.isActive })
     };
 
-    console.log('🔍 Saving provider settings:', {
-      savedProviderId,
-      payload,
-      payloadTypes: Object.keys(payload).map(key => `${key}: ${typeof payload[key as keyof typeof payload]} (${Array.isArray(payload[key as keyof typeof payload]) ? 'array' : 'not array'})`)
-    });
+    console.log('🔍 Saving provider settings:', { savedProviderId: savedProvider.id, payload });
 
-    setLoading(prev => ({ ...prev, [savedProviderId]: true }));
+    setLoading(prev => ({ ...prev, [provider.id]: true }));
     try {
-      const response = await fetch(`/api/practice-config/provider-settings/${savedProviderId}`, {
+      const response = await fetch(`/api/practice-config/provider-settings/${savedProvider.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -172,11 +282,11 @@ export function ProvidersConfig({
       if (response.ok) {
         toast.success('Provider settings saved successfully!');
         onUpdate();
+        setExpandedProvider(null);
       } else {
         const error = await response.json();
         console.error('❌ API Error Response:', error);
         
-        // Show more detailed error information
         if (error.issues && Array.isArray(error.issues)) {
           const errorMessages = error.issues.map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join(', ');
           toast.error(`Validation failed: ${errorMessages}`);
@@ -188,15 +298,9 @@ export function ProvidersConfig({
       console.error('Error saving provider settings:', error);
       toast.error('Failed to save provider settings');
     } finally {
-      setLoading(prev => ({ ...prev, [savedProviderId]: false }));
+      setLoading(prev => ({ ...prev, [provider.id]: false }));
     }
   };
-
-  const getProviderName = (provider: Provider) => {
-    return `${provider.firstName || ''} ${provider.lastName}`.trim() || 'Unnamed Provider';
-  };
-
-
 
   const handleSyncNexHealth = async () => {
     setSyncLoading(true);
@@ -221,43 +325,86 @@ export function ProvidersConfig({
     }
   };
 
-  const handleProviderSelection = (providerId: string, checked: boolean) => {
-    setSelectedProviders(prev => 
-      checked 
-        ? [...prev, providerId]
-        : prev.filter(id => id !== providerId)
+  const renderProviderSettings = (providerWithStatus: ProviderWithStatus) => {
+    const { provider, savedProvider } = providerWithStatus;
+    if (!savedProvider) return null;
+    
+    const settingsKey = savedProvider.id;
+    
+    if (fetchingSettings[settingsKey]) {
+      return <div className="text-center py-4 text-gray-500">Loading settings...</div>;
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* Laine Status Toggle */}
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Laine Status</h4>
+          <label className="flex items-center">
+            <input
+              type="checkbox"
+              checked={providerSettings[settingsKey]?.isActive ?? true}
+              onChange={(e) => updateProviderSetting(settingsKey, 'isActive', e.target.checked)}
+              className="mr-2"
+            />
+            <span className="text-sm text-gray-700">
+              {providerSettings[settingsKey]?.isActive ? 'Active in Laine' : 'Inactive in Laine'}
+            </span>
+          </label>
+        </div>
+
+        {/* Accepted Appointment Types */}
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Accepted Appointment Types</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {allAppointmentTypes.map((appointmentType) => (
+              <label key={appointmentType.id} className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={providerSettings[settingsKey]?.acceptedAppointmentTypeIds.includes(appointmentType.id) || false}
+                  onChange={(e) => handleAcceptedTypesChange(settingsKey, appointmentType.id, e.target.checked)}
+                  className="mr-2"
+                />
+                <span className="text-sm text-gray-700">
+                  {appointmentType.name} ({appointmentType.duration} min)
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Assigned Operatories */}
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Assigned Operatories</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {allOperatories.filter(op => op.isActive).map((operatory) => (
+              <label key={operatory.id} className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={providerSettings[settingsKey]?.assignedOperatoryIds.includes(operatory.id) || false}
+                  onChange={(e) => handleOperatoryAssignmentChange(settingsKey, operatory.id, e.target.checked)}
+                  className="mr-2"
+                />
+                <span className="text-sm text-gray-700">
+                  {operatory.name} (ID: {operatory.nexhealthOperatoryId})
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Save Button */}
+        <div className="flex justify-end pt-4">
+          <button
+            onClick={() => saveProviderSettings(providerWithStatus)}
+            disabled={loading[provider.id]}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading[provider.id] ? 'Saving...' : 'Save Settings'}
+          </button>
+        </div>
+      </div>
     );
-  };
-
-  const handleActivateProviders = async () => {
-    if (selectedProviders.length === 0) {
-      toast.error('Please select at least one provider to activate');
-      return;
-    }
-
-    setActivationLoading(true);
-    try {
-      const response = await fetch('/api/practice-config/providers/activate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerIds: selectedProviders })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Successfully activated ${result.activatedProviders} provider(s)!`);
-        setSelectedProviders([]);
-        onUpdate();
-      } else {
-        const error = await response.json();
-        toast.error(`Activation failed: ${error.error || 'Unknown error'}`);
-      }
-    } catch (error) {
-      console.error('Error activating providers:', error);
-      toast.error('Failed to activate providers');
-    } finally {
-      setActivationLoading(false);
-    }
   };
 
   return (
@@ -272,166 +419,58 @@ export function ProvidersConfig({
           {syncLoading ? 'Syncing...' : 'Sync from NexHealth'}
         </button>
       </div>
-      
-      {activeProviders.length === 0 ? (
-        <div className="space-y-6">
-          {unactivatedProviders.length > 0 ? (
-            <>
-              <div className="text-center py-4">
-                <p className="text-gray-600 mb-4">
-                  Found {unactivatedProviders.length} provider(s) from NexHealth. Select providers to activate:
-                </p>
-              </div>
-              
-              <div className="space-y-3">
-                {unactivatedProviders.map((provider) => (
-                  <label key={provider.id} className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
-                    <input
-                      type="checkbox"
-                      checked={selectedProviders.includes(provider.id)}
-                      onChange={(e) => handleProviderSelection(provider.id, e.target.checked)}
-                      className="mr-3"
-                    />
-                    <div className="flex-1">
-                      <h3 className="font-medium text-gray-900">
-                        {getProviderName(provider)}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        Provider ID: {provider.nexhealthProviderId}
-                      </p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-              
-              {selectedProviders.length > 0 && (
-                <div className="flex justify-center">
-                  <button
-                    onClick={handleActivateProviders}
-                    disabled={activationLoading}
-                    className="bg-green-600 text-white px-6 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {activationLoading ? 'Activating...' : `Activate ${selectedProviders.length} Provider(s)`}
-                  </button>
-                </div>
-              )}
-            </>
-          ) : allProviders.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <p className="mb-4">No providers found. Please sync with NexHealth first.</p>
-              <button
-                onClick={handleSyncNexHealth}
-                disabled={syncLoading}
-                className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {syncLoading ? 'Syncing...' : 'Sync from NexHealth'}
-              </button>
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <p>All providers have been synced but none are activated.</p>
-            </div>
-          )}
+
+      {/* Unified Provider List */}
+      {providersWithStatus.length === 0 ? (
+        <div className="text-center py-8 text-gray-500">
+          <p className="mb-4">No providers found. Please sync with NexHealth first.</p>
+          <button
+            onClick={handleSyncNexHealth}
+            disabled={syncLoading}
+            className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {syncLoading ? 'Syncing...' : 'Sync from NexHealth'}
+          </button>
         </div>
       ) : (
         <div className="space-y-4">
-          {activeProviders.map((savedProvider) => (
-            <div key={savedProvider.id} className="border border-gray-200 rounded-lg">
-              <div
-                className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50"
-                onClick={() => handleProviderExpand(savedProvider.id)}
-              >
-                <div>
-                  <h3 className="font-medium text-gray-900">
-                    {getProviderName(savedProvider.provider)}
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    Provider ID: {savedProvider.provider.nexhealthProviderId}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">
-                    {expandedProvider === savedProvider.id ? 'Collapse' : 'Configure'}
-                  </span>
-                  <svg
-                    className={`w-5 h-5 text-gray-500 transition-transform ${
-                      expandedProvider === savedProvider.id ? 'rotate-180' : ''
-                    }`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-
-              {expandedProvider === savedProvider.id && (
-                <div className="border-t border-gray-200 p-4">
-                  {fetchingSettings[savedProvider.id] ? (
-                    <div className="text-center py-4 text-gray-500">Loading settings...</div>
-                  ) : (
-                    <div className="space-y-6">
-                      {/* Accepted Appointment Types */}
-                      <div>
-                        <h4 className="font-medium text-gray-900 mb-3">Accepted Appointment Types</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {allAppointmentTypes.map((appointmentType) => (
-                            <label key={appointmentType.id} className="flex items-center">
-                              <input
-                                type="checkbox"
-                                checked={providerSettings[savedProvider.id]?.acceptedAppointmentTypeIds.includes(appointmentType.id) || false}
-                                onChange={(e) => handleAcceptedTypesChange(savedProvider.id, appointmentType.id, e.target.checked)}
-                                className="mr-2"
-                              />
-                              <span className="text-sm text-gray-700">
-                                {appointmentType.name} ({appointmentType.duration} min)
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-
-
-                      {/* Assigned Operatories */}
-                      <div>
-                        <h4 className="font-medium text-gray-900 mb-3">Assigned Operatories</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {allOperatories.filter(op => op.isActive).map((operatory) => (
-                            <label key={operatory.id} className="flex items-center">
-                              <input
-                                type="checkbox"
-                                checked={providerSettings[savedProvider.id]?.assignedOperatoryIds.includes(operatory.id) || false}
-                                onChange={(e) => handleOperatoryAssignmentChange(savedProvider.id, operatory.id, e.target.checked)}
-                                className="mr-2"
-                              />
-                              <span className="text-sm text-gray-700">
-                                {operatory.name} (ID: {operatory.nexhealthOperatoryId})
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-
-
-                      {/* Save Button */}
-                      <div className="flex justify-end pt-4">
-                        <button
-                          onClick={() => saveProviderSettings(savedProvider.id)}
-                          disabled={loading[savedProvider.id]}
-                          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {loading[savedProvider.id] ? 'Saving...' : 'Save Settings'}
-                        </button>
-                      </div>
+          {providersWithStatus.map((providerWithStatus) => {
+            const { provider, status } = providerWithStatus;
+            const isExpanded = expandedProvider === provider.id;
+            
+            return (
+              <div key={provider.id} className="border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-1">
+                      <h3 className="font-medium text-gray-900">
+                        {getProviderName(provider)}
+                      </h3>
+                      {getStatusBadge(status)}
                     </div>
-                  )}
+                    <p className="text-sm text-gray-500">
+                      Provider ID: {provider.nexhealthProviderId}
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={() => handleProviderConfigure(providerWithStatus)}
+                    disabled={loading[provider.id]}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    {loading[provider.id] ? 'Loading...' : getActionButtonText(status)}
+                  </button>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Expanded Settings Panel */}
+                {isExpanded && (
+                  <div className="border-t border-gray-200 p-4">
+                    {renderProviderSettings(providerWithStatus)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -94,9 +94,23 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         };
       }
 
-      // Get provider and operatory arrays from eligible providers
+      // Get provider array from eligible providers
       const providers = eligibleProviders.map(sp => sp.provider.nexhealthProviderId);
-      const operatories = activeOperatories.map(so => so.nexhealthOperatoryId);
+      
+      // Collect operatory IDs from all eligible providers' assigned operatories
+      const operatorySets = new Set<string>();
+      eligibleProviders.forEach(sp => {
+        if (sp.assignedOperatories && sp.assignedOperatories.length > 0) {
+          sp.assignedOperatories.forEach(assignment => {
+            operatorySets.add(assignment.savedOperatory.nexhealthOperatoryId);
+          });
+        }
+      });
+      
+      // If no providers have specific operatory assignments, use all active operatories
+      const operatories = operatorySets.size > 0 
+        ? Array.from(operatorySets)
+        : activeOperatories.map(so => so.nexhealthOperatoryId);
 
       // Build search params object for NexHealth API
       const searchParams: Record<string, string | string[]> = {
