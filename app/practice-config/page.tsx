@@ -55,7 +55,7 @@ interface Practice {
 }
 
 interface WebhookStatus {
-  lastSyncStatus: 'NEVER_SYNCED' | 'SYNCED_ATTEMPTED' | 'ERROR';
+  lastSyncStatus: 'NEVER_SYNCED' | 'SYNCED' | 'SYNC_IN_PROGRESS' | 'ERROR';
   lastSyncAttemptAt: string | null;
   lastSyncErrorMessage: string | null;
   subscriptionCounts: {
@@ -158,8 +158,10 @@ export default function PracticeConfigPage() {
 
   const getWebhookStatusIcon = (status: WebhookStatus['lastSyncStatus']) => {
     switch (status) {
-      case 'SYNCED_ATTEMPTED':
+      case 'SYNCED':
         return <div className="w-3 h-3 bg-green-500 rounded-full"></div>;
+      case 'SYNC_IN_PROGRESS':
+        return <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>;
       case 'ERROR':
         return <div className="w-3 h-3 bg-red-500 rounded-full"></div>;
       case 'NEVER_SYNCED':
@@ -171,8 +173,10 @@ export default function PracticeConfigPage() {
 
   const getWebhookStatusText = (status: WebhookStatus['lastSyncStatus']) => {
     switch (status) {
-      case 'SYNCED_ATTEMPTED':
+      case 'SYNCED':
         return 'Webhooks Synced';
+      case 'SYNC_IN_PROGRESS':
+        return 'Sync In Progress';
       case 'ERROR':
         return 'Webhook Error';
       case 'NEVER_SYNCED':
