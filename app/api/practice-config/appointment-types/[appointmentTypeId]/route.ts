@@ -15,7 +15,8 @@ const updateAppointmentTypeSchema = z.object({
   name: z.string().min(1, "Name must be a non-empty string").optional(),
   minutes: z.number().positive("Minutes must be a positive number").optional(),
   bookableOnline: z.boolean().optional(),
-  groupCode: z.string().nullable().optional()
+  groupCode: z.string().nullable().optional(),
+  keywords: z.string().nullable().optional()
 });
 
 export async function PUT(
@@ -69,7 +70,7 @@ export async function PUT(
       }, { status: 400 });
     }
 
-    const { name, minutes, bookableOnline, groupCode } = validationResult.data;
+    const { name, minutes, bookableOnline, groupCode, keywords } = validationResult.data;
 
     // Build update data object with only provided fields for NexHealth
     const nexhealthUpdateData: {
@@ -91,12 +92,13 @@ export async function PUT(
     }
 
     try {
-      // Build local update data (includes groupCode which is Laine-specific)
+      // Build local update data (includes groupCode and keywords which are Laine-specific)
       const localUpdateData: {
         name?: string;
         duration?: number;
         bookableOnline?: boolean;
         groupCode?: string | null;
+        keywords?: string | null;
         parentType?: string;
         parentId?: string;
         lastSyncError?: null;
@@ -129,9 +131,12 @@ export async function PUT(
         }
       }
 
-      // Add groupCode update if provided (Laine-specific field)
+      // Add groupCode and keywords updates if provided (Laine-specific fields)
       if (groupCode !== undefined) {
         localUpdateData.groupCode = groupCode;
+      }
+      if (keywords !== undefined) {
+        localUpdateData.keywords = keywords;
       }
 
       // Clear any previous sync errors if we made changes
@@ -153,11 +158,15 @@ export async function PUT(
     } catch (nexhealthError) {
       console.error("Error updating appointment type in NexHealth:", nexhealthError);
       
-      // If only groupCode was being updated and NexHealth call failed, still update locally
-      if (Object.keys(nexhealthUpdateData).length === 0 && groupCode !== undefined) {
+      // If only groupCode/keywords were being updated and NexHealth call failed, still update locally
+      if (Object.keys(nexhealthUpdateData).length === 0 && (groupCode !== undefined || keywords !== undefined)) {
+        const localOnlyData: { groupCode?: string | null; keywords?: string | null } = {};
+        if (groupCode !== undefined) localOnlyData.groupCode = groupCode;
+        if (keywords !== undefined) localOnlyData.keywords = keywords;
+        
         const updatedLocalAppointmentType = await prisma.appointmentType.update({
           where: { id: appointmentTypeId },
-          data: { groupCode }
+          data: localOnlyData
         });
 
         return NextResponse.json({

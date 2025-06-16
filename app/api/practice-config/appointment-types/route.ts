@@ -8,7 +8,8 @@ const createAppointmentTypeSchema = z.object({
   name: z.string().min(1, "Name is required and must be a non-empty string"),
   minutes: z.number().positive("Minutes must be a positive number"),
   bookableOnline: z.boolean().optional().default(true),
-  groupCode: z.string().nullable().optional()
+  groupCode: z.string().nullable().optional(),
+  keywords: z.string().nullable().optional()
 });
 
 export async function GET() {
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { name, minutes, bookableOnline, groupCode } = validationResult.data;
+    const { name, minutes, bookableOnline, groupCode, keywords } = validationResult.data;
 
     try {
       // Create appointment type in NexHealth (groupCode is Laine-specific, not sent to NexHealth)
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      // Create appointment type in local database with groupCode
+      // Create appointment type in local database with groupCode and keywords
       const localAppointmentType = await prisma.appointmentType.create({
         data: {
           practiceId: practice.id,
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest) {
           duration: nexhealthResponse.minutes,
           bookableOnline: nexhealthResponse.bookable_online,
           groupCode, // Store the Laine-specific group code
+          keywords, // Store the Laine-specific keywords
           parentType: nexhealthResponse.parent_type,
           parentId: nexhealthResponse.parent_id.toString()
         }

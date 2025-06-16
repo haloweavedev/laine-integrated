@@ -10,6 +10,7 @@ interface AppointmentType {
   duration: number;
   bookableOnline: boolean | null;
   groupCode: string | null;
+  keywords: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +25,7 @@ interface FormData {
   minutes: number;
   bookableOnline: boolean;
   groupCode: string;
+  keywords: string;
 }
 
 export function AppointmentTypesConfig({ 
@@ -42,7 +44,8 @@ export function AppointmentTypesConfig({
     name: '',
     minutes: 30,
     bookableOnline: true,
-    groupCode: ''
+    groupCode: '',
+    keywords: ''
   });
 
   const resetForm = () => {
@@ -50,7 +53,8 @@ export function AppointmentTypesConfig({
       name: '',
       minutes: 30,
       bookableOnline: true,
-      groupCode: ''
+      groupCode: '',
+      keywords: ''
     });
   };
 
@@ -90,7 +94,8 @@ export function AppointmentTypesConfig({
           name: formData.name,
           minutes: formData.minutes,
           bookableOnline: formData.bookableOnline,
-          groupCode: formData.groupCode || null
+          groupCode: formData.groupCode || null,
+          keywords: formData.keywords || null
         })
       });
 
@@ -127,7 +132,8 @@ export function AppointmentTypesConfig({
           name: formData.name,
           minutes: formData.minutes,
           bookableOnline: formData.bookableOnline,
-          groupCode: formData.groupCode || null
+          groupCode: formData.groupCode || null,
+          keywords: formData.keywords || null
         })
       });
 
@@ -182,7 +188,8 @@ export function AppointmentTypesConfig({
       name: type.name,
       minutes: type.duration,
       bookableOnline: type.bookableOnline ?? true,
-      groupCode: type.groupCode || ''
+      groupCode: type.groupCode || '',
+      keywords: type.keywords || ''
     });
     setShowEditModal(true);
   };
@@ -240,6 +247,9 @@ export function AppointmentTypesConfig({
                 Group Code
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Keywords
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Bookable Online
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -258,6 +268,9 @@ export function AppointmentTypesConfig({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {type.groupCode || '-'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {type.keywords || '-'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
@@ -344,6 +357,18 @@ export function AppointmentTypesConfig({
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Keywords
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.keywords}
+                    onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
+                    placeholder="Enter comma-separated keywords like: jaw pain, emergency exam"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -425,6 +450,18 @@ export function AppointmentTypesConfig({
                     type="text"
                     value={formData.groupCode}
                     onChange={(e) => setFormData({ ...formData, groupCode: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Keywords
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.keywords}
+                    onChange={(e) => setFormData({ ...formData, keywords: e.target.value })}
+                    placeholder="Enter comma-separated keywords like: jaw pain, emergency exam"
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

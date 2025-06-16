@@ -26,6 +26,7 @@ interface Practice {
     duration: number;
     bookableOnline: boolean | null;
     groupCode: string | null;
+    keywords: string | null;
     createdAt: string;
     updatedAt: string;
   }>;
