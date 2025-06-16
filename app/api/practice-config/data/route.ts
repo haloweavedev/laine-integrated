@@ -20,6 +20,7 @@ export async function GET() {
             duration: true,
             bookableOnline: true,
             groupCode: true,
+            keywords: true,
             createdAt: true,
             updatedAt: true
           }
