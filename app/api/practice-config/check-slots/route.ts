@@ -105,18 +105,38 @@ export async function POST(req: NextRequest) {
 
     const { requestedDate, appointmentTypeId, providerIds, operatoryIds, daysToSearch } = validationResult.data;
 
-    // Find the Laine AppointmentType by its CUID
-    const appointmentType = practice.appointmentTypes.find(
-      at => at.id === appointmentTypeId
-    );
+    // Log input parameters for debugging
+    console.log("=== CHECK SLOTS API - INPUT PARAMETERS ===");
+    console.log("Received appointmentTypeId (Laine CUID):", appointmentTypeId);
+    console.log("Received requestedDate:", requestedDate);
+    console.log("Received providerIds (SavedProvider CUIDs from frontend):", providerIds);
+    console.log("Received operatoryIds (SavedOperatory CUIDs from frontend):", operatoryIds);
+    console.log("Days to search:", daysToSearch);
+
+    // CRUCIAL STEP A: Fetch the complete AppointmentType record using Laine CUID
+    // Using direct Prisma fetch for safety instead of relying on practice.appointmentTypes
+    const appointmentType = await prisma.appointmentType.findUnique({
+      where: { 
+        id: appointmentTypeId,
+        practiceId: practice.id // Ensure it belongs to this practice
+      }
+    });
 
     if (!appointmentType) {
+      console.log("❌ AppointmentType not found for Laine CUID:", appointmentTypeId);
       return NextResponse.json({ 
         error: "Appointment type not found or doesn't belong to practice" 
       }, { status: 400 });
     }
 
-    // STEP 1: Find all SavedProviders who are active and accept this appointment type
+    // Log fetched AppointmentType details
+    console.log("✅ Found AppointmentType:");
+    console.log("  - Laine CUID:", appointmentType.id);
+    console.log("  - Name:", appointmentType.name);
+    console.log("  - Duration (for slot_length):", appointmentType.duration);
+    console.log("  - NexHealth ID:", appointmentType.nexhealthAppointmentTypeId);
+
+    // CRUCIAL STEP B: Find all SavedProviders who are active and accept this appointment type
     let eligibleSavedProviders = practice.savedProviders.filter(sp => {
       // Must be active
       if (!sp.isActive) return false;
@@ -126,20 +146,39 @@ export async function POST(req: NextRequest) {
         return true;
       }
       
-      // Otherwise, check if they accept this specific appointment type
+      // Otherwise, check if they accept this specific appointment type using Laine CUID
       return sp.acceptedAppointmentTypes.some(
         relation => relation.appointmentType.id === appointmentType.id
       );
     });
 
-    // STEP 2: Apply optional provider filter (if providerIds provided, filter by Provider.id)
+    console.log("📋 Provider filtering - Step 1 (Active + Accept AppointmentType):");
+    console.log("  - Total active SavedProviders in practice:", practice.savedProviders.length);
+    console.log("  - SavedProviders accepting this AppointmentType:", eligibleSavedProviders.length);
+    console.log("  - Eligible SavedProvider details:", eligibleSavedProviders.map(sp => ({
+      savedProviderId: sp.id,
+      providerName: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim(),
+      providerId: sp.provider.id,
+      nexhealthProviderId: sp.provider.nexhealthProviderId,
+      acceptedAppointmentTypesCount: sp.acceptedAppointmentTypes.length
+    })));
+
+    // STEP 2: Apply optional provider filter
+    // Frontend sends SavedProvider.id CUIDs, so filter by sp.id
     if (providerIds.length > 0) {
+      const beforeFilterCount = eligibleSavedProviders.length;
       eligibleSavedProviders = eligibleSavedProviders.filter(sp => 
-        providerIds.includes(sp.provider.id)
+        providerIds.includes(sp.id) // Fixed: Compare against SavedProvider.id, not Provider.id
       );
+      console.log("📋 Provider filtering - Step 2 (Optional provider filter):");
+      console.log("  - Before provider filter:", beforeFilterCount);
+      console.log("  - After provider filter:", eligibleSavedProviders.length);
+      console.log("  - Provider filter CUIDs from frontend:", providerIds);
+      console.log("  - Matched SavedProvider CUIDs:", eligibleSavedProviders.map(sp => sp.id));
     }
 
     if (eligibleSavedProviders.length === 0) {
+      console.log("❌ No providers match the criteria");
       return NextResponse.json({ 
         error: "No providers are configured to accept this appointment type or match the filter criteria" 
       }, { status: 400 });
@@ -150,7 +189,9 @@ export async function POST(req: NextRequest) {
       eligibleSavedProviders.map(sp => sp.provider.nexhealthProviderId)
     )];
 
-    // STEP 4: Get operatories assigned to these eligible providers
+    console.log("🔗 NexHealth Provider IDs extracted:", nexhealthProviderIds);
+
+    // CRUCIAL STEP C: Get operatories assigned to these eligible providers
     const eligibleOperatories: Array<{
       id: string;
       nexhealthOperatoryId: string;
@@ -168,25 +209,41 @@ export async function POST(req: NextRequest) {
       index === self.findIndex(o => o.id === operatory.id)
     );
 
+    console.log("🏢 Operatory derivation - Step 1 (From eligible providers):");
+    console.log("  - Operatories derived from eligible providers:", uniqueOperatories.length);
+    console.log("  - Operatory details:", uniqueOperatories.map(op => ({
+      operatoryId: op.id,
+      name: op.name,
+      nexhealthOperatoryId: op.nexhealthOperatoryId
+    })));
+
     // STEP 5: Apply optional operatory filter (if operatoryIds provided, filter by SavedOperatory.id)
     let finalOperatories = uniqueOperatories;
     if (operatoryIds.length > 0) {
+      const beforeFilterCount = finalOperatories.length;
       finalOperatories = uniqueOperatories.filter(operatory => 
         operatoryIds.includes(operatory.id)
       );
+      console.log("🏢 Operatory derivation - Step 2 (Optional operatory filter):");
+      console.log("  - Before operatory filter:", beforeFilterCount);
+      console.log("  - After operatory filter:", finalOperatories.length);
+      console.log("  - Operatory filter CUIDs from frontend:", operatoryIds);
+      console.log("  - Matched operatory CUIDs:", finalOperatories.map(op => op.id));
     }
 
-    // STEP 6: Collect unique nexhealthOperatoryId values for NexHealth API
+    // CRUCIAL STEP D: Extract nexhealthOperatoryIds for the API call
     const nexhealthOperatoryIds = finalOperatories.map(operatory => operatory.nexhealthOperatoryId);
 
-    // STEP 7: Build NexHealth API parameters with new requirements
+    console.log("🔗 NexHealth Operatory IDs extracted:", nexhealthOperatoryIds);
+
+    // STEP 7: Build NexHealth API parameters with correct requirements
     const params: Record<string, string | number | string[]> = {
       start_date: requestedDate,
       days: daysToSearch,
       'lids[]': [practice.nexhealthLocationId],
       'pids[]': nexhealthProviderIds,
-      slot_length: appointmentType.duration, // Use duration instead of appointment_type_id
-      overlapping_operatory_slots: 'false' // Explicitly set to false as string
+      slot_length: appointmentType.duration, // CRITICAL: Use duration from Laine AppointmentType, NOT appointment_type_id
+      overlapping_operatory_slots: 'false' // CRITICAL: Explicitly set to false as string
     };
 
     // Add operatory IDs if we have any
@@ -194,16 +251,14 @@ export async function POST(req: NextRequest) {
       params['operatory_ids[]'] = nexhealthOperatoryIds;
     }
 
-    console.log("Checking appointment slots with refactored logic:", {
-      laineAppointmentTypeId: appointmentType.id,
-      appointmentTypeName: appointmentType.name,
-      duration: appointmentType.duration,
-      eligibleSavedProvidersCount: eligibleSavedProviders.length,
-      nexhealthProviderIds,
-      finalOperatoriesCount: finalOperatories.length,
-      nexhealthOperatoryIds,
-      params
-    });
+    // CRITICAL: Log the exact params being sent to NexHealth API
+    console.log("🚀 NEXHEALTH API CALL PARAMETERS:");
+    console.log("  - Endpoint: /appointment_slots");
+    console.log("  - Subdomain:", practice.nexhealthSubdomain);
+    console.log("  - Params:", JSON.stringify(params, null, 2));
+    console.log("  - IMPORTANT: slot_length =", appointmentType.duration, "(from AppointmentType.duration)");
+    console.log("  - IMPORTANT: overlapping_operatory_slots = 'false'");
+    console.log("  - IMPORTANT: NO appointment_type_id parameter sent to NexHealth");
 
     // STEP 8: Call NexHealth API
     const slotsResponse = await fetchNexhealthAPI(
@@ -211,6 +266,8 @@ export async function POST(req: NextRequest) {
       practice.nexhealthSubdomain,
       params
     );
+
+    console.log("📡 NexHealth API Response received");
 
     // STEP 9: Parse response and extract slots
     const rawSlots: Array<NexhealthSlot & { provider_id: number; location_id: number }> = [];
@@ -228,10 +285,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    console.log("📊 Slot processing:");
+    console.log("  - Raw slots from NexHealth API:", rawSlots.length);
+
     // STEP 10: Filter out lunch break slots (1-2 PM local time)
     const filteredSlots = rawSlots.filter(slot => !isLunchBreakSlot(slot.time));
 
-    console.log(`Lunch break filtering: ${rawSlots.length} raw slots -> ${filteredSlots.length} after filtering`);
+    console.log("  - Slots after lunch break filtering:", filteredSlots.length);
+    console.log("  - Lunch break slots filtered out:", rawSlots.length - filteredSlots.length);
 
     // Create provider lookup map
     const providerLookup = new Map();
@@ -304,6 +365,9 @@ export async function POST(req: NextRequest) {
     // Sort slots by time
     formattedSlots.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
+    console.log("✅ Final result:", formattedSlots.length, "formatted slots ready to return");
+    console.log("=== CHECK SLOTS API - COMPLETED ===");
+
     return NextResponse.json({
       success: true,
       data: {
@@ -317,9 +381,9 @@ export async function POST(req: NextRequest) {
         available_slots: formattedSlots,
         has_availability: formattedSlots.length > 0,
         total_slots_found: formattedSlots.length,
-                  debug_info: {
-            slot_length_used: appointmentType.duration,
-            overlapping_operatory_slots_param: 'false',
+        debug_info: {
+          slot_length_used: appointmentType.duration,
+          overlapping_operatory_slots_param: 'false',
           raw_slots_before_lunch_filter: rawSlots.length,
           slots_after_lunch_filter: filteredSlots.length,
           lunch_break_slots_filtered: rawSlots.length - filteredSlots.length,
@@ -341,7 +405,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error("Error checking appointment slots:", error);
+    console.error("❌ Error checking appointment slots:", error);
     return NextResponse.json(
       { 
         error: "Failed to check appointment slots", 
