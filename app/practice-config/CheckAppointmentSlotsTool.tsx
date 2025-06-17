@@ -184,11 +184,7 @@ export function CheckAppointmentSlotsTool({
       setSlotsData(result.data);
 
       if (result.data.has_availability) {
-        const lunchFiltered = result.data.debug_info.lunch_break_slots_filtered;
-        const successMessage = lunchFiltered > 0 
-          ? `Found ${result.data.total_slots_found} available slot(s)! (${lunchFiltered} lunch break slots filtered)`
-          : `Found ${result.data.total_slots_found} available slot(s)!`;
-        toast.success(successMessage);
+        toast.success(`Found ${result.data.total_slots_found} available slot(s)!`);
       } else {
         toast.info("No available slots found for the selected date and appointment type");
       }
@@ -225,8 +221,8 @@ export function CheckAppointmentSlotsTool({
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-2">Check Appointment Slots</h2>
         <p className="text-gray-600">
-          Check availability for specific appointment types and dates. Uses slot duration instead of appointment type ID, 
-          filters lunch break (1-2 PM), and sets overlapping_operatory_slots=false. Optional filters for providers and operatories.
+          Check availability for specific appointment types and dates. Uses slot duration and 
+          sets overlapping_operatory_slots=false. Optional filters for providers and operatories.
         </p>
       </div>
 
@@ -346,11 +342,6 @@ export function CheckAppointmentSlotsTool({
                 <p className="text-green-600 font-medium">
                   Found {slotsData.total_slots_found} available slot(s)
                 </p>
-                {slotsData.debug_info.lunch_break_slots_filtered > 0 && (
-                  <p className="text-orange-600 text-sm">
-                    {slotsData.debug_info.lunch_break_slots_filtered} lunch break slots filtered (1-2 PM)
-                  </p>
-                )}
               </div>
 
               {/* Slots List */}
@@ -383,8 +374,7 @@ export function CheckAppointmentSlotsTool({
                     </div>
                     <div>
                       <p><strong>Raw slots from NexHealth:</strong> {slotsData.debug_info.raw_slots_before_lunch_filter}</p>
-                      <p><strong>After lunch filtering:</strong> {slotsData.debug_info.slots_after_lunch_filter}</p>
-                      <p><strong>Lunch break slots filtered:</strong> {slotsData.debug_info.lunch_break_slots_filtered}</p>
+                      <p><strong>Slots after filtering:</strong> {slotsData.debug_info.slots_after_lunch_filter}</p>
                     </div>
                   </div>
                   
@@ -419,11 +409,6 @@ export function CheckAppointmentSlotsTool({
           ) : (
             <div className="text-center py-8">
               <p className="text-gray-500 mb-4">No available slots found</p>
-              {slotsData.debug_info.lunch_break_slots_filtered > 0 && (
-                <p className="text-orange-600 text-sm mb-4">
-                  Note: {slotsData.debug_info.lunch_break_slots_filtered} slots were filtered due to lunch break (1-2 PM)
-                </p>
-              )}
               <div className="bg-gray-50 rounded-lg p-4">
                 <h4 className="font-medium text-gray-900 mb-2">Search Summary & API Details</h4>
                 <div className="text-sm text-gray-600 space-y-1">
@@ -436,8 +421,7 @@ export function CheckAppointmentSlotsTool({
                     </div>
                     <div>
                       <p><strong>Raw slots from NexHealth:</strong> {slotsData.debug_info.raw_slots_before_lunch_filter}</p>
-                      <p><strong>After lunch filtering:</strong> {slotsData.debug_info.slots_after_lunch_filter}</p>
-                      <p><strong>Lunch break slots filtered:</strong> {slotsData.debug_info.lunch_break_slots_filtered}</p>
+                      <p><strong>Slots after filtering:</strong> {slotsData.debug_info.slots_after_lunch_filter}</p>
                     </div>
                   </div>
                 </div>
