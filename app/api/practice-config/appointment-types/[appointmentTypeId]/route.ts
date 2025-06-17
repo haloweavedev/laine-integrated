@@ -12,8 +12,16 @@ interface RouteParams {
 }
 
 const updateAppointmentTypeSchema = z.object({
-  name: z.string().min(1, "Name must be a non-empty string").optional(),
-  minutes: z.number().positive("Minutes must be a positive number").optional(),
+  name: z.string()
+    .min(1, "Name must be a non-empty string")
+    .max(100, "Name must be 100 characters or less")
+    .trim()
+    .optional(),
+  minutes: z.number()
+    .int("Minutes must be a whole number")
+    .min(5, "Duration must be at least 5 minutes")
+    .max(480, "Duration must be 8 hours or less")
+    .optional(),
   bookableOnline: z.boolean().optional(),
   groupCode: z.string().nullable().optional(),
   keywords: z.string().nullable().optional()
@@ -106,6 +114,8 @@ export async function PUT(
 
       // Update appointment type in NexHealth (only if there are NexHealth-relevant fields)
       if (Object.keys(nexhealthUpdateData).length > 0) {
+        console.log(`Updating NexHealth appointment type ${localAppointmentType.nexhealthAppointmentTypeId} with data:`, nexhealthUpdateData);
+        
         const nexhealthResponse = await updateNexhealthAppointmentType(
           practice.nexhealthSubdomain,
           localAppointmentType.nexhealthAppointmentTypeId,
@@ -113,7 +123,7 @@ export async function PUT(
           nexhealthUpdateData
         );
 
-        // Update local data with NexHealth response
+        // Update local data with NexHealth response to ensure consistency
         if (nexhealthResponse.name !== localAppointmentType.name) {
           localUpdateData.name = nexhealthResponse.name;
         }
@@ -129,6 +139,8 @@ export async function PUT(
         if (nexhealthResponse.parent_id.toString() !== localAppointmentType.parentId) {
           localUpdateData.parentId = nexhealthResponse.parent_id.toString();
         }
+        
+        console.log(`Successfully updated NexHealth appointment type ${localAppointmentType.nexhealthAppointmentTypeId}`);
       }
 
       // Add groupCode and keywords updates if provided (Laine-specific fields)
@@ -139,7 +151,7 @@ export async function PUT(
         localUpdateData.keywords = keywords;
       }
 
-      // Clear any previous sync errors if we made changes
+      // Clear any previous sync errors on successful update
       if (Object.keys(localUpdateData).length > 0) {
         localUpdateData.lastSyncError = null;
       }
@@ -149,6 +161,8 @@ export async function PUT(
         where: { id: appointmentTypeId },
         data: localUpdateData
       });
+
+      console.log(`Successfully updated local appointment type ${appointmentTypeId}`);
 
       return NextResponse.json({
         success: true,
@@ -169,29 +183,35 @@ export async function PUT(
           data: localOnlyData
         });
 
+        console.log(`Updated local-only fields for appointment type ${appointmentTypeId}`);
+
         return NextResponse.json({
           success: true,
-          appointmentType: updatedLocalAppointmentType
+          appointmentType: updatedLocalAppointmentType,
+          warning: "Only Laine-specific fields were updated. NexHealth synchronization is not affected."
         });
       }
 
       // Update local record with error for NexHealth-related fields
+      const errorMessage = nexhealthError instanceof Error ? nexhealthError.message : 'Unknown NexHealth error';
+      
       await prisma.appointmentType.update({
         where: { id: appointmentTypeId },
         data: {
-          lastSyncError: nexhealthError instanceof Error ? nexhealthError.message : 'Unknown NexHealth error'
+          lastSyncError: errorMessage
         }
       });
 
       return NextResponse.json({
-        error: nexhealthError instanceof Error ? nexhealthError.message : 'Failed to update appointment type in NexHealth'
+        error: `NexHealth API Error: ${errorMessage}`,
+        details: "The appointment type sync error has been logged. Please try again or contact support if the issue persists."
       }, { status: 400 });
     }
 
   } catch (error) {
     console.error("Error updating appointment type:", error);
     return NextResponse.json(
-      { error: "Failed to update appointment type" },
+      { error: "Internal server error while updating appointment type" },
       { status: 500 }
     );
   }
@@ -238,34 +258,46 @@ export async function DELETE(
     }
 
     try {
-      // Delete appointment type from NexHealth
+      console.log(`Deleting appointment type from NexHealth: ${localAppointmentType.nexhealthAppointmentTypeId}`);
+      
+      // Delete appointment type from NexHealth first
       await deleteNexhealthAppointmentType(
         practice.nexhealthSubdomain,
         localAppointmentType.nexhealthAppointmentTypeId,
         practice.nexhealthLocationId
       );
 
-      // Delete appointment type from local database
+      console.log(`Successfully deleted from NexHealth: ${localAppointmentType.nexhealthAppointmentTypeId}`);
+
+      // Delete appointment type from local database only after successful NexHealth deletion
       await prisma.appointmentType.delete({
         where: { id: appointmentTypeId }
       });
 
+      console.log(`Successfully deleted local appointment type: ${appointmentTypeId}`);
+
       return NextResponse.json({
         success: true,
-        message: "Appointment type deleted successfully"
+        message: "Appointment type deleted successfully from both Laine and NexHealth"
       });
 
     } catch (nexhealthError) {
       console.error("Error deleting appointment type from NexHealth:", nexhealthError);
+      
+      // Extract meaningful error message
+      const errorMessage = nexhealthError instanceof Error ? nexhealthError.message : 'Unknown NexHealth error';
+      
+      // Don't delete locally if NexHealth deletion failed to maintain consistency
       return NextResponse.json({
-        error: nexhealthError instanceof Error ? nexhealthError.message : 'Failed to delete appointment type from NexHealth'
+        error: `NexHealth API Error: ${errorMessage}`,
+        details: "Appointment type was not deleted to maintain consistency between Laine and NexHealth. Please try again or contact support if the issue persists."
       }, { status: 400 });
     }
 
   } catch (error) {
     console.error("Error deleting appointment type:", error);
     return NextResponse.json(
-      { error: "Failed to delete appointment type" },
+      { error: "Internal server error while deleting appointment type" },
       { status: 500 }
     );
   }

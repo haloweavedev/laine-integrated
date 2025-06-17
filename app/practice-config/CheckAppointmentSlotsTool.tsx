@@ -60,7 +60,8 @@ interface CheckSlotsResponse {
   data: {
     requested_date: string;
     appointment_type: {
-      id: string;
+      id: string; // Now returns Laine CUID
+      nexhealthAppointmentTypeId?: string; // Optional reference
       name: string;
       duration: number;
     };
@@ -68,12 +69,18 @@ interface CheckSlotsResponse {
     has_availability: boolean;
     total_slots_found: number;
     debug_info: {
+      slot_length_used: number;
+      overlapping_operatory_slots_param: string;
+      raw_slots_before_lunch_filter: number;
+      slots_after_lunch_filter: number;
+      lunch_break_slots_filtered: number;
       providers_checked: number;
       operatories_checked: number;
       providers_used: Array<{
         id: string;
         name: string;
         nexhealthProviderId: string;
+        acceptedAppointmentTypesCount: number;
       }>;
       operatories_used: Array<{
         id: string;
@@ -177,7 +184,11 @@ export function CheckAppointmentSlotsTool({
       setSlotsData(result.data);
 
       if (result.data.has_availability) {
-        toast.success(`Found ${result.data.total_slots_found} available slot(s)!`);
+        const lunchFiltered = result.data.debug_info.lunch_break_slots_filtered;
+        const successMessage = lunchFiltered > 0 
+          ? `Found ${result.data.total_slots_found} available slot(s)! (${lunchFiltered} lunch break slots filtered)`
+          : `Found ${result.data.total_slots_found} available slot(s)!`;
+        toast.success(successMessage);
       } else {
         toast.info("No available slots found for the selected date and appointment type");
       }
@@ -214,7 +225,8 @@ export function CheckAppointmentSlotsTool({
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-2">Check Appointment Slots</h2>
         <p className="text-gray-600">
-          Check availability for specific appointment types and dates. Optional filters for providers and operatories.
+          Check availability for specific appointment types and dates. Uses slot duration instead of appointment type ID, 
+          filters lunch break (1-2 PM), and sets overlapping_operatory_slots=false. Optional filters for providers and operatories.
         </p>
       </div>
 
@@ -330,9 +342,16 @@ export function CheckAppointmentSlotsTool({
 
           {slotsData.has_availability ? (
             <div className="space-y-4">
-              <p className="text-green-600 font-medium">
-                Found {slotsData.total_slots_found} available slot(s)
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-green-600 font-medium">
+                  Found {slotsData.total_slots_found} available slot(s)
+                </p>
+                {slotsData.debug_info.lunch_break_slots_filtered > 0 && (
+                  <p className="text-orange-600 text-sm">
+                    {slotsData.debug_info.lunch_break_slots_filtered} lunch break slots filtered (1-2 PM)
+                  </p>
+                )}
+              </div>
 
               {/* Slots List */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -351,23 +370,76 @@ export function CheckAppointmentSlotsTool({
                 ))}
               </div>
 
-              {/* Debug Info */}
+              {/* Enhanced Debug Info */}
               <div className="bg-gray-50 rounded-lg p-4 mt-6">
-                <h4 className="font-medium text-gray-900 mb-2">Search Summary</h4>
+                <h4 className="font-medium text-gray-900 mb-2">Search Summary & API Details</h4>
                 <div className="text-sm text-gray-600 space-y-1">
-                  <p>Providers checked: {slotsData.debug_info.providers_checked}</p>
-                  <p>Operatories checked: {slotsData.debug_info.operatories_checked}</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p><strong>Slot length used:</strong> {slotsData.debug_info.slot_length_used} minutes</p>
+                      <p><strong>Overlapping operatory slots:</strong> {slotsData.debug_info.overlapping_operatory_slots_param}</p>
+                      <p><strong>Providers checked:</strong> {slotsData.debug_info.providers_checked}</p>
+                      <p><strong>Operatories checked:</strong> {slotsData.debug_info.operatories_checked}</p>
+                    </div>
+                    <div>
+                      <p><strong>Raw slots from NexHealth:</strong> {slotsData.debug_info.raw_slots_before_lunch_filter}</p>
+                      <p><strong>After lunch filtering:</strong> {slotsData.debug_info.slots_after_lunch_filter}</p>
+                      <p><strong>Lunch break slots filtered:</strong> {slotsData.debug_info.lunch_break_slots_filtered}</p>
+                    </div>
+                  </div>
+                  
+                  {slotsData.debug_info.providers_used.length > 0 && (
+                    <div className="mt-3">
+                      <p><strong>Providers used:</strong></p>
+                      <ul className="ml-4 list-disc">
+                        {slotsData.debug_info.providers_used.map((provider) => (
+                          <li key={provider.id}>
+                            {provider.name} (accepts {provider.acceptedAppointmentTypesCount} appointment types)
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {slotsData.debug_info.operatories_used.length > 0 && (
+                    <div className="mt-3">
+                      <p><strong>Operatories used:</strong></p>
+                      <ul className="ml-4 list-disc">
+                        {slotsData.debug_info.operatories_used.map((operatory) => (
+                          <li key={operatory.id}>
+                            {operatory.name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
             <div className="text-center py-8">
               <p className="text-gray-500 mb-4">No available slots found</p>
+              {slotsData.debug_info.lunch_break_slots_filtered > 0 && (
+                <p className="text-orange-600 text-sm mb-4">
+                  Note: {slotsData.debug_info.lunch_break_slots_filtered} slots were filtered due to lunch break (1-2 PM)
+                </p>
+              )}
               <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="font-medium text-gray-900 mb-2">Search Summary</h4>
+                <h4 className="font-medium text-gray-900 mb-2">Search Summary & API Details</h4>
                 <div className="text-sm text-gray-600 space-y-1">
-                  <p>Providers checked: {slotsData.debug_info.providers_checked}</p>
-                  <p>Operatories checked: {slotsData.debug_info.operatories_checked}</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p><strong>Slot length used:</strong> {slotsData.debug_info.slot_length_used} minutes</p>
+                      <p><strong>Overlapping operatory slots:</strong> {slotsData.debug_info.overlapping_operatory_slots_param}</p>
+                      <p><strong>Providers checked:</strong> {slotsData.debug_info.providers_checked}</p>
+                      <p><strong>Operatories checked:</strong> {slotsData.debug_info.operatories_checked}</p>
+                    </div>
+                    <div>
+                      <p><strong>Raw slots from NexHealth:</strong> {slotsData.debug_info.raw_slots_before_lunch_filter}</p>
+                      <p><strong>After lunch filtering:</strong> {slotsData.debug_info.slots_after_lunch_filter}</p>
+                      <p><strong>Lunch break slots filtered:</strong> {slotsData.debug_info.lunch_break_slots_filtered}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

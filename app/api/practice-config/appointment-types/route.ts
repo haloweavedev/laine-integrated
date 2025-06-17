@@ -5,8 +5,14 @@ import { createNexhealthAppointmentType } from "@/lib/nexhealth";
 import { z } from "zod";
 
 const createAppointmentTypeSchema = z.object({
-  name: z.string().min(1, "Name is required and must be a non-empty string"),
-  minutes: z.number().positive("Minutes must be a positive number"),
+  name: z.string()
+    .min(1, "Name is required and must be a non-empty string")
+    .max(100, "Name must be 100 characters or less")
+    .trim(),
+  minutes: z.number()
+    .int("Minutes must be a whole number")
+    .min(5, "Duration must be at least 5 minutes")
+    .max(480, "Duration must be 8 hours or less"),
   bookableOnline: z.boolean().optional().default(true),
   groupCode: z.string().nullable().optional(),
   keywords: z.string().nullable().optional()
@@ -82,7 +88,7 @@ export async function POST(req: NextRequest) {
     const { name, minutes, bookableOnline, groupCode, keywords } = validationResult.data;
 
     try {
-      // Create appointment type in NexHealth (groupCode is Laine-specific, not sent to NexHealth)
+      // Create appointment type in NexHealth (groupCode and keywords are Laine-specific, not sent to NexHealth)
       const nexhealthResponse = await createNexhealthAppointmentType(
         practice.nexhealthSubdomain,
         practice.nexhealthLocationId,
@@ -95,7 +101,7 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      // Create appointment type in local database with groupCode and keywords
+      // Create appointment type in local database with all data from NexHealth response plus Laine-specific fields
       const localAppointmentType = await prisma.appointmentType.create({
         data: {
           practiceId: practice.id,
@@ -103,12 +109,15 @@ export async function POST(req: NextRequest) {
           name: nexhealthResponse.name,
           duration: nexhealthResponse.minutes,
           bookableOnline: nexhealthResponse.bookable_online,
-          groupCode, // Store the Laine-specific group code
-          keywords, // Store the Laine-specific keywords
+          groupCode: groupCode || null, // Store the Laine-specific group code
+          keywords: keywords || null, // Store the Laine-specific keywords
           parentType: nexhealthResponse.parent_type,
-          parentId: nexhealthResponse.parent_id.toString()
+          parentId: nexhealthResponse.parent_id.toString(),
+          lastSyncError: null // Start with no sync errors
         }
       });
+
+      console.log(`Successfully created appointment type: ${localAppointmentType.name} (Local ID: ${localAppointmentType.id}, NexHealth ID: ${nexhealthResponse.id})`);
 
       return NextResponse.json({
         success: true,
@@ -117,15 +126,21 @@ export async function POST(req: NextRequest) {
 
     } catch (nexhealthError) {
       console.error("Error creating appointment type in NexHealth:", nexhealthError);
+      
+      // Extract meaningful error message
+      const errorMessage = nexhealthError instanceof Error 
+        ? nexhealthError.message 
+        : 'Failed to create appointment type in NexHealth';
+      
       return NextResponse.json({
-        error: nexhealthError instanceof Error ? nexhealthError.message : 'Failed to create appointment type in NexHealth'
+        error: `NexHealth API Error: ${errorMessage}`
       }, { status: 400 });
     }
 
   } catch (error) {
     console.error("Error creating appointment type:", error);
     return NextResponse.json(
-      { error: "Failed to create appointment type" },
+      { error: "Internal server error while creating appointment type" },
       { status: 500 }
     );
   }

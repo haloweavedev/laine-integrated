@@ -27,6 +27,7 @@ interface Practice {
     bookableOnline: boolean | null;
     groupCode: string | null;
     keywords: string | null;
+    lastSyncError: string | null;
     createdAt: string;
     updatedAt: string;
   }>;

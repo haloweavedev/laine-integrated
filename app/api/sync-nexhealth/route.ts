@@ -1,16 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAppointmentTypes, getProviders, getOperatories } from "@/lib/nexhealth";
-
-interface NexHealthAppointmentType {
-  id: number;
-  name: string;
-  minutes: number;
-  parent_type: string;
-  parent_id: number;
-  bookable_online: boolean;
-}
+import { getProviders, getOperatories } from "@/lib/nexhealth";
 
 interface NexHealthProvider {
   id: number;
@@ -22,6 +13,13 @@ interface NexHealthProvider {
   npi?: string;
   specialty_code?: string;
   nexhealth_specialty?: string;
+}
+
+interface NexHealthOperatory {
+  id: number;
+  name?: string;
+  active?: boolean;
+  location_id?: number;
 }
 
 export async function POST() {
@@ -47,38 +45,25 @@ export async function POST() {
       );
     }
 
-    // Fetch data from NexHealth (including operatories)
-    const [appointmentTypes, providers, operatories] = await Promise.all([
-      getAppointmentTypes(practice.nexhealthSubdomain, practice.nexhealthLocationId),
+    console.log(`Starting sync for practice ${practice.id} with NexHealth subdomain: ${practice.nexhealthSubdomain}, location: ${practice.nexhealthLocationId}`);
+
+    // Fetch data from NexHealth (excluding appointment types - now managed directly in Laine)
+    const [providers, operatories] = await Promise.all([
       getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
       getOperatories(practice.nexhealthSubdomain, practice.nexhealthLocationId),
     ]);
 
-    // Sync appointment types - use 'minutes' from NexHealth API
-    const appointmentTypePromises = appointmentTypes.map((type: NexHealthAppointmentType) =>
-      prisma.appointmentType.upsert({
-        where: {
-          practiceId_nexhealthAppointmentTypeId: {
-            practiceId: practice.id,
-            nexhealthAppointmentTypeId: type.id.toString(),
-          },
-        },
-        update: {
-          name: type.name,
-          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
-        },
-        create: {
-          practiceId: practice.id,
-          nexhealthAppointmentTypeId: type.id.toString(),
-          name: type.name,
-          duration: type.minutes || 0, // Use 'minutes' from NexHealth API
-        },
-      })
-    );
+    console.log(`Fetched ${providers.length} providers and ${operatories.length} operatories from NexHealth`);
+
+    // Track sync results
+    let providersCreated = 0;
+    let providersUpdated = 0;
+    let operatoriesCreated = 0;
+    let operatoriesUpdated = 0;
 
     // Sync providers
-    const providerPromises = providers.map((provider: NexHealthProvider) =>
-      prisma.provider.upsert({
+    const providerPromises = providers.map(async (provider: NexHealthProvider) => {
+      const result = await prisma.provider.upsert({
         where: {
           practiceId_nexhealthProviderId: {
             practiceId: practice.id,
@@ -95,47 +80,96 @@ export async function POST() {
           firstName: provider.first_name || null,
           lastName: provider.last_name || provider.name || "Unknown",
         },
-      })
-    );
+      });
 
-    // Sync operatories (NEW)
-    const operatoryPromises = operatories.map((operatory: { id: number; name?: string; active?: boolean }) =>
-      prisma.savedOperatory.upsert({
+      // Check if this was a create or update operation by checking if the record was just created
+      const existingProvider = await prisma.provider.findFirst({
         where: {
-          practiceId_nexhealthOperatoryId: {
-            practiceId: practice.id,
-            nexhealthOperatoryId: operatory.id.toString(),
-          },
-        },
-        update: {
-          name: operatory.name || `Operatory ${operatory.id}`,
-          isActive: operatory.active !== false, // Default to true unless explicitly false
-        },
-        create: {
+          practiceId: practice.id,
+          nexhealthProviderId: provider.id.toString(),
+          createdAt: { gte: new Date(Date.now() - 1000) } // Created within last second
+        }
+      });
+
+      if (existingProvider && existingProvider.createdAt > new Date(Date.now() - 1000)) {
+        providersCreated++;
+      } else {
+        providersUpdated++;
+      }
+
+      return result;
+    });
+
+    // Sync operatories with refined logic for newly created vs updated
+    const operatoryPromises = operatories.map(async (operatory: NexHealthOperatory) => {
+      // First check if operatory already exists
+      const existingOperatory = await prisma.savedOperatory.findFirst({
+        where: {
           practiceId: practice.id,
           nexhealthOperatoryId: operatory.id.toString(),
-          name: operatory.name || `Operatory ${operatory.id}`,
-          isActive: operatory.active !== false,
-        },
-      })
-    );
+        }
+      });
 
-    // Execute all upserts (including operatories)
-    await Promise.all([...appointmentTypePromises, ...providerPromises, ...operatoryPromises]);
+      if (existingOperatory) {
+        // Update existing operatory - keep existing isActive status
+        const result = await prisma.savedOperatory.update({
+          where: { id: existingOperatory.id },
+          data: {
+            name: operatory.name || `Operatory ${operatory.id}`,
+            // Keep existing isActive status for updates
+          }
+        });
+        operatoriesUpdated++;
+        return result;
+      } else {
+        // Create new operatory - default to isActive: false for new operatories
+        const result = await prisma.savedOperatory.create({
+          data: {
+            practiceId: practice.id,
+            nexhealthOperatoryId: operatory.id.toString(),
+            name: operatory.name || `Operatory ${operatory.id}`,
+            isActive: false, // New operatories default to inactive until explicitly configured
+          }
+        });
+        operatoriesCreated++;
+        return result;
+      }
+    });
+
+    // Execute all upserts
+    await Promise.all([...providerPromises, ...operatoryPromises]);
+
+    console.log(`Sync completed: ${providersCreated} providers created, ${providersUpdated} providers updated, ${operatoriesCreated} operatories created, ${operatoriesUpdated} operatories updated`);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully synced ${appointmentTypes.length} appointment types, ${providers.length} providers, and ${operatories.length} operatories.`,
+      message: `Successfully synced ${providers.length} providers and ${operatories.length} operatories. Note: Appointment types are now managed directly in Laine.`,
       data: {
-        appointmentTypesCount: appointmentTypes.length,
         providersCount: providers.length,
         operatoriesCount: operatories.length,
+        details: {
+          providers: {
+            created: providersCreated,
+            updated: providersUpdated
+          },
+          operatories: {
+            created: operatoriesCreated,
+            updated: operatoriesUpdated
+          }
+        }
       },
     });
   } catch (error) {
     console.error("Error syncing NexHealth data:", error);
+    
+    // Provide more specific error messages
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    
     return NextResponse.json(
-      { error: "Failed to sync NexHealth data. Please check your configuration and try again." },
+      { 
+        error: "Failed to sync NexHealth data. Please check your configuration and try again.",
+        details: errorMessage
+      },
       { status: 500 }
     );
   }

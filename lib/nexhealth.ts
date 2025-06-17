@@ -516,7 +516,7 @@ export async function deleteNexhealthAppointmentType(
   console.log(`Deleted NexHealth appointment type ${nexhealthAppointmentTypeId}:`, response);
 }
 
-// Sync function for appointment types
+// @deprecated: Appointment types are now managed directly in Laine and pushed to NexHealth. Syncing from NexHealth is no longer supported for appointment types.
 export async function syncPracticeAppointmentTypes(
   practiceId: string,
   subdomain: string,

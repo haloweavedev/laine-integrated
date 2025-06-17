@@ -96,21 +96,21 @@ export function ProvidersConfig({
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
-            Active
+            Active in Laine
           </span>
         );
       case 'inactive':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
             <div className="w-1.5 h-1.5 bg-amber-500 rounded-full"></div>
-            Inactive
+            Inactive in Laine
           </span>
         );
       case 'unconfigured':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
             <div className="w-1.5 h-1.5 bg-slate-400 rounded-full"></div>
-            Unconfigured
+            Not Configured
           </span>
         );
     }
@@ -192,10 +192,14 @@ export function ProvidersConfig({
           return;
         }
 
+        const result = await response.json();
+        toast.success(`Provider activated successfully! ${result.message || ''}`);
+        
         // Refresh data to get the new SavedProvider record
         onUpdate();
         
-        // Initialize empty settings for new provider
+        // Initialize default settings for new provider (active with no assignments)
+        // The user will need to configure operatories before the provider can be truly active
         setProviderSettings(prev => ({
           ...prev,
           [provider.id]: {
@@ -205,6 +209,7 @@ export function ProvidersConfig({
           }
         }));
         
+        // Expand to show settings immediately
         setExpandedProvider(provider.id);
         
       } catch (error) {
@@ -214,29 +219,9 @@ export function ProvidersConfig({
         setLoading(prev => ({ ...prev, [provider.id]: false }));
       }
     } else if (savedProvider) {
-      // For existing saved providers, expand and fetch settings
-      const settingsKey = savedProvider.id;
-      
-      if (expandedProvider === provider.id) {
-        setExpandedProvider(null);
-      } else {
-        setExpandedProvider(provider.id);
-        
-        // Pre-set isActive to true for inactive providers being re-configured
-        if (status === 'inactive') {
-          setProviderSettings(prev => ({
-            ...prev,
-            [settingsKey]: {
-              ...prev[settingsKey],
-              isActive: true
-            }
-          }));
-        }
-        
-        if (!providerSettings[settingsKey]) {
-          await fetchProviderSettings(settingsKey);
-        }
-      }
+      // For existing providers, fetch their settings and expand
+      await fetchProviderSettings(savedProvider.id);
+      setExpandedProvider(provider.id);
     }
   };
 
@@ -251,29 +236,63 @@ export function ProvidersConfig({
   };
 
   const handleAcceptedTypesChange = (settingsKey: string, appointmentTypeId: string, checked: boolean) => {
-    const currentSettings = providerSettings[settingsKey];
-    let newAcceptedTypes: string[];
+    const currentSettings = providerSettings[settingsKey] || { acceptedAppointmentTypeIds: [], assignedOperatoryIds: [] };
+    const currentTypes = currentSettings.acceptedAppointmentTypeIds || [];
     
-    if (checked) {
-      newAcceptedTypes = [...(currentSettings?.acceptedAppointmentTypeIds || []), appointmentTypeId];
-    } else {
-      newAcceptedTypes = (currentSettings?.acceptedAppointmentTypeIds || []).filter(id => id !== appointmentTypeId);
-    }
+    const updatedTypes = checked 
+      ? [...currentTypes, appointmentTypeId]
+      : currentTypes.filter(id => id !== appointmentTypeId);
     
-    updateProviderSetting(settingsKey, 'acceptedAppointmentTypeIds', newAcceptedTypes);
+    updateProviderSetting(settingsKey, 'acceptedAppointmentTypeIds', updatedTypes);
   };
 
   const handleOperatoryAssignmentChange = (settingsKey: string, operatoryId: string, checked: boolean) => {
-    const currentSettings = providerSettings[settingsKey];
-    let newAssignedOperatories: string[];
+    const currentSettings = providerSettings[settingsKey] || { acceptedAppointmentTypeIds: [], assignedOperatoryIds: [] };
+    const currentOperatories = currentSettings.assignedOperatoryIds || [];
     
-    if (checked) {
-      newAssignedOperatories = [...(currentSettings?.assignedOperatoryIds || []), operatoryId];
-    } else {
-      newAssignedOperatories = (currentSettings?.assignedOperatoryIds || []).filter(id => id !== operatoryId);
+    const updatedOperatories = checked 
+      ? [...currentOperatories, operatoryId]
+      : currentOperatories.filter(id => id !== operatoryId);
+    
+    updateProviderSetting(settingsKey, 'assignedOperatoryIds', updatedOperatories);
+  };
+
+  // Enhanced error handling function
+  const handleErrorResponse = (errorData: { error?: string; details?: string | Array<{ path: string[], message: string }>; code?: string }): string => {
+    let errorMessage = errorData.error || 'Unknown operation failed';
+    
+    // Handle specific error codes
+    if (errorData.code === 'MANDATORY_OPERATORY_REQUIRED') {
+      return errorData.error || 'Active providers must have at least one operatory assigned';
     }
     
-    updateProviderSetting(settingsKey, 'assignedOperatoryIds', newAssignedOperatories);
+    // If there are validation details, include them
+    if (errorData.details && Array.isArray(errorData.details)) {
+      const detailMessages = errorData.details.map((d: { path: string[], message: string }) => 
+        `${d.path.join('.')}: ${d.message}`
+      ).join('; ');
+      errorMessage += ` (${detailMessages})`;
+    }
+    
+    // If there are additional details, include them
+    if (errorData.details && typeof errorData.details === 'string') {
+      errorMessage += ` - ${errorData.details}`;
+    }
+    
+    return errorMessage;
+  };
+
+  // Client-side validation
+  const validateProviderSettings = (settings: ProviderSettings): { isValid: boolean; error?: string } => {
+    // Check if provider is being set to active without operatories
+    if (settings.isActive === true && (!settings.assignedOperatoryIds || settings.assignedOperatoryIds.length === 0)) {
+      return { 
+        isValid: false, 
+        error: 'Active providers must be assigned at least one operatory. Please select at least one operatory before activating this provider.' 
+      };
+    }
+    
+    return { isValid: true };
   };
 
   const saveProviderSettings = async (providerWithStatus: ProviderWithStatus) => {
@@ -288,6 +307,13 @@ export function ProvidersConfig({
     const settingsKey = savedProvider.id;
     const settings = providerSettings[settingsKey];
     if (!settings) return;
+
+    // Client-side validation
+    const validation = validateProviderSettings(settings);
+    if (!validation.isValid) {
+      toast.error(validation.error || 'Invalid settings');
+      return;
+    }
 
     const payload = {
       acceptedAppointmentTypeIds: Array.isArray(settings.acceptedAppointmentTypeIds) ? settings.acceptedAppointmentTypeIds : [],
@@ -306,19 +332,16 @@ export function ProvidersConfig({
       });
 
       if (response.ok) {
-        toast.success('Provider settings saved successfully!');
+        const result = await response.json();
+        toast.success(result.message || 'Provider settings saved successfully!');
         onUpdate();
         setExpandedProvider(null);
       } else {
         const error = await response.json();
         console.error('❌ API Error Response:', error);
         
-        if (error.issues && Array.isArray(error.issues)) {
-          const errorMessages = error.issues.map((issue: { path: string; message: string }) => `${issue.path}: ${issue.message}`).join(', ');
-          toast.error(`Validation failed: ${errorMessages}`);
-        } else {
-          toast.error(`Failed to save: ${error.error || 'Unknown error'}`);
-        }
+        const errorMessage = handleErrorResponse(error);
+        toast.error(errorMessage);
       }
     } catch (error) {
       console.error('Error saving provider settings:', error);
@@ -337,11 +360,19 @@ export function ProvidersConfig({
 
       if (response.ok) {
         const result = await response.json();
-        toast.success(`Successfully synced ${result.data.providersCount} providers and ${result.data.operatoriesCount} operatories!`);
+        const details = result.data?.details;
+        let successMessage = `Successfully synced ${result.data.providersCount} providers and ${result.data.operatoriesCount} operatories!`;
+        
+        if (details) {
+          successMessage += ` (Providers: ${details.providers.created} new, ${details.providers.updated} updated; Operatories: ${details.operatories.created} new, ${details.operatories.updated} updated)`;
+        }
+        
+        toast.success(successMessage);
         onUpdate();
       } else {
         const error = await response.json();
-        toast.error(`Sync failed: ${error.error || 'Unknown error'}`);
+        const errorMessage = handleErrorResponse(error);
+        toast.error(`Sync failed: ${errorMessage}`);
       }
     } catch (error) {
       console.error('Error syncing with NexHealth:', error);
@@ -349,6 +380,15 @@ export function ProvidersConfig({
     } finally {
       setSyncLoading(false);
     }
+  };
+
+  // Check if save button should be disabled
+  const isSaveDisabled = (settingsKey: string): boolean => {
+    const settings = providerSettings[settingsKey];
+    if (!settings) return false;
+    
+    // Disable if provider is set to active but has no operatories assigned
+    return settings.isActive === true && (!settings.assignedOperatoryIds || settings.assignedOperatoryIds.length === 0);
   };
 
   const renderProviderSettings = (providerWithStatus: ProviderWithStatus) => {
@@ -368,6 +408,10 @@ export function ProvidersConfig({
       );
     }
 
+    const isActiveProvider = providerSettings[settingsKey]?.isActive === true;
+    const hasOperatories = providerSettings[settingsKey]?.assignedOperatoryIds?.length > 0;
+    const showOperatoryWarning = isActiveProvider && !hasOperatories;
+
     return (
       <div className="space-y-8">
         {/* Laine Status Toggle */}
@@ -375,7 +419,20 @@ export function ProvidersConfig({
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-sm font-semibold text-slate-900 mb-1">Laine Status</h4>
-              <p className="text-xs text-slate-600">Control whether this provider is active in Laine</p>
+              <p className="text-xs text-slate-600">Control whether this provider is available for AI scheduling in Laine</p>
+              {showOperatoryWarning && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <svg className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <div>
+                      <p className="text-xs font-medium text-amber-800">Operatory Assignment Required</p>
+                      <p className="text-xs text-amber-700">Active providers must be assigned at least one operatory to be available for scheduling.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
@@ -399,22 +456,32 @@ export function ProvidersConfig({
             <p className="text-xs text-slate-600">Select which appointment types this provider can handle</p>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {allAppointmentTypes.map((appointmentType) => (
-                <label key={appointmentType.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all duration-200">
-                  <input
-                    type="checkbox"
-                    checked={providerSettings[settingsKey]?.acceptedAppointmentTypeIds.includes(appointmentType.id) || false}
-                    onChange={(e) => handleAcceptedTypesChange(settingsKey, appointmentType.id, e.target.checked)}
-                    className="mt-0.5 w-4 h-4 text-blue-600 bg-white border-slate-300 rounded focus:ring-blue-500 focus:ring-2"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-slate-900 block">{appointmentType.name}</span>
-                    <span className="text-xs text-slate-500">{appointmentType.duration} minutes</span>
-                  </div>
-                </label>
-              ))}
-            </div>
+            {allAppointmentTypes.length === 0 ? (
+              <div className="text-center py-8">
+                <svg className="w-12 h-12 text-slate-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                <p className="text-sm text-slate-500 mb-2">No appointment types available</p>
+                <p className="text-xs text-slate-400">Create appointment types first to assign them to providers</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {allAppointmentTypes.map((appointmentType) => (
+                  <label key={appointmentType.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 cursor-pointer transition-all duration-200">
+                    <input
+                      type="checkbox"
+                      checked={providerSettings[settingsKey]?.acceptedAppointmentTypeIds.includes(appointmentType.id) || false}
+                      onChange={(e) => handleAcceptedTypesChange(settingsKey, appointmentType.id, e.target.checked)}
+                      className="mt-0.5 w-4 h-4 text-blue-600 bg-white border-slate-300 rounded focus:ring-blue-500 focus:ring-2"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-slate-900 block">{appointmentType.name}</span>
+                      <span className="text-xs text-slate-500">{appointmentType.duration} minutes</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -422,25 +489,35 @@ export function ProvidersConfig({
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="px-6 py-4 bg-gradient-to-r from-emerald-50 to-teal-50 border-b border-slate-200">
             <h4 className="text-sm font-semibold text-slate-900 mb-1">Assigned Operatories</h4>
-            <p className="text-xs text-slate-600">Choose which operatories this provider can use</p>
+            <p className="text-xs text-slate-600">Choose which operatories this provider can use for appointments</p>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {allOperatories.filter(op => op.isActive).map((operatory) => (
-                <label key={operatory.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 cursor-pointer transition-all duration-200">
-                  <input
-                    type="checkbox"
-                    checked={providerSettings[settingsKey]?.assignedOperatoryIds.includes(operatory.id) || false}
-                    onChange={(e) => handleOperatoryAssignmentChange(settingsKey, operatory.id, e.target.checked)}
-                    className="mt-0.5 w-4 h-4 text-emerald-600 bg-white border-slate-300 rounded focus:ring-emerald-500 focus:ring-2"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-slate-900 block">{operatory.name}</span>
-                    <span className="text-xs text-slate-500">ID: {operatory.nexhealthOperatoryId}</span>
-                  </div>
-                </label>
-              ))}
-            </div>
+            {allOperatories.filter(op => op.isActive).length === 0 ? (
+              <div className="text-center py-8">
+                <svg className="w-12 h-12 text-slate-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-4m-5 0H9m0 0H5m0 0h2M7 8h10M7 12h4m1 8l2-2 2 2" />
+                </svg>
+                <p className="text-sm text-slate-500 mb-2">No active operatories available</p>
+                <p className="text-xs text-slate-400">Sync with NexHealth to import operatories, then activate them for assignment</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {allOperatories.filter(op => op.isActive).map((operatory) => (
+                  <label key={operatory.id} className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 cursor-pointer transition-all duration-200">
+                    <input
+                      type="checkbox"
+                      checked={providerSettings[settingsKey]?.assignedOperatoryIds.includes(operatory.id) || false}
+                      onChange={(e) => handleOperatoryAssignmentChange(settingsKey, operatory.id, e.target.checked)}
+                      className="mt-0.5 w-4 h-4 text-emerald-600 bg-white border-slate-300 rounded focus:ring-emerald-500 focus:ring-2"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-slate-900 block">{operatory.name}</span>
+                      <span className="text-xs text-slate-500">ID: {operatory.nexhealthOperatoryId}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -457,8 +534,13 @@ export function ProvidersConfig({
           </button>
           <button
             onClick={() => saveProviderSettings(providerWithStatus)}
-            disabled={loading[provider.id]}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={loading[provider.id] || isSaveDisabled(settingsKey)}
+            className={`inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+              isSaveDisabled(settingsKey) 
+                ? 'bg-slate-400 text-white' 
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+            title={isSaveDisabled(settingsKey) ? 'Please assign at least one operatory to activate this provider' : ''}
           >
             {loading[provider.id] ? (
               <>
@@ -615,7 +697,7 @@ export function ProvidersConfig({
                     </div>
                   </div>
 
-                  {/* Expanded Settings Panel */}
+                  {/* Expanded Settings */}
                   {isExpanded && (
                     <div className="border-t border-slate-200 bg-slate-50">
                       <div className="p-8">

@@ -8,8 +8,12 @@ interface RouteParams {
 }
 
 const updateProviderSettingsSchema = z.object({
-  acceptedAppointmentTypeIds: z.array(z.string()).optional(),
-  assignedOperatoryIds: z.array(z.string()).optional(),
+  acceptedAppointmentTypeIds: z.array(z.string().cuid("Invalid appointment type ID format"))
+    .optional()
+    .transform(arr => arr || []),
+  assignedOperatoryIds: z.array(z.string().cuid("Invalid operatory ID format"))
+    .optional()
+    .transform(arr => arr || []),
   isActive: z.boolean().optional()
 });
 
@@ -129,7 +133,7 @@ export async function PUT(
       console.error('❌ Validation failed:', validationResult.error.issues);
       return NextResponse.json({
         error: "Validation failed",
-        issues: validationResult.error.issues.map(issue => ({
+        details: validationResult.error.issues.map(issue => ({
           path: issue.path.join('.'),
           message: issue.message,
           code: issue.code
@@ -152,6 +156,9 @@ export async function PUT(
       where: {
         id: savedProviderId,
         practiceId: practice.id
+      },
+      include: {
+        assignedOperatories: true // Include current operatories for validation
       }
     });
 
@@ -162,7 +169,7 @@ export async function PUT(
     }
 
     // Validate appointment type IDs belong to practice if provided
-    if (acceptedAppointmentTypeIds && acceptedAppointmentTypeIds.length > 0) {
+    if (acceptedAppointmentTypeIds.length > 0) {
       const validAppointmentTypes = await prisma.appointmentType.findMany({
         where: {
           id: { in: acceptedAppointmentTypeIds },
@@ -171,14 +178,17 @@ export async function PUT(
       });
 
       if (validAppointmentTypes.length !== acceptedAppointmentTypeIds.length) {
+        const foundIds = validAppointmentTypes.map(at => at.id);
+        const invalidIds = acceptedAppointmentTypeIds.filter(id => !foundIds.includes(id));
         return NextResponse.json({
-          error: "Some appointment types don't belong to this practice"
+          error: "Some appointment types don't belong to this practice",
+          details: `Invalid appointment type IDs: ${invalidIds.join(', ')}`
         }, { status: 400 });
       }
     }
 
     // Validate assigned operatory IDs belong to practice if provided
-    if (assignedOperatoryIds && assignedOperatoryIds.length > 0) {
+    if (assignedOperatoryIds.length > 0) {
       const validOperatories = await prisma.savedOperatory.findMany({
         where: {
           id: { in: assignedOperatoryIds },
@@ -188,14 +198,30 @@ export async function PUT(
       });
 
       if (validOperatories.length !== assignedOperatoryIds.length) {
+        const foundIds = validOperatories.map(op => op.id);
+        const invalidIds = assignedOperatoryIds.filter(id => !foundIds.includes(id));
         return NextResponse.json({
-          error: "Some operatories don't belong to this practice or are not active"
+          error: "Some operatories don't belong to this practice or are not active",
+          details: `Invalid or inactive operatory IDs: ${invalidIds.join(', ')}`
         }, { status: 400 });
       }
     }
 
     // Use transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
+      // MANDATORY OPERATORY ASSIGNMENT VALIDATION
+      // If isActive is being set to true, ensure operatories are assigned
+      if (isActive === true) {
+        // Check what operatories will be assigned after this update
+        const finalOperatoryIds = assignedOperatoryIds.length > 0 
+          ? assignedOperatoryIds 
+          : savedProvider.assignedOperatories.map(ao => ao.savedOperatoryId);
+        
+        if (finalOperatoryIds.length === 0) {
+          throw new Error("An active provider must be assigned at least one operatory. Please assign at least one operatory before activating this provider.");
+        }
+      }
+
       // Update SavedProvider record if isActive is provided
       if (isActive !== undefined) {
         await tx.savedProvider.update({
@@ -204,7 +230,7 @@ export async function PUT(
         });
       }
 
-      // Manage accepted appointment types if provided
+      // Manage accepted appointment types
       if (acceptedAppointmentTypeIds !== undefined) {
         // Delete existing associations
         await tx.providerAcceptedAppointmentType.deleteMany({
@@ -222,7 +248,7 @@ export async function PUT(
         }
       }
 
-      // Manage assigned operatories if provided
+      // Manage assigned operatories
       if (assignedOperatoryIds !== undefined) {
         // Delete existing operatory assignments
         await tx.providerOperatoryAssignment.deleteMany({
@@ -280,18 +306,44 @@ export async function PUT(
       }
     });
 
+    console.log(`✅ Provider settings updated successfully for ${savedProviderId}`);
+
     return NextResponse.json({
       success: true,
+      message: "Provider settings updated successfully",
       provider: {
-        ...responseData,
-        acceptedAppointmentTypes: responseData?.acceptedAppointmentTypes.map(relation => relation.appointmentType)
+        id: responseData?.id,
+        provider: responseData?.provider,
+        isActive: responseData?.isActive,
+        acceptedAppointmentTypes: responseData?.acceptedAppointmentTypes.map(relation => relation.appointmentType) || [],
+        assignedOperatories: responseData?.assignedOperatories?.map(assignment => assignment.savedOperatory) || [],
+        createdAt: responseData?.createdAt,
+        updatedAt: responseData?.updatedAt
       }
     });
 
   } catch (error) {
     console.error("Error updating provider settings:", error);
+    
+    // Handle specific business logic errors
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    
+    // Check if it's a mandatory operatory assignment error
+    if (errorMessage.includes('operatory')) {
+      return NextResponse.json(
+        { 
+          error: errorMessage,
+          code: 'MANDATORY_OPERATORY_REQUIRED'
+        },
+        { status: 400 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: "Failed to update provider settings" },
+      { 
+        error: "Failed to update provider settings",
+        details: errorMessage
+      },
       { status: 500 }
     );
   }
