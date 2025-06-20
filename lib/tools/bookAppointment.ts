@@ -23,8 +23,40 @@ export const bookAppointmentSchema = z.object({
 
 const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
   name: "book_appointment",
-  description: "Books the actual appointment after patient selects a specific time from available slots. Use after showing available slots and getting patient's time preference.",
+  description: `
+    Books the appointment in the EHR system once all details are confirmed.
+    CRITICAL: Only call this tool as the FINAL step in the booking process.
+    WHEN TO USE: Call this tool AFTER:
+    1. Patient identity is confirmed (via 'find_patient_in_ehr' or 'create_new_patient', providing a 'patientId').
+    2. Appointment type is determined (via 'find_appointment_type', providing an 'appointmentTypeId' and 'durationMinutes').
+    3. Available slots were checked (via 'check_available_slots') and the patient has explicitly selected a 'selectedTime' from those options for a specific 'requestedDate'.
+    REQUIRED INPUTS: 'selectedTime' (e.g., "8:00 AM"), 'patientId', 'appointmentTypeId', 'requestedDate' (YYYY-MM-DD), 'durationMinutes'.
+    OUTPUTS: On success, confirms the booking and returns 'appointment_id', 'booked_date', 'booked_time', etc.
+    DO NOT CALL if any of the required inputs are missing or if the preceding steps have not been completed.
+  `.trim(),
   schema: bookAppointmentSchema,
+  prerequisites: [
+    {
+      argName: 'patientId',
+      askUserMessage: "To book this appointment, I'll need to confirm your patient details. Could you please spell out your full name and provide your date of birth?"
+    },
+    {
+      argName: 'appointmentTypeId',
+      askUserMessage: "And what type of appointment are we booking today?"
+    },
+    {
+      argName: 'requestedDate',
+      askUserMessage: "For which date are we scheduling this appointment?"
+    },
+    {
+      argName: 'selectedTime',
+      askUserMessage: "And what time did you decide on for the appointment?"
+    },
+    {
+      argName: 'durationMinutes',
+      askUserMessage: "I also need to confirm the appointment duration. What type of service was this for again?"
+    }
+  ],
   
   async run({ args, context }): Promise<ToolResult> {
     const { practice, vapiCallId, callSummaryForNote } = context;
@@ -33,7 +65,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I can't book appointments right now. Please contact the office directly."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "Missing practice configuration"
       };
     }
 
@@ -41,7 +74,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       return {
         success: false,
         error_code: "NO_SAVED_PROVIDERS",
-        message_to_patient: "I need to assign a provider but none are configured. Please contact the office to complete your booking."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "No providers configured"
       };
     }
 
@@ -53,7 +87,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
         return {
           success: false,
           error_code: "INVALID_PATIENT_ID",
-          message_to_patient: "I need to verify your patient information before booking. Let me help you with that first.",
+          message_to_patient: "", // Will be filled by dynamic generation
           details: `Invalid patient ID provided: ${args.patientId}`
         };
       }
@@ -63,7 +97,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
         return {
           success: false,
           error_code: "INVALID_PATIENT_ID_FORMAT",
-          message_to_patient: "There's an issue with your patient record. Please contact the office to complete your booking.",
+          message_to_patient: "", // Will be filled by dynamic generation
           details: `Patient ID must be numeric, received: ${args.patientId}`
         };
       }
@@ -74,7 +108,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       return {
          success: false,
          error_code: "INVALID_TIME_FORMAT",
-         message_to_patient: `I didn't quite catch that time. Could you please choose from the available times I mentioned?`
+         message_to_patient: "", // Will be filled by dynamic generation
+         details: "Invalid time format provided"
        };
      }
 
@@ -85,7 +120,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        return {
          success: false,
          error_code: "NO_ACTIVE_PROVIDERS",
-         message_to_patient: "I need to assign a provider but none are available. Please contact the office to complete your booking."
+         message_to_patient: "", // Will be filled by dynamic generation
+         details: "No active providers"
        };
      }
 
@@ -110,7 +146,10 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        return {
          success: false,
          error_code: "NO_PROVIDERS_FOR_TYPE",
-         message_to_patient: `No providers are configured to handle ${appointmentType?.name || 'this appointment type'}. Please contact the office to complete your booking.`
+         message_to_patient: "", // Will be filled by dynamic generation
+         data: {
+           appointment_type_name: appointmentType?.name || 'this appointment type'
+         }
        };
      }
 
@@ -122,7 +161,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        return {
          success: false,
          error_code: "NO_ASSIGNED_OPERATORIES",
-         message_to_patient: "The selected provider doesn't have any assigned rooms configured. Please contact the office to complete your booking.",
+         message_to_patient: "", // Will be filled by dynamic generation
          details: `Provider ${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName} has no assigned operatories`
        };
      }
@@ -182,7 +221,8 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        return {
          success: false,
          error_code: "BOOKING_FAILED",
-         message_to_patient: "I'm having trouble booking your appointment. Please contact the office to complete your booking."
+         message_to_patient: "", // Will be filled by dynamic generation
+         details: "Invalid booking response format"
        };
      }
 
@@ -194,7 +234,6 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
      // Format appointment details for confirmation
      const formattedDate = formatDate(args.requestedDate);
-     const formattedTime = args.selectedTime;
      const providerName = selectedProvider.provider.firstName ? 
        `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
        selectedProvider.provider.lastName || 'your provider';
@@ -202,15 +241,19 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
      return {
        success: true,
-       message_to_patient: `Excellent! I've successfully booked your ${appointmentTypeName} for ${formattedDate} at ${formattedTime} with ${providerName}. You should receive a confirmation shortly. Is there anything else I can help you with today?`,
+       message_to_patient: "", // Will be filled by dynamic generation
        data: {
          appointment_id: String(appointmentId),
          patient_id: args.patientId,
          appointment_type: appointmentTypeName,
+         appointment_type_name: appointmentTypeName, // Alternative key for consistency
          date: args.requestedDate,
+         date_friendly: formattedDate,
          time: args.selectedTime,
          provider_name: providerName,
-         booked: true
+         practice_name: practice.name,
+         booked: true,
+         booking_successful: true
        }
      };
 
@@ -220,16 +263,10 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       return {
         success: false,
         error_code: "BOOKING_ERROR",
-        message_to_patient: "I'm having trouble completing your booking right now. Please contact the office directly to schedule your appointment.",
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me book that appointment for you...",
-    success: "Okay, booking processed.",
-    fail: "There was an issue with the booking."
   }
 };
 

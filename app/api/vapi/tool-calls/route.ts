@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { ToolExecutionContext, ToolDefinition } from "@/lib/tools/types";
 import { getErrorCode, getPatientMessage } from "@/lib/utils/error-messages";
 import { generateCallSummaryForNote } from "@/lib/ai/summarization";
+import { generateText, CoreMessage } from 'ai';
+import { openai } from '@ai-sdk/openai';
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -285,17 +287,199 @@ function extractToolCallArguments(toolCall: any): Record<string, unknown> { // e
   return {};
 }
 
+/**
+ * Generate dynamic message using LLM based on tool execution outcome
+ */
+async function generateDynamicMessage(
+  toolName: string,
+  toolArgs: unknown,
+  toolResult: { success: boolean; data?: Record<string, unknown>; error_code?: string; _internal_prereq_failure_info?: { missingArg: string, askUserMessage: string } }
+): Promise<string> {
+  try {
+    const systemPromptContent = `
+You are a friendly and helpful AI dental office assistant named Laine.
+A tool has just been executed (or attempted). Based on the tool's name, its input arguments, and the execution outcome,
+craft ONE concise, conversational sentence to tell the patient.
+This sentence should:
+1. Briefly acknowledge the action or what was checked.
+2. Clearly state the result (e.g., success, specific data found, failure, information missing).
+3. If successful and more steps are needed, naturally lead to the next question or action.
+4. If failed or information is missing, politely explain and ask for the necessary information or suggest an alternative.
+5. Sound human and empathetic. Avoid robotic phrasing.
+
+If the 'execution_outcome' indicates a 'PREREQUISITE_MISSING' error_code and provides 'prerequisite_failure_details' (like the missing argument name and a suggested question for the user),
+your primary goal is to rephrase the suggested question ('askUserMessage') into a natural, polite, single sentence to ask the patient for that specific missing information.
+Example: If tool 'check_slots' needs 'appointment_type' and the suggested question is "What type of appointment are you looking for?",
+you might say: "Sure, I can check that for you! What type of appointment did you have in mind?"
+Return ONLY that single sentence. Do not add any preamble like "Okay, here's the sentence:".
+    `.trim();
+
+    // Prepare a summary of data for the LLM. Be selective to keep the prompt concise.
+    let dataSummaryForLLM = {};
+    if (toolResult.data) {
+      // Example: For findPatient, you might extract specific fields
+      if (toolName === 'find_patient_in_ehr' && toolResult.data.patient_exists) {
+        dataSummaryForLLM = {
+          patient_found: true,
+          patient_name: toolResult.data.confirmed_patient_name,
+          patient_dob: toolResult.data.confirmed_patient_dob_friendly
+        };
+      } else if (toolName === 'check_available_slots' && toolResult.data.has_availability) {
+        dataSummaryForLLM = {
+          slots_found: true,
+          num_slots_offered: toolResult.data.slots_offered,
+          first_few_slots_display: (toolResult.data.available_slots as any[] || []) // eslint-disable-line @typescript-eslint/no-explicit-any
+                                  .slice(0, toolResult.data.slots_offered as number || 3)
+                                  .map((s: any) => s.display_time).join(', ') // eslint-disable-line @typescript-eslint/no-explicit-any
+        };
+      } else if (toolName === 'check_available_slots' && !toolResult.data.has_availability) {
+        dataSummaryForLLM = { 
+          slots_found: false, 
+          appointment_type_name: toolResult.data.appointment_type_name, 
+          requested_date_friendly: toolResult.data.requested_date_friendly 
+        };
+      } else {
+        // For other tools, pass a subset of the data
+        dataSummaryForLLM = toolResult.data;
+      }
+    }
+
+    // Build execution outcome object
+    const executionOutcome: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
+      success: toolResult.success,
+      data_summary: dataSummaryForLLM,
+      error_code: toolResult.error_code
+    };
+
+    // Add prerequisite failure details if present
+    if (toolResult._internal_prereq_failure_info) {
+      executionOutcome.prerequisite_failure_details = {
+        missing_argument_name: toolResult._internal_prereq_failure_info.missingArg,
+        suggested_question_for_user: toolResult._internal_prereq_failure_info.askUserMessage
+      };
+    }
+
+    const llmMessages: CoreMessage[] = [
+      { role: 'system', content: systemPromptContent },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          tool_name: toolName,
+          tool_arguments: toolArgs,
+          execution_outcome: executionOutcome
+        }, null, 2)
+      }
+    ];
+
+    const { text: generatedMessage } = await generateText({
+      model: openai('gpt-4o-mini'),
+      messages: llmMessages,
+      temperature: 0.7,
+      maxTokens: 80
+    });
+
+    return generatedMessage.trim();
+  } catch (generationError) {
+    console.error(`Error generating dynamic message for tool ${toolName}:`, generationError);
+    
+    // Fallback message if LLM generation fails
+    if (toolResult.success) {
+      return "Okay, I've processed that.";
+    } else {
+      // More specific fallback messages based on error_code
+      if (toolResult.error_code === 'NEXHEALTH_API_ERROR') {
+        return "I'm having trouble connecting to the scheduling system right now. Please try again in a moment.";
+      }
+      return "I encountered an issue. Please try again.";
+    }
+  }
+}
+
 async function executeToolSafely(
   // Use more flexible typing to avoid constraint issues
   tool: ToolDefinition<any>, // eslint-disable-line @typescript-eslint/no-explicit-any
   toolCall: any, // eslint-disable-line @typescript-eslint/no-explicit-any 
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
+  callLogContextData?: { nexhealthPatientId?: string | null } | null
 ) {
   try {
     const parsedArgs = extractToolCallArguments(toolCall);
     const startTime = Date.now();
     
     console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
+    
+    // Check prerequisites before executing tool
+    if (tool.prerequisites && tool.prerequisites.length > 0) {
+      for (const prereq of tool.prerequisites) {
+        // Check if the prerequisite argument is present in parsedArgs AND is not obviously empty/null.
+        const argValueFromLlm = parsedArgs[prereq.argName];
+        let actualArgValue = argValueFromLlm; // Value from LLM's current arguments
+
+        // Attempt to find the prerequisite from callLogContextData if missing from LLM args
+        if (actualArgValue === undefined || actualArgValue === null || (typeof actualArgValue === 'string' && actualArgValue.trim() === '')) {
+          if (prereq.argName === 'patientId' && callLogContextData?.nexhealthPatientId) {
+            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in CallLog context: ${callLogContextData.nexhealthPatientId}`);
+            actualArgValue = callLogContextData.nexhealthPatientId;
+            // IMPORTANT: If using from context, add it back to parsedArgs
+            // so that Zod validation and tool.run() receive it.
+            parsedArgs[prereq.argName] = actualArgValue;
+          }
+          // Add similar checks for other contextually available args, e.g., 'appointmentTypeId'
+          // else if (prereq.argName === 'appointmentTypeId' && callLogContextData?.lastAppointmentTypeId) {
+          //   actualArgValue = callLogContextData.lastAppointmentTypeId;
+          //   parsedArgs[prereq.argName] = actualArgValue;
+          // }
+        }
+
+        const isArgStillMissingOrEmpty = actualArgValue === undefined || actualArgValue === null || (typeof actualArgValue === 'string' && actualArgValue.trim() === '');
+
+        if (isArgStillMissingOrEmpty) {
+          console.log(`[${tool.name}] Prerequisite missing: ${prereq.argName}. Prompting user.`);
+
+          const prerequisiteFailureResult: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
+            success: false, // Mark as not successful for the tool's main goal
+            error_code: "PREREQUISITE_MISSING",
+            details: `Missing prerequisite: ${prereq.argName}. User needs to be asked: "${prereq.askUserMessage}"`,
+            // The actual message_to_patient will be generated by generateDynamicMessage
+            _internal_prereq_failure_info: {
+              missingArg: prereq.argName,
+              askUserMessage: prereq.askUserMessage
+            }
+          };
+
+          // Call the dynamic message generator with this specific failure info
+          const finalMessage = await generateDynamicMessage(
+            tool.name,
+            parsedArgs, // Arguments as received from LLM
+            prerequisiteFailureResult, // Cast or adjust type
+          );
+          
+          // Construct the full result to return
+          const resultWithDynamicMessage = {
+              success: false,
+              error_code: "PREREQUISITE_MISSING",
+              message_to_patient: finalMessage, // The LLM generated message
+              details: `Missing prerequisite: ${prereq.argName}. User prompted.`,
+              data: {
+                  missing_prerequisite: prereq.argName,
+                  prompt_for_user: prereq.askUserMessage
+              }
+          };
+
+          // Log this pre-emptive failure
+          await logToolExecution(
+            context,
+            tool.name,
+            parsedArgs,
+            resultWithDynamicMessage, // Log the result that includes the user prompt
+            false, // Not a successful tool execution
+            `Prerequisite check failed: ${prereq.argName} was missing.`
+          );
+
+          return resultWithDynamicMessage; // Return early, do not proceed to Zod validation or tool.run()
+        }
+      }
+    }
     
     // Pre-validation for create_new_patient to prevent premature calls
     if (tool.name === 'create_new_patient') {
@@ -306,9 +490,16 @@ async function executeToolSafely(
         const preValidationError = {
           success: false,
           error_code: preValidationResult.errorCode,
-          message_to_patient: preValidationResult.message,
+          message_to_patient: preValidationResult.message || "Missing information",
           details: preValidationResult.reason
         };
+        
+        // Generate dynamic message for pre-validation error
+        preValidationError.message_to_patient = await generateDynamicMessage(
+          tool.name,
+          parsedArgs,
+          preValidationError
+        );
         
         // Log the pre-validation failure
         await logToolExecution(
@@ -331,6 +522,13 @@ async function executeToolSafely(
       args: validatedArgs,
       context
     });
+    
+    // Generate dynamic message for successful execution
+    toolResult.message_to_patient = await generateDynamicMessage(
+      tool.name,
+      validatedArgs,
+      toolResult
+    );
     
     const executionTime = Date.now() - startTime;
     
@@ -355,6 +553,13 @@ async function executeToolSafely(
       message_to_patient: getPatientMessage(getErrorCode(error, tool.name)),
       details: error instanceof Error ? error.message : "Unknown error"
     };
+    
+    // Generate dynamic message for general execution error
+    errorResult.message_to_patient = await generateDynamicMessage(
+      tool.name,
+      toolCall.arguments || toolCall.function?.arguments || {},
+      errorResult
+    );
     
     // Log failed execution
     await logToolExecution(
@@ -566,9 +771,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results: errorResults });
     }
     
-    // Update call log status
+    // Update call log status and fetch existing context data
+    let callLogContextData = null;
     try {
-      await prisma.callLog.upsert({
+      const updatedCallLog = await prisma.callLog.upsert({
         where: { vapiCallId },
         create: {
           vapiCallId,
@@ -579,10 +785,27 @@ export async function POST(req: NextRequest) {
         update: {
           callStatus: "TOOL_IN_PROGRESS",
           updatedAt: new Date()
-        }
+        },
+        select: { nexhealthPatientId: true } // Fetch context data for prerequisites
       });
+      
+      callLogContextData = updatedCallLog;
+      console.log(`[ToolCallHandler] Fetched CallLog context:`, callLogContextData);
     } catch (dbError) {
       console.error("Error updating CallLog:", dbError);
+      // Try to fetch existing call log context data separately
+      try {
+                 const existingCallLog = await prisma.callLog.findUnique({
+           where: { vapiCallId: vapiCallId },
+           select: { nexhealthPatientId: true }
+        });
+        if (existingCallLog) {
+          callLogContextData = existingCallLog;
+          console.log(`[ToolCallHandler] Fetched existing CallLog context:`, callLogContextData);
+        }
+      } catch (fallbackError) {
+        console.error(`[ToolCallHandler] Error fetching CallLog for context:`, fallbackError);
+      }
     }
     
     // Process all tool calls
@@ -735,7 +958,7 @@ export async function POST(req: NextRequest) {
         callSummaryForNote, // Pass the summary
       };
       
-      const toolResult = await executeToolSafely(tool, toolCall, context);
+      const toolResult = await executeToolSafely(tool, toolCall, context, callLogContextData);
       
       let vapiToolResponseItem: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 

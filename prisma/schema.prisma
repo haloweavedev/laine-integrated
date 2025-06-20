@@ -195,6 +195,9 @@ model CallLog {
   detectedIntent               String?
   nexhealthPatientId           String? // If patient identified/created
   bookedAppointmentNexhealthId String? // If appointment booked
+  lastAppointmentTypeId        String? // Last determined appointment type ID (NexHealth Appointment Type ID)
+  lastAppointmentTypeName      String? // Last determined appointment type name for context
+  lastAppointmentDuration      Int?    // Last determined appointment duration for context
 
   // Enhanced fields as per refactoring plan
   assistantId         String? // VAPI assistant ID

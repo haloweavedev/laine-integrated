@@ -5,7 +5,14 @@ export const getPracticeDetailsSchema = z.object({});
 
 const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = {
   name: "get_practice_details",
-  description: "Retrieves practice details like address and location info. Use when patient asks for practice address or location information, or when providing confirmation and directions.",
+  description: `
+    Retrieves practice information including address and location details.
+    WHEN TO USE: Call this tool when a patient asks for the practice's address, location, or directions, or when confirming appointment location.
+    REQUIRED INPUTS: None (no arguments needed).
+    OUTPUTS: Returns 'address' and 'practice_name' if available, or indicates if address is not configured.
+    USE CASE: Helpful for providing directions, confirming appointment locations, or answering general practice information inquiries.
+    NOTE: This tool works independently and can be called at any time during the conversation.
+  `.trim(),
   schema: getPracticeDetailsSchema,
   
   async run({ context }): Promise<ToolResult> {
@@ -17,16 +24,22 @@ const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = 
         return {
           success: false,
           error_code: "PRACTICE_DETAIL_MISSING",
-          message_to_patient: "I don't have the specific address details available in my system right now. However, our office team can certainly provide that to you. Were you looking to schedule an appointment?",
-          details: "Practice address is not configured."
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Practice address is not configured",
+          data: {
+            practice_name: practice.name,
+            address_available: false
+          }
         };
       }
 
       return {
         success: true,
-        message_to_patient: `Our practice is located at ${practice.address}. Is there anything else about our location you'd like to know?`,
+        message_to_patient: "", // Will be filled by dynamic generation
         data: { 
-          address: practice.address 
+          address: practice.address,
+          practice_name: practice.name,
+          address_available: true
         }
       };
 
@@ -36,16 +49,10 @@ const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = 
       return {
         success: false,
         error_code: "EXECUTION_ERROR",
-        message_to_patient: "I couldn't retrieve the practice details at the moment. Please contact the office for location information.",
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me get those practice details for you...",
-    success: "Okay, practice details processed.",
-    fail: "There was an issue retrieving the practice details."
   }
 };
 

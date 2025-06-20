@@ -26,8 +26,24 @@ export const checkAvailableSlotsSchema = z.object({
 
 const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> = {
   name: "check_available_slots",
-  description: "Checks available appointment slots for a specific date and appointment type. Use after confirming patient identity and appointment type when patient requests a specific date.",
+  description: `
+    Checks and returns available appointment slots for a specific date and appointment type.
+    WHEN TO USE: Call this tool AFTER 'find_appointment_type' has successfully provided an 'appointmentTypeId' AND the user has specified a 'requestedDate'.
+    REQUIRED INPUTS: 'requestedDate' (YYYY-MM-DD format), 'appointmentTypeId' (from 'find_appointment_type' tool), 'days' (number of days to check, defaults to 1).
+    OUTPUTS: On success, returns 'available_slots' (a list of time slots), 'appointment_type_name', 'requested_date_friendly', and 'has_availability' boolean.
+    SEQUENCE NOTE: This tool typically follows 'find_appointment_type'. Do not call if 'appointmentTypeId' is unknown.
+  `.trim(),
   schema: checkAvailableSlotsSchema,
+  prerequisites: [
+    {
+      argName: 'appointmentTypeId',
+      askUserMessage: "Okay, I can check on that. To find the right slots, could you first tell me what type of appointment you're looking for?"
+    },
+    {
+      argName: 'requestedDate',
+      askUserMessage: "And for which date would you like to check our availability?"
+    }
+  ],
   
   async run({ args, context }): Promise<ToolResult> {
     const { practice } = context;
@@ -36,7 +52,8 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I can't check availability right now. Please contact the office directly."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "Missing practice configuration"
       };
     }
 
@@ -44,7 +61,8 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       return {
         success: false,
         error_code: "NO_SAVED_PROVIDERS",
-        message_to_patient: "The practice hasn't configured any providers for online scheduling. Please contact the office directly."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "No providers configured"
       };
     }
 
@@ -57,7 +75,8 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         return {
           success: false,
           error_code: "NO_ACTIVE_PROVIDERS",
-          message_to_patient: "No providers are currently available for online scheduling. Please contact the office."
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "No active providers"
         };
       }
 
@@ -70,7 +89,8 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         return {
           success: false,
           error_code: "INVALID_APPOINTMENT_TYPE",
-          message_to_patient: "I couldn't find that appointment type. Please contact the office for assistance."
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Appointment type not found"
         };
       }
 
@@ -90,7 +110,10 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         return {
           success: false,
           error_code: "NO_PROVIDERS_FOR_TYPE",
-          message_to_patient: `I don't see any providers available for ${appointmentType.name} appointments. Please contact the office for assistance.`
+          message_to_patient: "", // Will be filled by dynamic generation
+          data: {
+            appointment_type_name: appointmentType.name
+          }
         };
       }
 
@@ -151,30 +174,23 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         }
       }
 
+      const appointmentTypeName = appointmentType.name;
+      const friendlyDate = formatDate(args.requestedDate);
+
       if (availableSlots.length === 0) {
-        // No slots found - let's provide more helpful information
-        const appointmentTypeName = practice.appointmentTypes?.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || "that appointment type";
-        const friendlyDate = formatDate(args.requestedDate);
-        
-        let messageToPatient = `I'm sorry, I don't see any available slots for a ${appointmentTypeName} on ${friendlyDate}.`;
-
         const otherAppointmentTypesExist = (practice.appointmentTypes?.length || 0) > 1;
-
-        if (otherAppointmentTypesExist) {
-          messageToPatient += ` Would you like me to check a different date for the ${appointmentTypeName}, or perhaps look at other appointment types for that day?`;
-        } else {
-          messageToPatient += ` Would you like me to check for ${appointmentTypeName} on a different date?`;
-        }
 
         return {
           success: true,
-          message_to_patient: messageToPatient,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: {
             requested_date: args.requestedDate,
+            requested_date_friendly: friendlyDate,
             requested_appointment_type_id: args.appointmentTypeId,
-            appointment_type_name: appointmentTypeName, // Add for context
+            appointment_type_name: appointmentTypeName,
             available_slots: [],
             has_availability: false,
+            other_appointment_types_exist: otherAppointmentTypesExist,
             debug_info: {
               providers_checked: providers.length,
               operatories_checked: operatories.length,
@@ -208,10 +224,6 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         };
       });
 
-      // Create more conversational message with appointment type and limited initial options
-      const appointmentTypeName = practice.appointmentTypes?.find(at => at.nexhealthAppointmentTypeId === args.appointmentTypeId)?.name || "your appointment";
-      const friendlyDate = formatDate(args.requestedDate);
-
       // Offer a limited number of slots initially for voice, e.g., 3 or 4
       const slotsToOfferCount = Math.min(formattedSlots.length, 3); // Offer up to 3 slots
       const offeredTimeList = formattedSlots.slice(0, slotsToOfferCount).map(slot => slot.display_time);
@@ -223,25 +235,21 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         timeOptionsMessage = offeredTimeList.slice(0, -1).join(', ') + (offeredTimeList.length > 1 ? ', or ' : '') + offeredTimeList[offeredTimeList.length - 1];
       }
 
-      let finalMessageToPatient = `Great! For a ${appointmentTypeName} on ${friendlyDate}, I have ${timeOptionsMessage} available.`;
-
-      if (formattedSlots.length > slotsToOfferCount) {
-        finalMessageToPatient += " Do any of those work, or would you like to hear more options?";
-      } else {
-        finalMessageToPatient += " Do any of those times work for you?";
-      }
-
       return {
         success: true,
-        message_to_patient: finalMessageToPatient,
+        message_to_patient: "", // Will be filled by dynamic generation
         data: {
           requested_date: args.requestedDate,
+          requested_date_friendly: friendlyDate,
           requested_appointment_type_id: args.appointmentTypeId,
           appointment_type_name: appointmentTypeName,
           available_slots: formattedSlots,
           has_availability: true,
           total_slots_found: availableSlots.length,
-          slots_offered: slotsToOfferCount
+          slots_offered: slotsToOfferCount,
+          // Hints for message generation:
+          offered_time_list_string_for_message_suggestion: timeOptionsMessage,
+          has_more_slots_beyond_offered: formattedSlots.length > slotsToOfferCount
         }
       };
 
@@ -251,16 +259,10 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       return {
         success: false,
         error_code: "SLOT_CHECK_ERROR",
-        message_to_patient: "I'm having trouble checking availability right now. Please contact the office for scheduling assistance.",
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me check what's available...",
-    success: "Okay, availability check processed.",
-    fail: "There was an issue checking availability."
   }
 };
 

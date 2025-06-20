@@ -31,6 +31,13 @@ export interface ToolExecutionContext {
   callSummaryForNote?: string; // ADD THIS LINE for bookAppointment tool
 }
 
+// Tool prerequisite definition
+export interface ToolPrerequisite {
+  argName: string; // The key of the argument in the tool's Zod schema (e.g., 'appointmentTypeId')
+  askUserMessage: string; // The user-facing question Laine should ask if this prerequisite is missing.
+                          // Example: "Okay, I can help with that. What type of appointment are you looking for?"
+}
+
 // Standardized tool result format
 export interface ToolResult {
   success: boolean;
@@ -72,13 +79,8 @@ export interface ToolDefinition<T extends z.ZodType<any, any>> {
     args: z.infer<T>; 
     context: ToolExecutionContext 
   }) => Promise<ToolResult>;
-  messages?: {
-    start?: string;
-    delay?: string;
-    success?: string;
-    fail?: string;
-  };
   async?: boolean;
+  prerequisites?: ToolPrerequisite[];
 }
 
 // VAPI webhook payload types

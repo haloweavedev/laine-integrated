@@ -35,8 +35,22 @@ export const createNewPatientSchema = z.object({
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: `Creates new patient record when all required information is collected: first name, last name, date of birth, phone (10+ digits), and valid email. Insurance name is optional. CRITICAL: Only call when you have ALL required fields - do not call with missing or empty values.`,
+  description: `
+    Creates a new patient record in the EHR system with complete patient information.
+    WHEN TO USE: Call this tool when a patient is NEW to the practice or when 'find_patient_in_ehr' fails to find an existing record.
+    REQUIRED INPUTS: 'firstName', 'lastName', 'dateOfBirth' (YYYY-MM-DD), 'phone' (10+ digits), 'email' (valid email format). 'insurance_name' is optional.
+    OUTPUTS: On success, returns 'patient_id', 'patient_name', and other patient details. Sets patient context for subsequent booking.
+    CRITICAL: Only call when you have collected ALL required information from the patient. Do not call with missing or empty values.
+    SEQUENCE NOTE: After successful creation, the returned 'patient_id' can be used for 'book_appointment'.
+  `.trim(),
   schema: createNewPatientSchema,
+  prerequisites: [
+    { argName: 'firstName', askUserMessage: "To create your patient record, could you please tell me your first name?" },
+    { argName: 'lastName', askUserMessage: "And what is your last name?" },
+    { argName: 'dateOfBirth', askUserMessage: "What is your date of birth, including the year?" },
+    { argName: 'phone', askUserMessage: "What's a good phone number we can reach you at?" },
+    { argName: 'email', askUserMessage: "And finally, what is your email address?" }
+  ],
   
   async run({ args, context }): Promise<ToolResult> {
     const { practice, vapiCallId } = context;
@@ -45,7 +59,8 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I'm sorry, I can't create new patient records right now. Please contact the office directly to register as a new patient."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "Missing practice configuration"
       };
     }
 
@@ -53,7 +68,8 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       return {
         success: false,
         error_code: "NO_SAVED_PROVIDERS",
-        message_to_patient: "I need to assign you to a provider but none are configured. Please contact the office to complete your registration."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "No providers configured"
       };
     }
 
@@ -64,7 +80,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         return {
           success: false,
           error_code: validationResult.errorCode || "VALIDATION_ERROR",
-          message_to_patient: validationResult.message || "There was an issue with the information provided.",
+          message_to_patient: "", // Will be filled by dynamic generation
           details: validationResult.details || "Validation failed"
         };
       }
@@ -75,7 +91,8 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         return {
           success: false,
           error_code: "NO_ACTIVE_PROVIDERS",
-          message_to_patient: "I need to assign you to a provider but none are available. Please contact the office to complete your registration."
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "No active providers"
         };
       }
 
@@ -134,7 +151,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         return {
           success: false,
           error_code: "PATIENT_CREATION_FAILED",
-          message_to_patient: "I had trouble creating your patient record. Please contact the office to complete your registration.",
+          message_to_patient: "", // Will be filled by dynamic generation
           details: "Could not extract patient ID from response"
         };
       }
@@ -145,66 +162,54 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       // Format confirmation message
       const formattedPhone = formatPhoneForDisplay(args.phone);
 
-      // Create context-aware success message based on insurance information
-      let successMessage: string;
-      if (args.insurance_name && args.insurance_name.trim() !== "") {
-        successMessage = `Excellent! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. I've also noted your ${args.insurance_name} insurance. To make sure we have all the details, could you provide the subscriber's full name on that policy?`;
-      } else {
-        successMessage = `Excellent! I've successfully created your patient profile for ${args.firstName} ${args.lastName}. Welcome to ${practice.name || 'our practice'}! Now, what type of appointment were you looking to schedule today?`;
-      }
-
       return {
         success: true,
-        message_to_patient: successMessage,
+        message_to_patient: "", // Will be filled by dynamic generation
         data: {
           patient_id: String(newPatientId), // Ensure string format for consistency with bookAppointment.ts
           patient_name: `${args.firstName} ${args.lastName}`,
+          first_name: args.firstName,
+          last_name: args.lastName,
           date_of_birth: args.dateOfBirth,
           phone: formattedPhone,
           email: args.email,
           insurance_name: args.insurance_name || null,
-          created: true
+          practice_name: practice.name,
+          created: true,
+          has_insurance: !!(args.insurance_name && args.insurance_name.trim() !== "")
         }
       };
 
     } catch (error) {
       console.error(`[createNewPatient] Error:`, error);
       
-      let message = "I'm having trouble creating your patient record right now. Please contact the office directly to register.";
       let errorCode = "PATIENT_CREATION_ERROR";
       
       if (error instanceof Error) {
         if (error.message.includes("400") || error.message.includes("validation")) {
           errorCode = "VALIDATION_ERROR";
-          message = "There was an issue with the information provided. Let me help you with the registration process.";
         } else if (error.message.includes("409") || error.message.includes("duplicate")) {
           errorCode = "DUPLICATE_PATIENT";
-          message = `It looks like you're already in our system, ${args.firstName}! I've found your existing record. Will you be using the same insurance we have on file, or has anything changed?`;
         } else if (error.message.includes("401")) {
           errorCode = "AUTH_ERROR";
-          message = "There's an authentication issue with our system. Please contact the office to register.";
         }
       }
       
       return {
         success: false,
         error_code: errorCode,
-        message_to_patient: message,
-        details: error instanceof Error ? error.message : "Unknown error"
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: error instanceof Error ? error.message : "Unknown error",
+        data: {
+          attempted_patient_name: `${args.firstName} ${args.lastName}`,
+          first_name: args.firstName,
+          last_name: args.lastName
+        }
       };
     }
-  },
-
-  messages: {
-    start: "Let me gather the information needed to create your patient record...",
-    success: "Okay, patient registration processed.",
-    fail: "There was an issue with the registration."
   }
 };
 
-/**
- * Validate patient data with comprehensive checks
- */
 function validatePatientData(args: {
   firstName: string;
   lastName: string;
@@ -215,85 +220,83 @@ function validatePatientData(args: {
   | { isValid: true; errorCode?: undefined; message?: undefined; details?: undefined }
   | { isValid: false; errorCode: string; message: string; details: string } {
   
-  // Check first name
-  if (!args.firstName || args.firstName.trim().length === 0) {
+  // Check required fields
+  if (!args.firstName.trim()) {
     return {
       isValid: false,
       errorCode: "MISSING_FIRST_NAME",
-      message: "I need your first name to create your patient record. Could you tell me your first name?",
-      details: "First name is required"
+      message: "First name is required",
+      details: "Missing or empty first name"
     };
   }
 
-  // Check last name
-  if (!args.lastName || args.lastName.trim().length === 0) {
+  if (!args.lastName.trim()) {
     return {
       isValid: false,
-      errorCode: "MISSING_LAST_NAME",
-      message: "I need your last name to create your patient record. Could you tell me your last name?",
-      details: "Last name is required"
+      errorCode: "MISSING_LAST_NAME", 
+      message: "Last name is required",
+      details: "Missing or empty last name"
     };
   }
 
-  // Check date of birth format
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!args.dateOfBirth || !dateRegex.test(args.dateOfBirth)) {
+  // Validate date of birth format and reasonableness
+  const dobRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dobRegex.test(args.dateOfBirth)) {
     return {
       isValid: false,
       errorCode: "INVALID_DATE_OF_BIRTH",
-      message: "I need your date of birth in a valid format. Could you tell me your date of birth again?",
-      details: "Date of birth must be in YYYY-MM-DD format"
+      message: "Date of birth must be in YYYY-MM-DD format",
+      details: `Invalid date format: ${args.dateOfBirth}`
     };
   }
 
-  // Check phone number
-  if (!args.phone || args.phone.length < 10) {
+  const dobDate = new Date(args.dateOfBirth);
+  const today = new Date();
+  const minAge = new Date(today.getFullYear() - 120, today.getMonth(), today.getDate());
+  const maxAge = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+
+  if (dobDate < minAge || dobDate > maxAge) {
     return {
       isValid: false,
-      errorCode: "MISSING_PHONE",
-      message: "I need your phone number to create your patient record. What's your phone number?",
-      details: "Phone number is required and must be at least 10 digits"
+      errorCode: "INVALID_DATE_OF_BIRTH",
+      message: "Date of birth seems unreasonable",
+      details: `DOB outside reasonable range: ${args.dateOfBirth}`
     };
   }
 
-  // Check email
-  if (!args.email || !args.email.includes('@')) {
-    return {
-      isValid: false,
-      errorCode: "MISSING_EMAIL",
-      message: "I need your email address to create your patient record. What's your email address?",
-      details: "Valid email address is required"
-    };
-  }
-
-  // Additional phone validation - ensure it's digits only
+  // Validate phone (minimum 10 digits)
   const phoneDigits = args.phone.replace(/\D/g, '');
   if (phoneDigits.length < 10) {
     return {
       isValid: false,
       errorCode: "INVALID_PHONE",
-      message: "I didn't get a valid phone number. Could you tell me your phone number again?",
-      details: "Phone number must contain at least 10 digits"
+      message: "Phone number must be at least 10 digits",
+      details: `Phone too short: ${phoneDigits.length} digits`
+    };
+  }
+
+  // Validate email
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(args.email)) {
+    return {
+      isValid: false,
+      errorCode: "INVALID_EMAIL",
+      message: "Email address format is invalid",
+      details: `Invalid email format: ${args.email}`
     };
   }
 
   return { isValid: true };
 }
 
-/**
- * Format phone number for display
- */
 function formatPhoneForDisplay(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   if (digits.length === 10) {
     return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   }
-  return phone;
+  return phone; // Return as-is if not 10 digits
 }
 
-/**
- * Update call log with new patient ID
- */
 async function updateCallLogWithPatient(vapiCallId: string, practiceId: string, patientId: string) {
   try {
     const { prisma } = await import("@/lib/prisma");
@@ -302,12 +305,13 @@ async function updateCallLogWithPatient(vapiCallId: string, practiceId: string, 
       create: {
         vapiCallId,
         practiceId,
-        callStatus: "TOOL_IN_PROGRESS",
+        callStatus: "PATIENT_CREATED",
         nexhealthPatientId: patientId,
         callTimestampStart: new Date()
       },
       update: {
         nexhealthPatientId: patientId,
+        callStatus: "PATIENT_CREATED",
         updatedAt: new Date()
       }
     });

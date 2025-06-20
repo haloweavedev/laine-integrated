@@ -56,12 +56,7 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
       }
     };
 
-    // Add only the start message - success/fail messages will be dynamic from tool execution
-    if (tool.messages?.start) {
-      vapiTool.messages = [
-        { type: "request-start", content: tool.messages.start }
-      ];
-    }
+    // Messages will now be dynamically generated, so no static messages
     
     console.log(`Built VAPI tool: ${tool.name} -> ${vapiTool.server.url}`);
     return vapiTool;

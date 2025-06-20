@@ -28,7 +28,13 @@ export const findPatientSchema = z.object({
 
 const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
   name: "find_patient_in_ehr",
-  description: "Use when an existing patient provides their full name and date of birth to verify their identity and retrieve their record before scheduling appointments or accessing their information. Only call when you have all three pieces: first name, last name, and complete date of birth.",
+  description: `
+    Verifies an existing patient's identity and retrieves their EHR record using their first name, last name, and date of birth.
+    WHEN TO USE: Call this tool when a patient indicates they are an existing patient and provides their full name and complete date of birth.
+    REQUIRED INPUTS: 'firstName', 'lastName', 'dateOfBirth' (in YYYY-MM-DD format).
+    OUTPUTS: On success, returns 'patient_id', 'confirmed_patient_name', and 'confirmed_patient_dob_friendly'. Sets patient context for the call.
+    IMPORTANT: Ensure you have collected all three pieces of information (first name, last name, full date of birth) before calling. If information is partial, ask the user for the missing parts first.
+  `.trim(),
   schema: findPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
@@ -38,7 +44,8 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "I'm sorry, I can't access patient records right now. Please contact the office directly for assistance."
+        message_to_patient: "Practice configuration error",
+        details: "Missing practice configuration"
       };
     }
 
@@ -88,12 +95,13 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
         
         return {
           success: true,
-          message_to_patient: `I couldn't find a patient record for ${args.firstName} ${args.lastName} with date of birth ${friendlyDob}. Are you a new patient with us, or would you like to double-check that information?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: { 
             found_patients: [], 
             patient_exists: false,
             searched_name: `${args.firstName} ${args.lastName}`,
-            searched_dob: args.dateOfBirth
+            searched_dob: args.dateOfBirth,
+            searched_dob_friendly: friendlyDob
           }
         };
       }
@@ -116,7 +124,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       
       return {
         success: true,
-        message_to_patient: `Perfect! I found ${patient.first_name || args.firstName} ${patient.last_name || args.lastName}, born ${friendlyDob}. What type of appointment would you like to schedule today?`,
+        message_to_patient: "", // Will be filled by dynamic generation
         data: {
           found_patients: [{
             id: patient.id,
@@ -125,31 +133,23 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
             dob: patientDob
           }],
           patient_exists: true,
-          patient_id: patient.id
+          patient_id: patient.id,
+          // Enhanced data for message generation:
+          confirmed_patient_name: `${patient.first_name || args.firstName} ${patient.last_name || args.lastName}`,
+          confirmed_patient_dob_friendly: friendlyDob
         }
       };
 
     } catch (error) {
       console.error(`[findPatient] Error:`, error);
       
-      let message = "I'm having trouble accessing patient records right now. Please try again in a moment or contact the office directly.";
-      if (error instanceof Error && error.message.includes("401")) {
-        message = "There's an authentication issue with the patient system. Please contact the office for assistance.";
-      }
-      
       return {
         success: false,
         error_code: "NEXHEALTH_API_ERROR",
-        message_to_patient: message,
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me look that up for you...",
-    success: "Okay, patient lookup processed.",
-    fail: "There was an issue with that lookup."
   }
 };
 

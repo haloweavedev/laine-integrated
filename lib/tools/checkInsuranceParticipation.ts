@@ -8,8 +8,21 @@ export const checkInsuranceParticipationSchema = z.object({
 
 const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParticipationSchema> = {
   name: "check_insurance_participation",
-  description: "Checks if practice is in-network with patient's dental insurance provider. Use after patient mentions their insurance company name.",
+  description: `
+    Checks whether the practice is in-network or out-of-network with the patient's dental insurance provider.
+    WHEN TO USE: Call this tool when a patient mentions their dental insurance provider or asks about insurance acceptance.
+    REQUIRED INPUTS: 'insuranceProviderName' (the name of the patient's dental insurance company, e.g., "Cigna", "MetLife").
+    OUTPUTS: Returns 'participation' status ("in-network" or "out-of-network"), 'is_in_network' boolean, and practice accepted insurances list.
+    USE CASE: Helps patients understand their coverage and potential out-of-pocket costs before booking appointments.
+    NOTE: This tool works independently and doesn't require patient identification first.
+  `.trim(),
   schema: checkInsuranceParticipationSchema,
+  prerequisites: [
+    {
+      argName: 'insuranceProviderName',
+      askUserMessage: "I can check that for you! What's the name of your dental insurance provider?"
+    }
+  ],
   
   async run({ args, context }): Promise<ToolResult> {
     const { practice } = context;
@@ -20,11 +33,13 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
         return {
           success: true, // Tool ran, but no configuration data available
           error_code: "INSURANCE_CONFIG_MISSING",
-          message_to_patient: `This practice hasn't specified which insurances they accept in my system. It would be best to confirm directly with the office regarding your ${args.insuranceProviderName} plan. Would you like to proceed with scheduling for now?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: { 
             insuranceProviderName: args.insuranceProviderName,
             participation: "unknown_configuration",
-            practiceAcceptedList: null
+            practiceAcceptedList: null,
+            practice_name: practice.name,
+            config_available: false
           }
         };
       }
@@ -47,21 +62,27 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
       if (isInNetwork) {
         return {
           success: true,
-          message_to_patient: `Great news! We are in-network with ${args.insuranceProviderName}. We can proceed with scheduling if you're ready. What type of appointment were you thinking of?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: {
             insuranceProviderName: args.insuranceProviderName,
             participation: "in-network",
-            practiceAcceptedList: practice.acceptedInsurances
+            practiceAcceptedList: practice.acceptedInsurances,
+            practice_name: practice.name,
+            is_in_network: true,
+            config_available: true
           }
         };
       } else {
         return {
           success: true,
-          message_to_patient: `Based on the information I have, we might be out-of-network with ${args.insuranceProviderName}. You are still welcome to be seen here, but you would be responsible for the cost out-of-pocket. Would you like an estimate for the service you're considering?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: {
             insuranceProviderName: args.insuranceProviderName,
             participation: "out-of-network",
-            practiceAcceptedList: practice.acceptedInsurances
+            practiceAcceptedList: practice.acceptedInsurances,
+            practice_name: practice.name,
+            is_in_network: false,
+            config_available: true
           }
         };
       }
@@ -72,16 +93,10 @@ const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParti
       return {
         success: false,
         error_code: "EXECUTION_ERROR",
-        message_to_patient: "I had trouble checking the insurance. Please contact the office to verify your insurance coverage.",
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me check that insurance for you...",
-    success: "Okay, insurance check processed.",
-    fail: "There was an issue with the insurance check."
   }
 };
 

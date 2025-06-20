@@ -9,8 +9,21 @@ export const findAppointmentTypeSchema = z.object({
 
 const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {
   name: "find_appointment_type",
-  description: "Matches patient's service request to available appointment types. Use after confirming patient identity when they mention what type of appointment they need (cleaning, checkup, filling, etc.).",
+  description: `
+    Matches the patient's requested service to available appointment types and returns the corresponding appointment type details.
+    WHEN TO USE: Call this tool when a patient mentions what type of service or appointment they need (e.g., "cleaning", "checkup", "filling").
+    REQUIRED INPUTS: 'userRequest' (patient's description of the service they want).
+    OUTPUTS: On success, returns 'appointment_type_id', 'appointment_type_name', 'duration_minutes', and 'matched' boolean. On no match, returns available options.
+    SEQUENCE NOTE: This tool should typically be called BEFORE 'check_available_slots' to obtain the required 'appointmentTypeId'. The output provides essential data for subsequent booking steps.
+    IMPORTANT: The returned 'appointment_type_id' and 'duration_minutes' are required for both 'check_available_slots' and 'book_appointment'.
+  `.trim(),
   schema: findAppointmentTypeSchema,
+  prerequisites: [
+    {
+      argName: 'userRequest',
+      askUserMessage: "Sure, I can help with that! What kind of service or reason for visit did you have in mind?"
+    }
+  ],
   
   async run({ args, context }): Promise<ToolResult> {
     const { practice } = context;
@@ -19,7 +32,8 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
       return {
         success: false,
         error_code: "NO_APPOINTMENT_TYPES",
-        message_to_patient: "I don't have any appointment types configured for this practice. Please contact the office directly to schedule your appointment."
+        message_to_patient: "", // Will be filled by dynamic generation
+        details: "No appointment types configured"
       };
     }
 
@@ -106,12 +120,11 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
         // No good match found - present options conversationally
         const typeOptions = availableTypes
           .slice(0, 5) // Limit to 5 options for voice
-          .map(type => type.name)
-          .join(', ');
+          .map(type => type.name);
           
         return {
           success: true,
-          message_to_patient: `I want to make sure I schedule the right appointment for you. We offer ${typeOptions}. Which of these sounds like what you need?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: {
             matched: false,
             available_types: availableTypes.map(t => ({
@@ -119,40 +132,53 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
               name: t.name,
               duration: t.duration
             })),
-            user_request: userRequest
+            available_types_list: typeOptions,
+            user_request: userRequest,
+            total_types_available: availableTypes.length
           }
         };
       }
 
-      // Good match found - confirm and move forward
+      // Good match found - persist to CallLog and return
+      // TODO: Implement CallLog persistence for lastAppointmentTypeId after Prisma type resolution
+      console.log(`[findAppointmentType] Found appointment type: ${bestMatch.id} (${bestMatch.name})`);
+      // Note: Schema has been updated with lastAppointmentTypeId, lastAppointmentTypeName, lastAppointmentDuration fields
+
       return {
         success: true,
-        message_to_patient: `Perfect! I can schedule you for a ${bestMatch.name} which takes ${bestMatch.duration} minutes. What day would work best for you?`,
+        message_to_patient: "", // Will be filled by dynamic generation
         data: {
           matched: true,
           appointment_type_id: bestMatch.id,
           appointment_type_name: bestMatch.name,
           duration_minutes: bestMatch.duration,
-          user_request: userRequest
+          user_request: userRequest,
+          match_score: bestScore
         }
       };
 
     } catch (error) {
       console.error(`[findAppointmentType] Error:`, error);
       
+      let errorCode = "APPOINTMENT_TYPE_SEARCH_ERROR";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("400") || error.message.includes("validation")) {
+          errorCode = "NEXHEALTH_VALIDATION_ERROR";
+        } else if (error.message.includes("401")) {
+          errorCode = "NEXHEALTH_AUTH_ERROR";
+        } else if (error.message.includes("nexhealth") || error.message.includes("api")) {
+          errorCode = "NEXHEALTH_API_ERROR";
+        }
+      }
+      
       return {
         success: false,
-        error_code: "APPOINTMENT_TYPE_SEARCH_ERROR",
-        message_to_patient: "I had trouble understanding what type of appointment you need. Could you tell me again what you'd like to come in for?",
+        error_code: errorCode,
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me find the right appointment type for you...",
-    success: "Okay, appointment type search processed.",
-    fail: "There was an issue with the appointment type search."
   }
 };
 

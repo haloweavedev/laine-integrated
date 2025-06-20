@@ -8,8 +8,21 @@ export const getServiceCostEstimateSchema = z.object({
 
 const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSchema> = {
   name: "get_service_cost_estimate",
-  description: "Provides estimated cost for dental services, particularly for out-of-network or self-pay patients. Use when patient asks about cost of a visit or service.",
+  description: `
+    Provides cost estimates for dental services based on practice configuration.
+    WHEN TO USE: Call this tool when a patient asks about pricing, costs, or fees for specific services or procedures.
+    REQUIRED INPUTS: 'serviceName' (the specific service or procedure name the patient is asking about).
+    OUTPUTS: On success, returns 'estimate' (cost), 'found' boolean, and 'practice_name'. May suggest alternative services if exact match not found.
+    USE CASE: Particularly helpful for out-of-network patients or self-pay patients who want to understand costs before booking.
+    NOTE: This tool works independently and doesn't require patient identification first.
+  `.trim(),
   schema: getServiceCostEstimateSchema,
+  prerequisites: [
+    {
+      argName: 'serviceName',
+      askUserMessage: "I can help you with that! What specific service or procedure would you like to know the cost for?"
+    }
+  ],
   
   async run({ args, context }): Promise<ToolResult> {
     const { practice } = context;
@@ -20,11 +33,13 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
         return {
           success: true, // Tool ran, but no configuration data available
           error_code: "COST_CONFIG_MISSING",
-          message_to_patient: "I don't have specific cost information in my system. The office staff can provide you with an estimate. Would you like to schedule an appointment so they can discuss costs with you?",
+          message_to_patient: "", // Will be filled by dynamic generation
           data: { 
             serviceName: args.serviceName,
             found: false,
-            estimate: null
+            estimate: null,
+            practice_name: practice.name,
+            config_available: false
           }
         };
       }
@@ -50,11 +65,13 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
         return {
           success: true,
           error_code: "COST_CONFIG_INVALID",
-          message_to_patient: "I'm having trouble reading the cost information in my system. The office staff can provide you with accurate pricing.",
+          message_to_patient: "", // Will be filled by dynamic generation
           data: { 
             serviceName: args.serviceName,
             found: false,
-            estimate: null
+            estimate: null,
+            practice_name: practice.name,
+            config_available: false
           }
         };
       }
@@ -71,12 +88,15 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       if (matchedService) {
         return {
           success: true,
-          message_to_patient: `For a ${matchedService.service}, the estimated cost is ${matchedService.cost}. Does that work for you, or would you like to discuss scheduling?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: {
             serviceName: args.serviceName,
             estimate: matchedService.cost,
             found: true,
-            matchedKey: matchedService.service
+            matchedKey: matchedService.service,
+            practice_name: practice.name,
+            config_available: true,
+            exact_match: true
           }
         };
       }
@@ -95,13 +115,17 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       )) {
         return {
           success: true,
-          message_to_patient: `While I don't have a specific estimate for ${args.serviceName}, we do have a ${specialOffer.service} for ${specialOffer.cost} which typically covers an initial exam and necessary x-rays. Would that interest you?`,
+          message_to_patient: "", // Will be filled by dynamic generation
           data: {
             serviceName: args.serviceName,
             estimate: specialOffer.cost,
             found: true,
             type: "special_offer",
-            matchedKey: specialOffer.service
+            matchedKey: specialOffer.service,
+            practice_name: practice.name,
+            config_available: true,
+            exact_match: false,
+            is_special_offer: true
           }
         };
       }
@@ -109,11 +133,14 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       // No match found
       return {
         success: true,
-        message_to_patient: `I couldn't find a specific cost estimate for ${args.serviceName} in my system. Our team can provide detailed pricing information. Would you like to proceed with scheduling, and they can discuss costs with you then?`,
+        message_to_patient: "", // Will be filled by dynamic generation
         data: {
           serviceName: args.serviceName,
           found: false,
-          estimate: null
+          estimate: null,
+          practice_name: practice.name,
+          config_available: true,
+          available_services: serviceCosts.map(sc => sc.service)
         }
       };
 
@@ -123,16 +150,10 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
       return {
         success: false,
         error_code: "EXECUTION_ERROR",
-        message_to_patient: "I'm unable to retrieve cost estimates right now. Please contact the office for pricing information.",
+        message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }
-  },
-
-  messages: {
-    start: "Let me check on that cost estimate for you...",
-    success: "Okay, cost estimate processed.",
-    fail: "There was an issue retrieving the cost estimate."
   }
 };
 
