@@ -69,6 +69,26 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
     }
   ],
   
+  /**
+   * Comprehensive slot checking tool that accurately retrieves, filters, and formats appointment slots
+   * from NexHealth API. Implements robust provider and operatory filtering based on practice configuration,
+   * uses conversation state for appointment type and duration, applies practice timezone for lunch filtering
+   * and display formatting, and returns well-structured slot data enriched with Laine-specific details.
+   * 
+   * Key Features:
+   * - Prioritizes ConversationState for appointmentTypeId and duration
+   * - Filters providers by activity status and appointment type acceptance
+   * - Derives operatories from eligible providers for accurate filtering
+   * - Uses practice timezone for lunch break filtering and display formatting
+   * - Constructs precise NexHealth API parameters (no appointment_type_id sent)
+   * - Enriches slots with Laine provider and operatory details
+   * - Updates ConversationState with results
+   * 
+   * @param {Object} params - Tool execution parameters
+   * @param {Object} params.args - Tool arguments from schema
+   * @param {Object} params.context - Execution context with practice and conversationState
+   * @returns {Promise<ToolResult>} Comprehensive result with slots and debug information
+   */
   async run({ args, context }): Promise<ToolResult> {
     const { practice, conversationState } = context;
     
@@ -99,6 +119,10 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
     }
 
     try {
+      // SUBPHASE 1: Correct Appointment Type and Duration Sourcing
+      console.log("🎯 APPOINTMENT TYPE SOURCING");
+      console.log("=============================");
+      
       // CRUCIAL STEP A: Get appointment type from ConversationState first, then validate against args
       let appointmentTypeId = conversationState.determinedAppointmentTypeId;
       
@@ -106,12 +130,16 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       if (!appointmentTypeId) {
         appointmentTypeId = args.appointmentTypeId;
         console.log("⚠️ appointmentTypeId not found in ConversationState, using from args");
+      } else {
+        console.log("✅ Using appointmentTypeId from ConversationState:", appointmentTypeId);
       }
       
-      // Verify they match if both are present
+      // Verify they match if both are present, prioritize ConversationState
       if (conversationState.determinedAppointmentTypeId && 
           conversationState.determinedAppointmentTypeId !== args.appointmentTypeId) {
         console.log("⚠️ appointmentTypeId mismatch between ConversationState and args, prioritizing ConversationState");
+        console.log("  - ConversationState:", conversationState.determinedAppointmentTypeId);
+        console.log("  - Args:", args.appointmentTypeId);
         appointmentTypeId = conversationState.determinedAppointmentTypeId;
       }
 
@@ -122,6 +150,39 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
       if (!appointmentType) {
         console.log("❌ AppointmentType not found for Laine CUID:", appointmentTypeId);
+        // Try with args.appointmentTypeId as fallback
+        if (appointmentTypeId !== args.appointmentTypeId) {
+          console.log("🔄 Fallback: Trying with args.appointmentTypeId:", args.appointmentTypeId);
+          const fallbackAppointmentType = practice.appointmentTypes?.find(
+            at => at.id === args.appointmentTypeId
+          );
+          if (fallbackAppointmentType) {
+            console.log("✅ Found AppointmentType using fallback args.appointmentTypeId");
+            appointmentTypeId = args.appointmentTypeId;
+          } else {
+            return {
+              success: false,
+              error_code: "INVALID_APPOINTMENT_TYPE",
+              message_to_patient: "",
+              details: "Appointment type not found or doesn't belong to practice"
+            };
+          }
+        } else {
+          return {
+            success: false,
+            error_code: "INVALID_APPOINTMENT_TYPE",
+            message_to_patient: "",
+            details: "Appointment type not found or doesn't belong to practice"
+          };
+        }
+      }
+
+      // Re-fetch appointmentType after potential fallback
+      const finalAppointmentType = practice.appointmentTypes?.find(
+        at => at.id === appointmentTypeId
+      );
+
+      if (!finalAppointmentType) {
         return {
           success: false,
           error_code: "INVALID_APPOINTMENT_TYPE",
@@ -130,44 +191,65 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         };
       }
 
-      // Use determinedDurationMinutes from ConversationState (CRITICAL)
-      const slotLength = conversationState.determinedDurationMinutes || appointmentType.duration;
+      // CRITICALLY, use determinedDurationMinutes from ConversationState as primary source
+      let slotLength: number;
+      let durationSource: string;
+      
+      if (conversationState.determinedDurationMinutes !== null && conversationState.determinedDurationMinutes > 0) {
+        slotLength = conversationState.determinedDurationMinutes;
+        durationSource = "ConversationState.determinedDurationMinutes";
+      } else {
+        slotLength = finalAppointmentType.duration;
+        durationSource = "AppointmentType.duration (fallback)";
+      }
       
       console.log("✅ Found AppointmentType:");
-      console.log("  - Laine CUID:", appointmentType.id);
-      console.log("  - Name:", appointmentType.name);
-      console.log("  - Duration (for slot_length):", slotLength);
-      console.log("  - NexHealth ID:", appointmentType.nexhealthAppointmentTypeId);
+      console.log("  - Laine CUID:", finalAppointmentType.id);
+      console.log("  - Name:", finalAppointmentType.name);
+      console.log("  - NexHealth ID:", finalAppointmentType.nexhealthAppointmentTypeId);
+      console.log("  - Duration source:", durationSource);
+      console.log("  - Duration (for slot_length):", slotLength, "minutes");
 
-      // CRUCIAL STEP B: Find all SavedProviders who are active and accept this appointment type
-      let eligibleSavedProviders = practice.savedProviders.filter(sp => {
-        // Must be active
-        if (!sp.isActive) return false;
-        
+      // SUBPHASE 2: Accurate Provider Filtering Logic
+      console.log("👨‍⚕️ PROVIDER FILTERING");
+      console.log("====================");
+      
+      // Filter practice.savedProviders to include only those where isActive is true
+      const activeSavedProviders = practice.savedProviders.filter(sp => sp.isActive);
+      console.log("📋 Provider filtering - Step 1 (Active filter):");
+      console.log("  - Total SavedProviders in practice:", practice.savedProviders.length);
+      console.log("  - Active SavedProviders:", activeSavedProviders.length);
+      
+      // Further filter based on acceptedAppointmentTypes
+      let eligibleSavedProviders = activeSavedProviders.filter(sp => {
         // If provider has no accepted appointment types configured, include them (backward compatibility)
         if (!sp.acceptedAppointmentTypes || sp.acceptedAppointmentTypes.length === 0) {
+          console.log(`  - Provider ${sp.provider.firstName} ${sp.provider.lastName}: accepts all (no restrictions)`);
           return true;
         }
         
         // Otherwise, check if they accept this specific appointment type using Laine CUID
-        return sp.acceptedAppointmentTypes.some(
-          relation => relation.appointmentType.id === appointmentType.id
+        const acceptsType = sp.acceptedAppointmentTypes.some(
+          relation => relation.appointmentType.id === finalAppointmentType.id
         );
+        console.log(`  - Provider ${sp.provider.firstName} ${sp.provider.lastName}: accepts this type = ${acceptsType} (${sp.acceptedAppointmentTypes.length} restrictions)`);
+        return acceptsType;
       });
 
-      console.log("📋 Provider filtering - Step 1 (Active + Accept AppointmentType):");
-      console.log("  - Total active SavedProviders in practice:", practice.savedProviders.filter(sp => sp.isActive).length);
+      console.log("📋 Provider filtering - Step 2 (Appointment type acceptance):");
       console.log("  - SavedProviders accepting this AppointmentType:", eligibleSavedProviders.length);
 
-      // Apply optional provider filter
+      // Apply optional provider filter (if args.providerIds are provided)
       if (args.providerIds && args.providerIds.length > 0) {
         const beforeFilterCount = eligibleSavedProviders.length;
         eligibleSavedProviders = eligibleSavedProviders.filter(sp => 
-          args.providerIds!.includes(sp.id)
+          args.providerIds!.includes(sp.id) // sp.id is the Laine CUID of SavedProvider
         );
-        console.log("📋 Provider filtering - Step 2 (Optional provider filter):");
-        console.log("  - Before provider filter:", beforeFilterCount);
-        console.log("  - After provider filter:", eligibleSavedProviders.length);
+        console.log("📋 Provider filtering - Step 3 (Optional provider ID filter):");
+        console.log("  - Before provider ID filter:", beforeFilterCount);
+        console.log("  - After provider ID filter:", eligibleSavedProviders.length);
+        console.log("  - Provider IDs requested:", args.providerIds);
+        console.log("  - Matched SavedProvider IDs:", eligibleSavedProviders.map(sp => sp.id));
       }
 
       if (eligibleSavedProviders.length === 0) {
@@ -177,79 +259,125 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           error_code: "NO_PROVIDERS_FOR_TYPE",
           message_to_patient: "",
           data: {
-            appointment_type_name: appointmentType.name
+            appointment_type_name: finalAppointmentType.name
           }
         };
       }
 
-      // STEP 3: Collect unique nexhealthProviderId values for NexHealth API
+      // Collect the unique nexhealthProviderId values for NexHealth API
       const nexhealthProviderIds = [...new Set(
         eligibleSavedProviders.map(sp => sp.provider.nexhealthProviderId)
       )];
 
       console.log("🔗 NexHealth Provider IDs extracted:", nexhealthProviderIds);
+      console.log("📋 Eligible provider details:");
+      eligibleSavedProviders.forEach(sp => {
+        console.log(`  - ${sp.provider.firstName || ''} ${sp.provider.lastName || ''}`.trim());
+        console.log(`    SavedProvider ID: ${sp.id}`);
+        console.log(`    Provider ID: ${sp.provider.id}`);
+        console.log(`    NexHealth Provider ID: ${sp.provider.nexhealthProviderId}`);
+        console.log(`    Accepted appointment types: ${sp.acceptedAppointmentTypes?.length || 0}`);
+             });
 
-      // CRUCIAL STEP C: Get operatories assigned to these eligible providers
+      // SUBPHASE 3: Accurate Operatory Derivation and Filtering Logic
+      console.log("\n🏥 OPERATORY DERIVATION");
+      console.log("=======================");
+      
+      // Initialize empty array for eligible operatories
       const eligibleOperatories: Array<{
         id: string;
         nexhealthOperatoryId: string;
         name: string;
       }> = [];
 
+      // Iterate through eligible providers to collect their assigned operatories
       for (const savedProvider of eligibleSavedProviders) {
-        // Get operatories assigned to this provider
+        console.log(`🔍 Checking operatories for provider: ${savedProvider.provider.firstName} ${savedProvider.provider.lastName}`);
+        // Get operatories assigned to this provider via the assignedOperatories relation
         const assignedOperatories = savedProvider.assignedOperatories?.map(assignment => assignment.savedOperatory) || [];
+        console.log(`  - Assigned operatories: ${assignedOperatories.length}`);
+        assignedOperatories.forEach(op => {
+          console.log(`    • ${op.name} (Laine ID: ${op.id}, NexHealth ID: ${op.nexhealthOperatoryId})`);
+        });
         eligibleOperatories.push(...assignedOperatories);
       }
 
-      // Remove duplicates
-      const uniqueOperatories = eligibleOperatories.filter((operatory, index, self) => 
-        index === self.findIndex(o => o.id === operatory.id)
-      );
+      // Remove duplicate SavedOperatory records (using Set based on id)
+      const uniqueOperatoriesMap = new Map();
+      eligibleOperatories.forEach(operatory => {
+        uniqueOperatoriesMap.set(operatory.id, operatory);
+      });
+      const uniqueOperatories = Array.from(uniqueOperatoriesMap.values());
 
       console.log("🏢 Operatory derivation - Step 1 (From eligible providers):");
-      console.log("  - Operatories derived from eligible providers:", uniqueOperatories.length);
+      console.log("  - Operatories derived from eligible providers:", eligibleOperatories.length);
+      console.log("  - Unique operatories after deduplication:", uniqueOperatories.length);
 
-      // Apply optional operatory filter
+      // Apply optional operatory filter (if args.operatoryIds are provided)
       let finalOperatories = uniqueOperatories;
       if (args.operatoryIds && args.operatoryIds.length > 0) {
         const beforeFilterCount = finalOperatories.length;
         finalOperatories = uniqueOperatories.filter(operatory => 
-          args.operatoryIds!.includes(operatory.id)
+          args.operatoryIds!.includes(operatory.id) // operatory.id is the Laine CUID of SavedOperatory
         );
-        console.log("🏢 Operatory derivation - Step 2 (Optional operatory filter):");
-        console.log("  - Before operatory filter:", beforeFilterCount);
-        console.log("  - After operatory filter:", finalOperatories.length);
+        console.log("🏢 Operatory derivation - Step 2 (Optional operatory ID filter):");
+        console.log("  - Before operatory ID filter:", beforeFilterCount);
+        console.log("  - After operatory ID filter:", finalOperatories.length);
+        console.log("  - Operatory IDs requested:", args.operatoryIds);
+        console.log("  - Matched SavedOperatory IDs:", finalOperatories.map(op => op.id));
       }
 
       // Extract nexhealthOperatoryIds for the API call
       const nexhealthOperatoryIds = finalOperatories.map(operatory => operatory.nexhealthOperatoryId);
 
       console.log("🔗 NexHealth Operatory IDs extracted:", nexhealthOperatoryIds);
+      console.log("📋 Final operatory details:");
+      finalOperatories.forEach(op => {
+        console.log(`  - ${op.name} (Laine ID: ${op.id}, NexHealth ID: ${op.nexhealthOperatoryId})`);
+             });
 
-      // Build NexHealth API parameters with correct requirements
-      const params: Record<string, string | number | string[]> = {
-        start_date: args.requestedDate,
-        days: args.days,
-        'lids[]': [practice.nexhealthLocationId],
-        'pids[]': nexhealthProviderIds,
-        slot_length: slotLength, // CRITICAL: Use duration from ConversationState or AppointmentType
-        overlapping_operatory_slots: 'false' // CRITICAL: Explicitly set to false as string
-      };
-
-      // Add operatory IDs if we have any
-      if (nexhealthOperatoryIds.length > 0) {
-        params['operatory_ids[]'] = nexhealthOperatoryIds;
+      // SUBPHASE 4: Practice Timezone Usage for Lunch Break and Display Formatting
+      console.log("\n⏰ PRACTICE TIMEZONE SETUP");
+      console.log("==========================");
+      
+      // Retrieve practiceTimezone from context.practice.timezone with fallback
+      const practiceTimezone = practice.timezone || 'America/Chicago';
+      if (practice.timezone) {
+        console.log("✅ Using practice timezone:", practice.timezone);
+      } else {
+        console.log("⚠️ Using default timezone (America/Chicago) for slot processing. Consider setting practice.timezone in practice configuration for accuracy.");
       }
 
-      // CRITICAL: DO NOT send appointment_type_id to NexHealth
-      console.log("🚀 NEXHEALTH API CALL PARAMETERS:");
+      // SUBPHASE 5: Construct Correct NexHealth API Parameters
+      console.log("\n🚀 NEXHEALTH API CALL PARAMETERS");
+      console.log("=================================");
+      
+      // Build NexHealth API parameters precisely per NexHealth requirements
+      const params: Record<string, string | number | string[]> = {
+        start_date: args.requestedDate,
+        days: args.days, // Ensure it's a number
+        'lids[]': [practice.nexhealthLocationId],
+        'pids[]': nexhealthProviderIds,
+        slot_length: slotLength, // CRITICAL: Use duration from ConversationState or AppointmentType fallback
+        overlapping_operatory_slots: 'false' // CRITICAL: Must be string 'false'
+      };
+
+      // CRITICAL: Only add operatory_ids[] if the array is not empty
+      if (nexhealthOperatoryIds.length > 0) {
+        params['operatory_ids[]'] = nexhealthOperatoryIds;
+        console.log("✅ Including operatory filter with", nexhealthOperatoryIds.length, "operatories");
+      } else {
+        console.log("ℹ️ No operatory filter - querying across all available operatories for providers");
+      }
+
+      // CRITICAL: Explicitly DO NOT include appointment_type_id in these parameters
+      console.log("📋 Final API parameters:");
       console.log("  - Endpoint: /appointment_slots");
       console.log("  - Subdomain:", practice.nexhealthSubdomain);
       console.log("  - Params:", JSON.stringify(params, null, 2));
-      console.log("  - IMPORTANT: slot_length =", slotLength);
-      console.log("  - IMPORTANT: overlapping_operatory_slots = 'false'");
-      console.log("  - IMPORTANT: NO appointment_type_id parameter sent to NexHealth");
+      console.log("  ✅ IMPORTANT: slot_length =", slotLength, "(from " + (conversationState.determinedDurationMinutes ? "ConversationState" : "AppointmentType") + ")");
+      console.log("  ✅ IMPORTANT: overlapping_operatory_slots = 'false'");
+      console.log("  ✅ IMPORTANT: NO appointment_type_id parameter sent to NexHealth (as required)");
 
       // Call NexHealth API
       const slotsResponse = await fetchNexhealthAPI(
@@ -260,7 +388,11 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
 
       console.log("📡 NexHealth API Response received");
 
-      // Parse response and extract slots
+      // SUBPHASE 6: Refine Slot Processing, Formatting, and Return Object
+      console.log("\n📊 SLOT PROCESSING & FORMATTING");
+      console.log("===============================");
+      
+      // Parse Raw Slots from NexHealth response
       interface NexhealthSlot {
         time: string;
         end_time: string;
@@ -274,9 +406,9 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       if (slotsResponse?.data && Array.isArray(slotsResponse.data)) {
         // Extract all slots from all providers
         for (const providerData of slotsResponse.data) {
-                     if (providerData.slots && Array.isArray(providerData.slots)) {
-                          rawSlots.push(...providerData.slots.map((slot: unknown) => ({
-               ...(slot as Record<string, unknown>),
+          if (providerData.slots && Array.isArray(providerData.slots)) {
+            rawSlots.push(...providerData.slots.map((slot: unknown) => ({
+              ...(slot as Record<string, unknown>),
               provider_id: providerData.pid,
               location_id: providerData.lid
             })));
@@ -284,48 +416,50 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         }
       }
 
-      console.log("📊 Slot processing:");
+      console.log("📊 Raw slot parsing:");
       console.log("  - Raw slots from NexHealth API:", rawSlots.length);
 
-      // Filter out lunch break slots using practice timezone
-      const practiceTimezone = practice.timezone || 'America/Chicago';
+      // Lunch Break Filtering using practice timezone
       const filteredSlots = rawSlots.filter(slot => !isLunchBreakSlot(slot.time, practiceTimezone));
 
+      console.log("📊 Lunch break filtering:");
       console.log("  - Slots after lunch break filtering:", filteredSlots.length);
       console.log("  - Lunch break slots filtered out:", rawSlots.length - filteredSlots.length);
-      if (practice.timezone) {
-        console.log("  - Using practice timezone:", practice.timezone);
-      } else {
-        console.log("  - Using default timezone (America/Chicago) - consider setting practice.timezone");
-      }
+      console.log("  - Practice timezone used for filtering:", practiceTimezone);
 
-      // Create provider lookup map
+      // Provider & Operatory Lookup Maps for enriching slot data
+      console.log("📊 Creating lookup maps:");
+      
+      // Provider lookup map (NexHealth Provider ID -> Laine Provider details)
       const providerLookup = new Map();
       eligibleSavedProviders.forEach(sp => {
         providerLookup.set(sp.provider.nexhealthProviderId, {
-          id: sp.provider.id,
+          id: sp.provider.id, // Laine Provider CUID
           nexhealthProviderId: sp.provider.nexhealthProviderId,
-          name: `${sp.provider.firstName || ''} ${sp.provider.lastName}`.trim()
+          name: `${sp.provider.firstName || ''} ${sp.provider.lastName || ''}`.trim()
         });
       });
+      console.log("  - Provider lookup map entries:", providerLookup.size);
 
-      // Create operatory lookup map
+      // Operatory lookup map (NexHealth Operatory ID -> Laine SavedOperatory details)
       const operatoryLookup = new Map();
       finalOperatories.forEach(operatory => {
         operatoryLookup.set(operatory.nexhealthOperatoryId, {
-          id: operatory.id,
+          id: operatory.id, // Laine SavedOperatory CUID
           nexhealthOperatoryId: operatory.nexhealthOperatoryId,
           name: operatory.name
         });
       });
+      console.log("  - Operatory lookup map entries:", operatoryLookup.size);
 
-      // Format slots for display with enhanced information
+      // Format Slots with Laine-specific enrichment and practice timezone formatting
+      console.log("📊 Formatting slots:");
       const formattedSlots = filteredSlots.map((slot, index) => {
         // Parse the time string correctly to preserve the timezone
         const startTime = new Date(slot.time);
         const endTime = new Date(slot.end_time);
         
-        // Use the practice timezone for formatting
+        // Use the practice timezone for formatting display times
         const timeString = startTime.toLocaleTimeString('en-US', {
           hour: 'numeric',
           minute: '2-digit',
@@ -340,45 +474,60 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           timeZone: practiceTimezone
         });
 
-        // Get provider and operatory details
+        // Get provider details from lookup map
         const providerInfo = providerLookup.get(slot.provider_id.toString()) || { 
-          name: `Provider ${slot.provider_id}`, 
-          nexhealthProviderId: slot.provider_id 
+          id: undefined, // No Laine Provider CUID found
+          nexhealthProviderId: slot.provider_id.toString(),
+          name: `Provider ${slot.provider_id}` 
         };
         
+        // Get operatory details from lookup map (if operatory_id exists)
         const operatoryInfo = slot.operatory_id ? 
           operatoryLookup.get(slot.operatory_id.toString()) || { 
-            name: `Operatory ${slot.operatory_id}`, 
-            nexhealthOperatoryId: slot.operatory_id 
+            id: undefined, // No Laine SavedOperatory CUID found
+            nexhealthOperatoryId: slot.operatory_id.toString(),
+            name: `Operatory ${slot.operatory_id}` 
           } : null;
         
         return {
           slot_id: `slot_${index}`,
-          time: slot.time,
-          end_time: slot.end_time,
-          display_time: timeString,
-          display_end_time: endTimeString,
-          display_range: `${timeString} - ${endTimeString}`,
-          operatory_id: slot.operatory_id,
-          provider_id: slot.provider_id,
-          location_id: slot.location_id,
-          provider_info: providerInfo,
-          operatory_info: operatoryInfo
+          time: slot.time, // Raw ISO string from NexHealth
+          end_time: slot.end_time, // Raw ISO string from NexHealth
+          display_time: timeString, // Formatted using practice timezone
+          display_end_time: endTimeString, // Formatted using practice timezone
+          display_range: `${timeString} - ${endTimeString}`, // Formatted range
+          operatory_id: slot.operatory_id, // Raw NexHealth operatory ID
+          provider_id: slot.provider_id, // Raw NexHealth provider ID
+          location_id: slot.location_id, // Raw NexHealth location ID
+          provider_info: providerInfo, // Enriched with Laine details
+          operatory_info: operatoryInfo // Enriched with Laine details (if applicable)
         };
       });
 
-      // Sort slots by time
+      // Sort slots chronologically by time
       formattedSlots.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+      console.log("  - Total formatted slots:", formattedSlots.length);
 
-      const appointmentTypeName = appointmentType.name;
+      const appointmentTypeName = finalAppointmentType.name;
       const friendlyDate = formatDate(args.requestedDate);
 
-      // Update ConversationState
+      // SUBPHASE 7: Update ConversationState and Final Review
+      console.log("\n📝 CONVERSATION STATE UPDATE");
+      console.log("============================");
+      
+      // After successfully processing slots, update ConversationState
       conversationState.updateRequestedDate(args.requestedDate);
-      conversationState.availableSlotsForDate = formattedSlots;
+      conversationState.availableSlotsForDate = formattedSlots; // Will be empty array if no slots found
+      
+      console.log("✅ ConversationState updated:");
+      console.log("  - requestedDate:", args.requestedDate);
+      console.log("  - availableSlotsForDate count:", formattedSlots.length);
 
+      // Construct ToolResult.data with comprehensive information
+      console.log("📊 Constructing final result:");
+      
       if (formattedSlots.length === 0) {
-        console.log("✅ No slots available - returning no availability result");
+        console.log("ℹ️ No slots available - returning no availability result");
         return {
           success: true,
           message_to_patient: "",
@@ -388,29 +537,45 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
             appointment_type_name: appointmentTypeName,
             available_slots: [],
             has_availability: false,
+            total_slots_found: 0,
+            slots_offered: 0,
+            offered_time_list_string_for_message_suggestion: "",
+            has_more_slots_beyond_offered: false,
             debug_info: {
               slot_length_used: slotLength,
               raw_slots_before_lunch_filter: rawSlots.length,
               slots_after_lunch_filter: filteredSlots.length,
+              lunch_break_slots_filtered: rawSlots.length - filteredSlots.length,
               providers_checked: eligibleSavedProviders.length,
-              operatories_checked: finalOperatories.length
+              operatories_checked: finalOperatories.length,
+              practice_timezone_used: practiceTimezone
             }
           }
         };
       }
 
-      // Offer a limited number of slots initially for voice, e.g., 3 or 4
+      // Determine number of slots to initially suggest (e.g., 3 or 4 for voice interface)
       const slotsToOfferCount = Math.min(formattedSlots.length, 3);
-      const offeredTimeList = formattedSlots.slice(0, slotsToOfferCount).map(slot => slot.display_time);
       
+      // Create unique display times for the offered slots
+      const offeredTimeList = [...new Set(
+        formattedSlots.slice(0, slotsToOfferCount).map(slot => slot.display_time)
+      )];
+      
+      // Format offered time list string for message suggestion
       let timeOptionsMessage = "";
       if (offeredTimeList.length === 1) {
         timeOptionsMessage = offeredTimeList[0];
       } else if (offeredTimeList.length > 1) {
-        timeOptionsMessage = offeredTimeList.slice(0, -1).join(', ') + (offeredTimeList.length > 1 ? ', or ' : '') + offeredTimeList[offeredTimeList.length - 1];
+        timeOptionsMessage = offeredTimeList.slice(0, -1).join(', ') + 
+          (offeredTimeList.length > 1 ? ', or ' : '') + 
+          offeredTimeList[offeredTimeList.length - 1];
       }
 
-      console.log("✅ Final result:", formattedSlots.length, "formatted slots ready to return");
+      console.log("✅ Final result summary:");
+      console.log("  - Total formatted slots:", formattedSlots.length);
+      console.log("  - Slots to offer initially:", slotsToOfferCount);
+      console.log("  - Offered time options:", timeOptionsMessage);
       console.log("=== CHECK AVAILABLE SLOTS - COMPLETED ===");
 
       return {
@@ -428,7 +593,6 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           has_more_slots_beyond_offered: formattedSlots.length > slotsToOfferCount,
           debug_info: {
             slot_length_used: slotLength,
-            overlapping_operatory_slots_param: 'false',
             raw_slots_before_lunch_filter: rawSlots.length,
             slots_after_lunch_filter: filteredSlots.length,
             lunch_break_slots_filtered: rawSlots.length - filteredSlots.length,
