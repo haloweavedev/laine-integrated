@@ -175,6 +175,19 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
                 lastName: true,
                 nexhealthProviderId: true
               }
+            },
+            // ADD THIS: Include operatory assignments
+            assignedOperatories: {
+              select: {
+                savedOperatory: {
+                  select: {
+                    id: true, // Laine CUID of SavedOperatory
+                    name: true,
+                    nexhealthOperatoryId: true,
+                    isActive: true // ensure we only use active operatories
+                  }
+                }
+              }
             }
           }
         },
@@ -340,7 +353,7 @@ GUIDELINES:
 - If failed, politely explain and suggest actionable next steps
 - Sound human, avoid robotic language or procedural descriptions
 - Always offer alternatives when possible
-- Avoid filler phrases like "Hold on", "Just a sec", "Let me process that"
+- AVOID using generic fillers like "Hold on", "Just a sec", "Give me a moment" - use brief "Acknowledgment + Action" statements instead
 
 ERROR RECOVERY BY CODE:
 - PATIENT_NOT_FOUND: "I couldn't find your record. Could you verify your name and date of birth, or should I register you as a new patient?"
@@ -362,6 +375,8 @@ FLOW GUIDANCE PATTERNS:
 - CHECK_AVAILABILITY_FIRST: "Let me check our availability for you first."
 - CONFIRM_SLOT_FIRST: "Which of those available times works best for you?"
 - PROCEED_WITH_NEW_PATIENT_REGISTRATION: "Since you're a new patient, let me get you registered first. What's your first name?"
+- DETERMINE_PATIENT_STATUS_FIRST: "Are you a new or existing patient with us?"
+- MATCH_APPOINTMENT_TYPE_FROM_REASON: "Let me find the right appointment type for your [reason]..."
 
 TOOL-SPECIFIC PATTERNS:
 - find_appointment_type SUCCESS: "Okay, a [type] is about [duration] minutes. What date works for you?"
@@ -369,7 +384,12 @@ TOOL-SPECIFIC PATTERNS:
 - check_available_slots SUCCESS no times: "I don't see any openings for [type] on [date]. Would you like me to check another date?"
 - find_patient_in_ehr SUCCESS: "Found you, [name]! Let's continue with your appointment."
 - book_appointment SUCCESS: "Confirmed! Your [type] with [provider] is set for [date] at [time]. Need directions?"
-- create_new_patient SUCCESS: "Great, [name]! You're registered. Now let's schedule your [type] appointment."
+- create_new_patient SUCCESS with appointment type: "Great, [name]! You're registered. We were discussing a [type] appointment. What date works for you?"
+- create_new_patient SUCCESS with reason: "Great, [name]! You're registered. You mentioned [reason] - let me find the right appointment type for that."
+- create_new_patient SUCCESS general: "Great, [name]! You're registered. What type of appointment are you looking for today?"
+- create_new_patient action_needed collect_full_name: "Could you please tell me your first and last name?"
+- create_new_patient action_needed confirm_firstName_spelling: "Thanks. Could you spell your first name, [firstName], for me?"
+- create_new_patient action_needed confirm_lastName_spelling: "And could you spell your last name, [lastName]?"
 
 Return ONLY the sentence.
     `.trim();
@@ -420,6 +440,18 @@ Return ONLY the sentence.
             date: toolResult.data?.date_friendly,
             time: toolResult.data?.time
           };
+          break;
+        case 'create_new_patient':
+          compactData = toolResult.data ? {
+            action_needed: toolResult.data.action_needed,
+            firstName: toolResult.data.firstName,
+            lastName: toolResult.data.lastName,
+            patient_name: toolResult.data.patient_name,
+            created: toolResult.data.created,
+            hasAppointmentType: !!toolResult.data.determinedAppointmentTypeId,
+            appointmentTypeName: toolResult.data.determinedAppointmentTypeName,
+            reasonForVisit: toolResult.data.reasonForVisit
+          } : {};
           break;
         default:
           // For other tools, include minimal essential data
@@ -557,8 +589,35 @@ function getNextLogicalStep(
     };
   }
   
+  // If trying to find appointment type but it's already determined, skip to next logical step
+  if (toolNameAttempted === 'find_appointment_type' && conversationState.determinedAppointmentTypeId) {
+    console.log(`[${toolNameAttempted}] Appointment type already determined, proceeding to next step`);
+    // If patient is identified and date is not set, ask for date
+    if (conversationState.identifiedPatientId && !conversationState.requestedDate) {
+      return {
+        guidanceMessageKey: 'ASK_FOR_DATE_FIRST'
+      };
+    }
+    // If patient and date are set, check availability
+    if (conversationState.identifiedPatientId && conversationState.requestedDate) {
+      return {
+        requiredNextToolName: 'check_available_slots',
+        guidanceMessageKey: 'CHECK_AVAILABILITY_FIRST'
+      };
+    }
+    // Otherwise, proceed with current flow
+    return null;
+  }
+
   // If trying to check slots but appointment type not determined
   if (toolNameAttempted === 'check_available_slots' && !conversationState.determinedAppointmentTypeId) {
+    // Check if reasonForVisit is available but appointment type not yet determined
+    if (conversationState.reasonForVisit) {
+      return { 
+        requiredNextToolName: 'find_appointment_type', 
+        guidanceMessageKey: 'MATCH_APPOINTMENT_TYPE_FROM_REASON' 
+      };
+    }
     return { 
       requiredNextToolName: 'find_appointment_type', 
       guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
@@ -630,7 +689,7 @@ async function executeToolSafely(
     const startTime = Date.now();
     
     console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
-    console.log('[ToolCallHandler] ConversationState before tool execution:', JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
+    console.log(`[executeToolSafely] For Tool: ${tool.name} - ConversationState BEFORE run:`, JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
     
     // FLOW ENFORCEMENT: Check if the tool call is appropriate for the current conversation state
     const flowCheck = getNextLogicalStep(tool.name, context.conversationState);
@@ -886,10 +945,8 @@ async function executeToolSafely(
       context
     });
     
-    // Log ConversationState after successful tool execution (if state might have changed)
-    if (toolResult.success && ['find_patient_in_ehr', 'create_new_patient', 'find_appointment_type', 'check_available_slots', 'book_appointment'].includes(tool.name)) {
-      console.log('[ToolCallHandler] ConversationState after successful tool execution:', JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
-    }
+    // Log ConversationState after tool execution
+    console.log(`[executeToolSafely] For Tool: ${tool.name} - ConversationState AFTER run:`, JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
     
     // Generate dynamic message for successful execution
     toolResult.message_to_patient = await generateDynamicMessage(
@@ -975,19 +1032,27 @@ async function logToolExecution(
 }
 
 export async function POST(req: NextRequest) {
-  console.log("=== VAPI Centralized Tool Handler ===");
-  
   try {
-    // TODO: Implement request verification when VAPI provides signing
+    console.log("--- [ToolCallRoute] START NEW REQUEST ---");
     
     const payload: VapiPayload = await req.json();
-    console.log("VAPI payload:", JSON.stringify(payload, null, 2));
     
-    // Validate payload structure
-    if (!payload.message || payload.message.type !== "tool-calls") {
-      console.error("Invalid payload type:", payload.message?.type);
-      return NextResponse.json({ error: "Invalid payload type" }, { status: 400 });
+    // SUBPHASE 1: Add detailed logging of the raw VAPI payload
+    console.log("[ToolCallRoute] RAW VAPI Payload:", JSON.stringify(payload, null, 2));
+    
+    // Check if conversationState exists in any tool call arguments
+    const toolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
+    for (let i = 0; i < toolCalls.length; i++) {
+      const toolCall = toolCalls[i];
+      const args = extractToolCallArguments(toolCall);
+      if (args.conversationState) {
+        console.log(`[ToolCallRoute] Found conversationState in tool call ${i}:`, JSON.stringify(args.conversationState, null, 2));
+      } else {
+        console.log(`[ToolCallRoute] No conversationState found in tool call ${i} arguments`);
+      }
     }
+
+    // TODO: Implement request verification when VAPI provides signing
     
     const { message } = payload;
     const vapiCallId = message.call.id;
@@ -1019,7 +1084,6 @@ export async function POST(req: NextRequest) {
       console.error("Debug info:", JSON.stringify(debugInfo, null, 2));
       
       // Return error results for all tool calls
-      const toolCalls = message.toolCallList || message.toolCalls || [];
       const errorResults = toolCalls.map((toolCall: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
         toolCallId: extractToolCallId(toolCall),
         result: JSON.stringify({
@@ -1035,6 +1099,8 @@ export async function POST(req: NextRequest) {
     
     // Initialize ConversationState
     const conversationState = new ConversationState(practice.id, vapiCallId, assistantId);
+    
+    console.log("[ToolCallRoute] Initialized/Loaded ConversationState:", JSON.stringify(conversationState.getStateSnapshot(), null, 2));
     
     // Update call log status and fetch existing context data
     let callLogContextData = null;
@@ -1284,6 +1350,8 @@ export async function POST(req: NextRequest) {
       let vapiToolResponseItem: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
       const currentConversationStateSnapshot = context.conversationState.getStateSnapshot();
+      
+      console.log(`[ToolCallRoute] Attaching ConversationState to VAPI response for ${tool.name}:`, JSON.stringify(currentConversationStateSnapshot, null, 2));
 
       // Apply dynamic message structure for ALL tools
       if (toolResult.success) {

@@ -14,10 +14,16 @@ function getCurrentDateContext(): string {
 }
 
 export const createNewPatientSchema = z.object({
+  fullName: z.string().optional()
+    .describe(`Patient's full name (first and last together). Example: "My name is John Smith" → "John Smith"`),
   firstName: z.string().optional()
     .describe(`Patient's first name. If spelled out (B-O-B), convert to proper form (Bob). Example: "My name is Sarah" → "Sarah"`),
   lastName: z.string().optional()
     .describe(`Patient's last name. If spelled out (T-E-S-T), convert to proper form (Test). Example: "Last name is Johnson" → "Johnson"`),
+  firstNameSpelling: z.string().optional()
+    .describe(`Spelled-out first name for confirmation. Example: "S-A-R-A-H" → "S-A-R-A-H"`),
+  lastNameSpelling: z.string().optional()
+    .describe(`Spelled-out last name for confirmation. Example: "J-O-H-N-S-O-N" → "J-O-H-N-S-O-N"`),
   dateOfBirth: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
     .optional()
@@ -37,8 +43,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   description: "Creates a new patient record in the EHR system through staged collection. Call when patient is NEW or find_patient_in_ehr fails. Gathers information step-by-step: firstName, lastName, dateOfBirth (YYYY-MM-DD), phone (10+ digits), email. Confirms all details before API call. Returns patient_id, patient_name.",
   schema: createNewPatientSchema,
   prerequisites: [
-    { argName: 'firstName', askUserMessage: "To create your patient record, could you please tell me your first name?" },
-    { argName: 'lastName', askUserMessage: "And what is your last name?" },
+    { argName: 'fullName', askUserMessage: "To create your patient record, could you please tell me your first and last name?" },
     { argName: 'dateOfBirth', askUserMessage: "What is your date of birth, including the year?" },
     { argName: 'phone', askUserMessage: "What's a good phone number we can reach you at?" },
     { argName: 'email', askUserMessage: "And finally, what is your email address?" }
@@ -71,13 +76,40 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
     }
 
     try {
-      // Update ConversationState with any new information from args
+      // Handle fullName parsing into firstName and lastName
+      if (args.fullName && typeof args.fullName === 'string') {
+        const nameParts = args.fullName.trim().split(/\s+/);
+        if (nameParts.length >= 2) {
+          const firstName = nameParts[0];
+          const lastName = nameParts.slice(1).join(' '); // Handle middle names as part of last name
+          conversationState.updateNewPatientDetail('firstName', firstName);
+          conversationState.updateNewPatientDetail('lastName', lastName);
+        }
+      }
+      
+      // Handle individual firstName and lastName updates (for spelling corrections)
       if (args.firstName && typeof args.firstName === 'string') {
         conversationState.updateNewPatientDetail('firstName', args.firstName.trim());
       }
       if (args.lastName && typeof args.lastName === 'string') {
         conversationState.updateNewPatientDetail('lastName', args.lastName.trim());
       }
+      
+      // Handle spelling confirmations
+      if (args.firstNameSpelling && typeof args.firstNameSpelling === 'string') {
+        // Convert spelling to proper name format (remove spaces/dashes, capitalize)
+        const spelledName = args.firstNameSpelling.replace(/[\s\-]/g, '').toLowerCase();
+        const properName = spelledName.charAt(0).toUpperCase() + spelledName.slice(1);
+        conversationState.updateNewPatientDetail('firstName', properName, true); // Mark as confirmed
+      }
+      if (args.lastNameSpelling && typeof args.lastNameSpelling === 'string') {
+        // Convert spelling to proper name format (remove spaces/dashes, capitalize)
+        const spelledName = args.lastNameSpelling.replace(/[\s\-]/g, '').toLowerCase();
+        const properName = spelledName.charAt(0).toUpperCase() + spelledName.slice(1);
+        conversationState.updateNewPatientDetail('lastName', properName, true); // Mark as confirmed
+      }
+      
+      // Update other details
       if (args.dateOfBirth && typeof args.dateOfBirth === 'string') {
         conversationState.updateNewPatientDetail('dob', args.dateOfBirth);
       }
@@ -93,58 +125,88 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         conversationState.updateNewPatientDetail('insuranceName', args.insurance_name.trim());
       }
 
-      // Check if all required fields are collected
+      // Check if all required fields are collected and confirmed
       const { firstName, lastName, dob, phone, email } = conversationState.newPatientInfo;
-      const allFieldsCollected = firstName && lastName && dob && phone && email;
-
-      // If not all fields collected, determine what to ask for next
-      if (!allFieldsCollected) {
-        let nextDetailToCollect = null;
-        
-        if (!firstName) {
-          nextDetailToCollect = 'firstName';
-        } else if (!lastName) {
-          nextDetailToCollect = 'lastName';
-        } else if (!dob) {
-          nextDetailToCollect = 'dateOfBirth';
-        } else if (!phone) {
-          nextDetailToCollect = 'phone';
-        } else if (!email) {
-          nextDetailToCollect = 'email';
-        }
-
+      const { firstNameConfirmed, lastNameConfirmed } = conversationState.newPatientInfoConfirmation;
+      
+      // Handle staged collection and confirmation flow
+      if (!firstName || !lastName) {
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "collect_full_name",
+            current_details: conversationState.newPatientInfo
+          }
+        };
+      }
+      
+      // If names are collected but not confirmed, ask for spelling confirmation
+      if (!firstNameConfirmed) {
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "confirm_firstName_spelling",
+            firstName: firstName,
+            current_details: conversationState.newPatientInfo
+          }
+        };
+      }
+      
+      if (!lastNameConfirmed) {
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "confirm_lastName_spelling",
+            lastName: lastName,
+            current_details: conversationState.newPatientInfo
+          }
+        };
+      }
+      
+      // Continue with other fields if names are confirmed
+      if (!dob) {
         return {
           success: true,
           message_to_patient: "",
           data: {
             action_needed: "collect_next_detail",
-            next_detail_to_collect: nextDetailToCollect,
+            next_detail_to_collect: 'dateOfBirth',
+            current_details: conversationState.newPatientInfo
+          }
+        };
+      }
+      
+      if (!phone) {
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "collect_next_detail",
+            next_detail_to_collect: 'phone',
+            current_details: conversationState.newPatientInfo
+          }
+        };
+      }
+      
+      if (!email) {
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "collect_next_detail",
+            next_detail_to_collect: 'email',
             current_details: conversationState.newPatientInfo
           }
         };
       }
 
-      // All details collected - check if user has confirmed
-      if (!conversationState.newPatientInfoConfirmation.allDetailsConfirmed && !args.userConfirmation) {
-        return {
-          success: true,
-          message_to_patient: "",
-          data: {
-            action_needed: "confirm_all_details",
-            patient_details_for_confirmation: {
-              firstName: conversationState.newPatientInfo.firstName,
-              lastName: conversationState.newPatientInfo.lastName,
-              dateOfBirth: conversationState.newPatientInfo.dob,
-              phone: formatPhoneForDisplay(conversationState.newPatientInfo.phone!),
-              email: conversationState.newPatientInfo.email,
-              insuranceName: conversationState.newPatientInfo.insuranceName
-            }
-          }
-        };
-      }
-
-      // User has confirmed OR userConfirmation is true - proceed with API call
-      if (args.userConfirmation || conversationState.newPatientInfoConfirmation.allDetailsConfirmed) {
+      // All details collected - since individual confirmations were done during collection,
+      // we can proceed directly to API call without full re-summary
+      if (!conversationState.newPatientInfoConfirmation.allDetailsConfirmed) {
+        // Mark all details as confirmed since we reached this point with individual confirmations
         conversationState.setAllNewPatientDetailsConfirmed(true);
       }
 
