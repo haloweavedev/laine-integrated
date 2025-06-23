@@ -38,7 +38,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
   schema: findPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
-    const { practice, vapiCallId } = context;
+    const { practice, vapiCallId, conversationState } = context;
     
     if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
       return {
@@ -109,7 +109,10 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const patient = patients[0] as any; // Take first match
       
-      // Store patient context for subsequent tool calls
+      // Store patient context in ConversationState
+      conversationState.updatePatient(String(patient.id));
+      
+      // Also update call log for backward compatibility
       await updateCallLogWithPatient(vapiCallId, practice.id, String(patient.id));
       
       // Format the date of birth for natural speech
@@ -133,7 +136,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
             dob: patientDob
           }],
           patient_exists: true,
-          patient_id: patient.id,
+          patient_id: String(patient.id), // NexHealth patient ID
           // Enhanced data for message generation:
           confirmed_patient_name: `${patient.first_name || args.firstName} ${patient.last_name || args.lastName}`,
           confirmed_patient_dob_friendly: friendlyDob

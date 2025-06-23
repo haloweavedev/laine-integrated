@@ -53,7 +53,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   ],
   
   async run({ args, context }): Promise<ToolResult> {
-    const { practice, vapiCallId } = context;
+    const { practice, vapiCallId, conversationState } = context;
     
     if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
       return {
@@ -74,8 +74,17 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
     }
 
     try {
+      // Merge collected information from ConversationState with provided args
+      let finalArgs = { ...args };
+      if (conversationState.collectedInfoForNewPatient) {
+        finalArgs = {
+          ...conversationState.collectedInfoForNewPatient,
+          ...args // Args from LLM take precedence
+        };
+      }
+
       // Validate all required fields are present and valid
-      const validationResult = validatePatientData(args);
+      const validationResult = validatePatientData(finalArgs);
       if (!validationResult.isValid) {
         return {
           success: false,
@@ -103,14 +112,14 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         gender: string;
         insurance_name?: string;
       } = {
-        date_of_birth: args.dateOfBirth,
-        phone_number: args.phone,
+        date_of_birth: finalArgs.dateOfBirth,
+        phone_number: finalArgs.phone,
         gender: "Female" // Default as per API example - this can be enhanced later
       };
 
       // Add insurance_name if provided
-      if (args.insurance_name && args.insurance_name.trim() !== "") {
-        patientBio.insurance_name = args.insurance_name.trim();
+      if (finalArgs.insurance_name && finalArgs.insurance_name.trim() !== "") {
+        patientBio.insurance_name = finalArgs.insurance_name.trim();
       }
 
       const newPatientData = {
@@ -118,14 +127,14 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
           provider_id: parseInt(activeProvider.provider.nexhealthProviderId) 
         },
         patient: {
-          first_name: args.firstName,
-          last_name: args.lastName,
-          email: args.email,
+          first_name: finalArgs.firstName,
+          last_name: finalArgs.lastName,
+          email: finalArgs.email,
           bio: patientBio
         }
       };
 
-      console.log(`[createNewPatient] Creating patient: ${args.firstName} ${args.lastName}`);
+      console.log(`[createNewPatient] Creating patient: ${finalArgs.firstName} ${finalArgs.lastName}`);
       console.log(`[createNewPatient] Patient data:`, JSON.stringify(newPatientData, null, 2));
 
       const createResponse = await fetchNexhealthAPI(
@@ -156,27 +165,33 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         };
       }
 
-      // Update call log with new patient ID
+      // Update ConversationState with new patient ID
+      conversationState.updatePatient(String(newPatientId));
+      
+      // Clear the collected new patient info since creation is complete
+      conversationState.clearNewPatientInfo();
+
+      // Update call log with new patient ID for backward compatibility
       await updateCallLogWithPatient(vapiCallId, practice.id, String(newPatientId));
 
       // Format confirmation message
-      const formattedPhone = formatPhoneForDisplay(args.phone);
+      const formattedPhone = formatPhoneForDisplay(finalArgs.phone);
 
       return {
         success: true,
         message_to_patient: "", // Will be filled by dynamic generation
         data: {
           patient_id: String(newPatientId), // Ensure string format for consistency with bookAppointment.ts
-          patient_name: `${args.firstName} ${args.lastName}`,
-          first_name: args.firstName,
-          last_name: args.lastName,
-          date_of_birth: args.dateOfBirth,
+          patient_name: `${finalArgs.firstName} ${finalArgs.lastName}`,
+          first_name: finalArgs.firstName,
+          last_name: finalArgs.lastName,
+          date_of_birth: finalArgs.dateOfBirth,
           phone: formattedPhone,
-          email: args.email,
-          insurance_name: args.insurance_name || null,
+          email: finalArgs.email,
+          insurance_name: finalArgs.insurance_name || null,
           practice_name: practice.name,
           created: true,
-          has_insurance: !!(args.insurance_name && args.insurance_name.trim() !== "")
+          has_insurance: !!(finalArgs.insurance_name && finalArgs.insurance_name.trim() !== "")
         }
       };
 

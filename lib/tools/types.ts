@@ -29,6 +29,7 @@ export interface ToolExecutionContext {
   toolCallId: string;
   assistantId: string;
   callSummaryForNote?: string; // ADD THIS LINE for bookAppointment tool
+  conversationState: import('../conversationState').ConversationState; // Add conversation state
 }
 
 // Tool prerequisite definition

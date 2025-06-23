@@ -25,7 +25,14 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
   ],
   
   async run({ args, context }): Promise<ToolResult> {
-    const { practice } = context;
+    const { practice, conversationState } = context;
+    
+    // If serviceName is not provided in args but we have appointment type context, use it
+    let serviceName = args.serviceName;
+    if (!serviceName && conversationState.determinedAppointmentTypeName) {
+      console.log(`[getServiceCostEstimate] Using appointment type from ConversationState: ${conversationState.determinedAppointmentTypeName}`);
+      serviceName = conversationState.determinedAppointmentTypeName;
+    }
     
     try {
       // Check if practice has service cost estimates configured
@@ -35,7 +42,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
           error_code: "COST_CONFIG_MISSING",
           message_to_patient: "", // Will be filled by dynamic generation
           data: { 
-            serviceName: args.serviceName,
+            serviceName: serviceName,
             found: false,
             estimate: null,
             practice_name: practice.name,
@@ -67,7 +74,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
           error_code: "COST_CONFIG_INVALID",
           message_to_patient: "", // Will be filled by dynamic generation
           data: { 
-            serviceName: args.serviceName,
+            serviceName: serviceName,
             found: false,
             estimate: null,
             practice_name: practice.name,
@@ -76,8 +83,8 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
         };
       }
 
-      // Normalize the service name from args for matching
-      const normalizedServiceName = args.serviceName.trim().toLowerCase();
+      // Normalize the service name for matching
+      const normalizedServiceName = serviceName.trim().toLowerCase();
 
       // Try to find a matching service
       const matchedService = serviceCosts.find(serviceItem => 
@@ -90,7 +97,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
           success: true,
           message_to_patient: "", // Will be filled by dynamic generation
           data: {
-            serviceName: args.serviceName,
+            serviceName: serviceName,
             estimate: matchedService.cost,
             found: true,
             matchedKey: matchedService.service,
@@ -117,7 +124,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
           success: true,
           message_to_patient: "", // Will be filled by dynamic generation
           data: {
-            serviceName: args.serviceName,
+            serviceName: serviceName,
             estimate: specialOffer.cost,
             found: true,
             type: "special_offer",
@@ -135,7 +142,7 @@ const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSc
         success: true,
         message_to_patient: "", // Will be filled by dynamic generation
         data: {
-          serviceName: args.serviceName,
+          serviceName: serviceName,
           found: false,
           estimate: null,
           practice_name: practice.name,

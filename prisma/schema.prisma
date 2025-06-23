@@ -32,6 +32,7 @@ model Practice {
   address              String? // Practice physical address
   acceptedInsurances   String? // Comma-separated list of accepted insurances
   serviceCostEstimates String? // Service cost estimates string
+  timezone             String? // Practice timezone for accurate lunch break filtering (e.g., 'America/Chicago')
 
   // VAPI Assistant relationship - moved to separate config table for better modularity
   assistantConfig               PracticeAssistantConfig? // One-to-one relation

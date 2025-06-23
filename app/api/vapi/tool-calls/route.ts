@@ -6,6 +6,7 @@ import { getErrorCode, getPatientMessage } from "@/lib/utils/error-messages";
 import { generateCallSummaryForNote } from "@/lib/ai/summarization";
 import { generateText, CoreMessage } from 'ai';
 import { openai } from '@ai-sdk/openai';
+import { ConversationState } from "@/lib/conversationState";
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -139,15 +140,34 @@ async function findPracticeByAssistantId(assistantIdOrName: string) {
 }
 
 // Separate function to fetch practice with scheduling data
+// PERFORMANCE OPTIMIZATION: Optimized query with selective field fetching
 async function fetchPracticeWithSchedulingData(practiceId: string) {
   try {
     const practice = await prisma.practice.findUnique({ 
       where: { id: practiceId },
       include: {
-        appointmentTypes: true,
+        appointmentTypes: {
+          select: {
+            id: true,
+            name: true,
+            duration: true,
+            nexhealthAppointmentTypeId: true
+          }
+        },
         savedProviders: {
           where: { isActive: true },
-          include: {
+          select: {
+            id: true,
+            isActive: true,
+            acceptedAppointmentTypes: {
+              select: {
+                appointmentType: {
+                  select: {
+                    id: true
+                  }
+                }
+              }
+            },
             provider: {
               select: {
                 id: true,
@@ -159,7 +179,12 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
           }
         },
         savedOperatories: {
-          where: { isActive: true }
+          where: { isActive: true },
+          select: {
+            id: true,
+            name: true,
+            nexhealthOperatoryId: true
+          }
         }
       }
     });
@@ -289,74 +314,120 @@ function extractToolCallArguments(toolCall: any): Record<string, unknown> { // e
 
 /**
  * Generate dynamic message using LLM based on tool execution outcome
+ * OPTIMIZED for performance and minimal latency
  */
 async function generateDynamicMessage(
   toolName: string,
   toolArgs: unknown,
-  toolResult: { success: boolean; data?: Record<string, unknown>; error_code?: string; _internal_prereq_failure_info?: { missingArg: string, askUserMessage: string } }
+  toolResult: { 
+    success: boolean; 
+    data?: Record<string, unknown>; 
+    error_code?: string; 
+    _internal_prereq_failure_info?: { missingArg: string, askUserMessage: string };
+    flow_correction_guidance?: string;
+  }
 ): Promise<string> {
   try {
+    // PERFORMANCE OPTIMIZATION: Streamlined system prompt for speed with comprehensive error recovery
     const systemPromptContent = `
-You are a friendly and helpful AI dental office assistant named Laine.
-A tool has just been executed (or attempted). Based on the tool's name, its input arguments, and the execution outcome,
-craft ONE concise, conversational sentence to tell the patient.
-This sentence should:
-1. Briefly acknowledge the action or what was checked.
-2. Clearly state the result (e.g., success, specific data found, failure, information missing).
-3. If successful and more steps are needed, naturally lead to the next question or action.
-4. If failed or information is missing, politely explain and ask for the necessary information or suggest an alternative.
-5. Sound human and empathetic. Avoid robotic phrasing.
+You are Laine, a friendly AI dental assistant. Based on the tool execution result, craft ONE concise, natural sentence.
 
-If the 'execution_outcome' indicates a 'PREREQUISITE_MISSING' error_code and provides 'prerequisite_failure_details' (like the missing argument name and a suggested question for the user),
-your primary goal is to rephrase the suggested question ('askUserMessage') into a natural, polite, single sentence to ask the patient for that specific missing information.
-Example: If tool 'check_slots' needs 'appointment_type' and the suggested question is "What type of appointment are you looking for?",
-you might say: "Sure, I can check that for you! What type of appointment did you have in mind?"
-Return ONLY that single sentence. Do not add any preamble like "Okay, here's the sentence:".
+GUIDELINES:
+- Be empathetic and conversational
+- Acknowledge what was checked/done
+- State the result clearly
+- If successful and more steps needed, ask the next question
+- If failed, politely explain and suggest actionable next steps
+- Sound human, avoid robotic language
+- Always offer alternatives when possible
+
+ERROR RECOVERY BY CODE:
+- PATIENT_NOT_FOUND: "I couldn't find your record. Could you verify your name and date of birth, or should I register you as a new patient?"
+- APPOINTMENT_TYPE_NOT_FOUND: "I'm not sure what type of appointment you need. Could you describe it, or would you like me to list our services?"
+- NO_AVAILABILITY: "I don't see any openings for that time. Would you like me to check another date?"
+- NEXHEALTH_API_ERROR: "I'm having trouble with our scheduling system right now. Could we try again in a moment?"
+- SCHEDULING_ERROR: "I had an issue checking that. Let me try again, or would you prefer to speak with our office?"
+- VALIDATION_ERROR: "I didn't quite catch that. Could you try saying it differently?"
+- MISSING_PHONE/EMAIL: "I need your [phone/email] to complete your registration. What's your [phone/email]?"
+- INVALID_PHONE/EMAIL: "I didn't get a valid [phone/email]. Could you try again? For example, 'my phone is...' or 'my email is...'"
+- INVALID_DATE: "I didn't understand that date. Could you try 'next Tuesday' or 'December 15th'?"
+- SYSTEM_ERROR/TIMEOUT_ERROR: "I'm having a technical hiccup. You can try again, or I can connect you with our office staff."
+- FLOW_INTERCEPTION: Use provided guidance naturally
+
+TOOL-SPECIFIC PATTERNS:
+- find_appointment_type SUCCESS: "Okay, a [type] is about [duration] minutes. What date works for you?"
+- check_available_slots SUCCESS: "For [type] on [date], I have [times] available. Which works?"
+- find_patient_in_ehr SUCCESS: "Found you, [name]! Let's continue with your appointment."
+- book_appointment SUCCESS: "Confirmed! Your [type] with [provider] is set for [date] at [time]. Need directions?"
+- create_new_patient SUCCESS: "Great, [name]! You're registered. Now let's schedule your [type] appointment."
+
+Return ONLY the sentence.
     `.trim();
 
-    // Prepare a summary of data for the LLM. Be selective to keep the prompt concise.
-    let dataSummaryForLLM = {};
+    // PERFORMANCE OPTIMIZATION: Minimize data passed to LLM - only essential fields
+    let compactData = {};
     if (toolResult.data) {
-      // Example: For findPatient, you might extract specific fields
-      if (toolName === 'find_patient_in_ehr' && toolResult.data.patient_exists) {
-        dataSummaryForLLM = {
-          patient_found: true,
-          patient_name: toolResult.data.confirmed_patient_name,
-          patient_dob: toolResult.data.confirmed_patient_dob_friendly
-        };
-      } else if (toolName === 'check_available_slots' && toolResult.data.has_availability) {
-        dataSummaryForLLM = {
-          slots_found: true,
-          num_slots_offered: toolResult.data.slots_offered,
-          first_few_slots_display: (toolResult.data.available_slots as any[] || []) // eslint-disable-line @typescript-eslint/no-explicit-any
-                                  .slice(0, toolResult.data.slots_offered as number || 3)
-                                  .map((s: any) => s.display_time).join(', ') // eslint-disable-line @typescript-eslint/no-explicit-any
-        };
-      } else if (toolName === 'check_available_slots' && !toolResult.data.has_availability) {
-        dataSummaryForLLM = { 
-          slots_found: false, 
-          appointment_type_name: toolResult.data.appointment_type_name, 
-          requested_date_friendly: toolResult.data.requested_date_friendly 
-        };
-      } else {
-        // For other tools, pass a subset of the data
-        dataSummaryForLLM = toolResult.data;
+      // Extract only the most essential fields per tool to reduce payload size
+      switch (toolName) {
+        case 'find_appointment_type':
+          compactData = toolResult.data.matched ? {
+            matched: true,
+            name: toolResult.data.appointment_type_name,
+            duration: toolResult.data.duration_minutes
+          } : {
+            matched: false,
+            options: Array.isArray(toolResult.data.available_types_list_for_prompt) 
+              ? toolResult.data.available_types_list_for_prompt.slice(0, 3) 
+              : [] // Limit to 3 options
+          };
+          break;
+        case 'check_available_slots':
+          compactData = {
+            available: toolResult.data.has_availability,
+            type: toolResult.data.appointment_type_name,
+            date: toolResult.data.requested_date_friendly,
+            times: typeof toolResult.data.offered_time_list_string === 'string' 
+              ? toolResult.data.offered_time_list_string.split(', ').slice(0, 3).join(', ')
+              : '' // Limit to 3 times
+          };
+          break;
+        case 'find_patient_in_ehr':
+          compactData = {
+            found: toolResult.data.patient_exists,
+            name: toolResult.data.confirmed_patient_name || toolResult.data.searched_name
+          };
+          break;
+        case 'book_appointment':
+          compactData = {
+            booked: toolResult.data?.booked,
+            type: toolResult.data?.appointment_type_name,
+            provider: toolResult.data?.provider_name,
+            date: toolResult.data?.date_friendly,
+            time: toolResult.data?.time
+          };
+          break;
+        default:
+          // For other tools, include minimal essential data
+          compactData = toolResult.data ? {
+            success: toolResult.success,
+            key_result: Object.values(toolResult.data)[0] // Just the first value
+          } : {};
       }
     }
 
-    // Build execution outcome object
+    // Build minimal execution outcome
     const executionOutcome: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
       success: toolResult.success,
-      data_summary: dataSummaryForLLM,
+      data: compactData,
       error_code: toolResult.error_code
     };
 
-    // Add prerequisite failure details if present
+    // Add prerequisite/flow guidance if present
     if (toolResult._internal_prereq_failure_info) {
-      executionOutcome.prerequisite_failure_details = {
-        missing_argument_name: toolResult._internal_prereq_failure_info.missingArg,
-        suggested_question_for_user: toolResult._internal_prereq_failure_info.askUserMessage
-      };
+      executionOutcome.ask_user = toolResult._internal_prereq_failure_info.askUserMessage;
+    }
+    if (toolResult.flow_correction_guidance) {
+      executionOutcome.flow_guide = toolResult.flow_correction_guidance;
     }
 
     const llmMessages: CoreMessage[] = [
@@ -364,36 +435,117 @@ Return ONLY that single sentence. Do not add any preamble like "Okay, here's the
       {
         role: 'user',
         content: JSON.stringify({
-          tool_name: toolName,
-          tool_arguments: toolArgs,
-          execution_outcome: executionOutcome
-        }, null, 2)
+          tool: toolName,
+          result: executionOutcome
+        })
       }
     ];
 
+    // PERFORMANCE OPTIMIZATION: Use gpt-4o-mini with optimal settings for speed
     const { text: generatedMessage } = await generateText({
-      model: openai('gpt-4o-mini'),
+      model: openai('gpt-4o-mini'), // Fastest suitable model
       messages: llmMessages,
-      temperature: 0.7,
-      maxTokens: 80
+      temperature: 0.3, // Lower for more consistent, faster responses
+      maxTokens: 60 // Reduced from 80 for faster generation
     });
 
     return generatedMessage.trim();
   } catch (generationError) {
     console.error(`Error generating dynamic message for tool ${toolName}:`, generationError);
     
-    // Fallback message if LLM generation fails
+    // ENHANCED ERROR RECOVERY: Comprehensive fallback messages with actionable guidance
+    const errorFallbacks: Record<string, string> = {
+      'PATIENT_NOT_FOUND': "I couldn't find your record. Could you verify your name and date of birth, or should I register you as a new patient?",
+      'APPOINTMENT_TYPE_NOT_FOUND': "I'm not sure what type of appointment you need. Could you describe it, or would you like me to list our services?",
+      'NO_AVAILABILITY': "I don't see any openings for that time. Would you like me to check another date?",
+      'NEXHEALTH_API_ERROR': "I'm having trouble with our scheduling system right now. Could we try again in a moment?",
+      'SCHEDULING_ERROR': "I had an issue checking that. Let me try again, or would you prefer to speak with our office?",
+      'VALIDATION_ERROR': "I didn't quite catch that. Could you try saying it differently?",
+      'MISSING_PHONE': "I need your phone number to complete your registration. What's your phone number?",
+      'MISSING_EMAIL': "I need your email address to complete your registration. What's your email address?",
+      'INVALID_PHONE': "I didn't get a valid phone number. Could you try again? For example, 'my phone is three one three, five five five, one two three four'.",
+      'INVALID_EMAIL': "I need a valid email address. Could you try again? For example, 'my email is john at gmail dot com'.",
+      'INVALID_DATE': "I didn't understand that date. Could you try 'next Tuesday' or 'December 15th'?",
+      'SYSTEM_ERROR': "I'm having a technical hiccup. You can try again, or I can connect you with our office staff.",
+      'TIMEOUT_ERROR': "That's taking longer than expected. Please try again, or I can connect you with our office.",
+      'PRACTICE_NOT_CONFIGURED': "Our scheduling system isn't fully set up yet. Please contact our office to schedule your appointment."
+    };
+
+    const toolFallbacks: Record<string, string> = {
+      'find_appointment_type': 'What type of appointment are you looking for?',
+      'check_available_slots': 'Let me check our availability for you.',
+      'find_patient_in_ehr': 'Could you please provide your name and date of birth?',
+      'book_appointment': 'Let me help you schedule that appointment.',
+      'create_new_patient': 'I\'ll help you get registered in our system.'
+    };
+    
     if (toolResult.success) {
-      return "Okay, I've processed that.";
+      return toolFallbacks[toolName] || "I've processed that for you.";
     } else {
-      // More specific fallback messages based on error_code
-      if (toolResult.error_code === 'NEXHEALTH_API_ERROR') {
-        return "I'm having trouble connecting to the scheduling system right now. Please try again in a moment.";
+      // Use specific error message if available
+      if (toolResult.error_code && errorFallbacks[toolResult.error_code]) {
+        return errorFallbacks[toolResult.error_code];
       }
-      return "I encountered an issue. Please try again.";
+      // Fall back to tool-specific message
+      return toolFallbacks[toolName] || "Let me try that again for you.";
     }
   }
 }
+
+/**
+ * Analyzes the attempted tool and current conversation state to determine if a flow correction is needed
+ * Also suggests auxiliary tools that might be contextually appropriate
+ */
+function getNextLogicalStep(
+  toolNameAttempted: string, 
+  conversationState: ConversationState
+): { requiredNextToolName?: string; guidanceMessageKey?: string; suggestedAuxiliaryTool?: string } | null {
+  
+  // If trying to check slots but appointment type not determined
+  if (toolNameAttempted === 'check_available_slots' && !conversationState.determinedAppointmentTypeId) {
+    return { 
+      requiredNextToolName: 'find_appointment_type', 
+      guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
+    };
+  }
+  
+  // If trying to book appointment but patient not identified
+  if (toolNameAttempted === 'book_appointment' && !conversationState.identifiedPatientId) {
+    return { 
+      guidanceMessageKey: 'IDENTIFY_PATIENT_FIRST' 
+    };
+  }
+  
+  // If trying to book appointment but appointment type not determined
+  if (toolNameAttempted === 'book_appointment' && !conversationState.determinedAppointmentTypeId) {
+    return { 
+      requiredNextToolName: 'find_appointment_type',
+      guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
+    };
+  }
+  
+  // If trying to book appointment but no slot selected (even if patient and appt type are known)
+  if (toolNameAttempted === 'book_appointment' && 
+      conversationState.identifiedPatientId && 
+      conversationState.determinedAppointmentTypeId && 
+      !conversationState.selectedTimeSlot && 
+      !conversationState.requestedDate) {
+    return { 
+      guidanceMessageKey: 'CONFIRM_SLOT_FIRST' 
+    };
+  }
+  
+  // If trying to create new patient but should check existing patients first
+  if (toolNameAttempted === 'create_new_patient' && !conversationState.identifiedPatientId) {
+    // This could be acceptable in some flows, but let's allow it for now
+    // return { guidanceMessageKey: 'CHECK_EXISTING_PATIENT_FIRST' };
+  }
+  
+  // If the attempted tool is appropriate for the current state, return null
+  return null;
+}
+
+
 
 async function executeToolSafely(
   // Use more flexible typing to avoid constraint issues
@@ -408,6 +560,101 @@ async function executeToolSafely(
     
     console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
     
+    // FLOW ENFORCEMENT: Check if the tool call is appropriate for the current conversation state
+    const flowCheck = getNextLogicalStep(tool.name, context.conversationState);
+    if (flowCheck) {
+      console.log(`[${tool.name}] Flow interception: Tool called out of sequence.`, flowCheck);
+      
+      const flowInterceptionResult = {
+        success: false,
+        error_code: "FLOW_INTERCEPTION",
+        details: `Tool '${tool.name}' called out of sequence. Guiding conversation flow.`,
+        flow_correction_guidance: flowCheck.guidanceMessageKey,
+        data: {
+          attempted_tool: tool.name,
+          required_next_tool: flowCheck.requiredNextToolName,
+          guidance_key: flowCheck.guidanceMessageKey
+        }
+      };
+
+      // Generate a natural guidance message
+      const guidanceMessage = await generateDynamicMessage(
+        tool.name,
+        parsedArgs,
+        flowInterceptionResult
+      );
+      
+      const resultWithGuidance = {
+        success: false,
+        error_code: "FLOW_INTERCEPTION", 
+        message_to_patient: guidanceMessage,
+        details: flowInterceptionResult.details,
+        data: flowInterceptionResult.data
+      };
+
+      // Log this flow interception
+      await logToolExecution(
+        context,
+        tool.name,
+        parsedArgs,
+        resultWithGuidance,
+        false,
+        `Flow interception: ${tool.name} called out of sequence`
+      );
+
+      return resultWithGuidance;
+    }
+    
+    // Argument pre-population for book_appointment from ConversationState
+    if (tool.name === 'book_appointment') {
+      // Pre-populate arguments from ConversationState if not provided by LLM
+      if (!parsedArgs.patientId && context.conversationState.identifiedPatientId) {
+        console.log(`[${tool.name}] Pre-populating patientId from ConversationState: ${context.conversationState.identifiedPatientId}`);
+        parsedArgs.patientId = context.conversationState.identifiedPatientId;
+      }
+      
+      if (!parsedArgs.appointmentTypeId && context.conversationState.determinedAppointmentTypeId) {
+        console.log(`[${tool.name}] Pre-populating appointmentTypeId from ConversationState: ${context.conversationState.determinedAppointmentTypeId}`);
+        parsedArgs.appointmentTypeId = context.conversationState.determinedAppointmentTypeId;
+      }
+      
+      if (!parsedArgs.requestedDate && context.conversationState.requestedDate) {
+        console.log(`[${tool.name}] Pre-populating requestedDate from ConversationState: ${context.conversationState.requestedDate}`);
+        parsedArgs.requestedDate = context.conversationState.requestedDate;
+      }
+      
+      if (!parsedArgs.durationMinutes && context.conversationState.determinedDurationMinutes) {
+        console.log(`[${tool.name}] Pre-populating durationMinutes from ConversationState: ${context.conversationState.determinedDurationMinutes}`);
+        parsedArgs.durationMinutes = context.conversationState.determinedDurationMinutes;
+      }
+      
+      if (!parsedArgs.selectedTime && context.conversationState.selectedTimeSlot?.display_time) {
+        console.log(`[${tool.name}] Pre-populating selectedTime from ConversationState: ${context.conversationState.selectedTimeSlot.display_time}`);
+        parsedArgs.selectedTime = context.conversationState.selectedTimeSlot.display_time;
+      }
+      
+              // Generate call summary for appointment note if not already available
+        if (!context.conversationState.callSummaryForNote) {
+          try {
+            // For now, we'll use a placeholder since transcript extraction from VAPI may require additional setup
+            // In a production environment, this would extract the transcript from the VAPI call
+            const transcript: string = ""; // TODO: Extract transcript from VAPI call when available
+            if (transcript.trim() !== "") {
+              console.log(`[${tool.name}] Generating call summary from transcript...`);
+              const summary = await generateCallSummaryForNote(transcript);
+              context.conversationState.setCallSummary(summary);
+              console.log(`[${tool.name}] Call summary generated: ${summary}`);
+            } else {
+              console.log(`[${tool.name}] No transcript available, using default summary`);
+              context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
+            }
+          } catch (error) {
+            console.error(`[${tool.name}] Error generating call summary:`, error);
+            context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
+          }
+        }
+    }
+    
     // Check prerequisites before executing tool
     if (tool.prerequisites && tool.prerequisites.length > 0) {
       for (const prereq of tool.prerequisites) {
@@ -415,20 +662,28 @@ async function executeToolSafely(
         const argValueFromLlm = parsedArgs[prereq.argName];
         let actualArgValue = argValueFromLlm; // Value from LLM's current arguments
 
-        // Attempt to find the prerequisite from callLogContextData if missing from LLM args
+        // ENHANCED: First check ConversationState for the prerequisite
         if (actualArgValue === undefined || actualArgValue === null || (typeof actualArgValue === 'string' && actualArgValue.trim() === '')) {
-          if (prereq.argName === 'patientId' && callLogContextData?.nexhealthPatientId) {
-            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in CallLog context: ${callLogContextData.nexhealthPatientId}`);
-            actualArgValue = callLogContextData.nexhealthPatientId;
-            // IMPORTANT: If using from context, add it back to parsedArgs
-            // so that Zod validation and tool.run() receive it.
+          // Check ConversationState for common prerequisites
+          if (prereq.argName === 'appointmentTypeId' && context.conversationState.determinedAppointmentTypeId) {
+            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in ConversationState: ${context.conversationState.determinedAppointmentTypeId}`);
+            actualArgValue = context.conversationState.determinedAppointmentTypeId;
+            parsedArgs[prereq.argName] = actualArgValue;
+          } else if (prereq.argName === 'patientId' && context.conversationState.identifiedPatientId) {
+            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in ConversationState: ${context.conversationState.identifiedPatientId}`);
+            actualArgValue = context.conversationState.identifiedPatientId;
+            parsedArgs[prereq.argName] = actualArgValue;
+          } else if (prereq.argName === 'requestedDate' && context.conversationState.requestedDate) {
+            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in ConversationState: ${context.conversationState.requestedDate}`);
+            actualArgValue = context.conversationState.requestedDate;
             parsedArgs[prereq.argName] = actualArgValue;
           }
-          // Add similar checks for other contextually available args, e.g., 'appointmentTypeId'
-          // else if (prereq.argName === 'appointmentTypeId' && callLogContextData?.lastAppointmentTypeId) {
-          //   actualArgValue = callLogContextData.lastAppointmentTypeId;
-          //   parsedArgs[prereq.argName] = actualArgValue;
-          // }
+          // Fallback to callLogContextData if still not found
+          else if (prereq.argName === 'patientId' && callLogContextData?.nexhealthPatientId) {
+            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in ConversationState, but found in CallLog context: ${callLogContextData.nexhealthPatientId}`);
+            actualArgValue = callLogContextData.nexhealthPatientId;
+            parsedArgs[prereq.argName] = actualArgValue;
+          }
         }
 
         const isArgStillMissingOrEmpty = actualArgValue === undefined || actualArgValue === null || (typeof actualArgValue === 'string' && actualArgValue.trim() === '');
@@ -483,7 +738,7 @@ async function executeToolSafely(
     
     // Pre-validation for create_new_patient to prevent premature calls
     if (tool.name === 'create_new_patient') {
-      const preValidationResult = validateCreateNewPatientArgs(parsedArgs);
+      const preValidationResult = validateCreateNewPatientArgs(parsedArgs, context.conversationState);
       if (!preValidationResult.isValid) {
         console.log(`[${tool.name}] Pre-validation failed:`, preValidationResult.reason);
         
@@ -578,18 +833,27 @@ async function executeToolSafely(
 /**
  * Pre-validation for create_new_patient to prevent premature tool calls
  */
-function validateCreateNewPatientArgs(args: any): { // eslint-disable-line @typescript-eslint/no-explicit-any
+function validateCreateNewPatientArgs(args: any, conversationState: ConversationState): { // eslint-disable-line @typescript-eslint/no-explicit-any
   isValid: boolean;
   errorCode?: string;
   message?: string;
   reason?: string;
 } {
+  // Merge args with collected information from ConversationState
+  let mergedArgs = { ...args };
+  if (conversationState.collectedInfoForNewPatient) {
+    mergedArgs = {
+      ...conversationState.collectedInfoForNewPatient,
+      ...args // Args from LLM take precedence
+    };
+  }
+
   // Check if any required field is missing or empty
   const requiredFields = ['firstName', 'lastName', 'dateOfBirth', 'phone', 'email'];
   const missingFields = [];
   
   for (const field of requiredFields) {
-    if (!args[field] || typeof args[field] !== 'string' || args[field].trim().length === 0) {
+    if (!mergedArgs[field] || typeof mergedArgs[field] !== 'string' || mergedArgs[field].trim().length === 0) {
       missingFields.push(field);
     }
   }
@@ -627,23 +891,23 @@ function validateCreateNewPatientArgs(args: any): { // eslint-disable-line @type
   }
   
   // Additional validation for phone (minimum 10 digits)
-  const phoneDigits = args.phone.replace(/\D/g, '');
+  const phoneDigits = mergedArgs.phone.replace(/\D/g, '');
   if (phoneDigits.length < 10) {
     return {
       isValid: false,
       errorCode: 'MISSING_PHONE',
       message: "I need your phone number to create your patient record. What's your phone number?",
-      reason: `Phone number too short: "${args.phone}" (${phoneDigits.length} digits)`
+      reason: `Phone number too short: "${mergedArgs.phone}" (${phoneDigits.length} digits)`
     };
   }
   
   // Additional validation for email (basic @ check)
-  if (!args.email.includes('@') || !args.email.includes('.')) {
+  if (!mergedArgs.email.includes('@') || !mergedArgs.email.includes('.')) {
     return {
       isValid: false,
       errorCode: 'MISSING_EMAIL',
       message: "I need your email address to create your patient record. What's your email address?",
-      reason: `Invalid email format: "${args.email}"`
+      reason: `Invalid email format: "${mergedArgs.email}"`
     };
   }
   
@@ -771,6 +1035,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results: errorResults });
     }
     
+    // Initialize ConversationState
+    const conversationState = new ConversationState(practice.id, vapiCallId, assistantId);
+    
     // Update call log status and fetch existing context data
     let callLogContextData = null;
     try {
@@ -786,22 +1053,58 @@ export async function POST(req: NextRequest) {
           callStatus: "TOOL_IN_PROGRESS",
           updatedAt: new Date()
         },
-        select: { nexhealthPatientId: true } // Fetch context data for prerequisites
+        select: { 
+          nexhealthPatientId: true,
+          lastAppointmentTypeId: true,
+          lastAppointmentTypeName: true,
+          lastAppointmentDuration: true
+        } // Fetch context data for prerequisites and state loading
       });
       
       callLogContextData = updatedCallLog;
       console.log(`[ToolCallHandler] Fetched CallLog context:`, callLogContextData);
+      
+      // Load existing state from CallLog
+      if (callLogContextData?.lastAppointmentTypeId && callLogContextData?.lastAppointmentTypeName && callLogContextData?.lastAppointmentDuration) {
+        conversationState.updateAppointmentType(
+          callLogContextData.lastAppointmentTypeId,
+          callLogContextData.lastAppointmentTypeName,
+          callLogContextData.lastAppointmentDuration
+        );
+        console.log(`[ToolCallHandler] Loaded appointment type from CallLog: ${callLogContextData.lastAppointmentTypeName}`);
+      }
+      if (callLogContextData?.nexhealthPatientId) {
+        conversationState.updatePatient(callLogContextData.nexhealthPatientId);
+        console.log(`[ToolCallHandler] Loaded patient ID from CallLog: ${callLogContextData.nexhealthPatientId}`);
+      }
     } catch (dbError) {
       console.error("Error updating CallLog:", dbError);
       // Try to fetch existing call log context data separately
       try {
-                 const existingCallLog = await prisma.callLog.findUnique({
-           where: { vapiCallId: vapiCallId },
-           select: { nexhealthPatientId: true }
+        const existingCallLog = await prisma.callLog.findUnique({
+          where: { vapiCallId: vapiCallId },
+          select: { 
+            nexhealthPatientId: true,
+            lastAppointmentTypeId: true,
+            lastAppointmentTypeName: true,
+            lastAppointmentDuration: true
+          }
         });
         if (existingCallLog) {
           callLogContextData = existingCallLog;
           console.log(`[ToolCallHandler] Fetched existing CallLog context:`, callLogContextData);
+          
+          // Load existing state from existing CallLog
+          if (existingCallLog.lastAppointmentTypeId && existingCallLog.lastAppointmentTypeName && existingCallLog.lastAppointmentDuration) {
+            conversationState.updateAppointmentType(
+              existingCallLog.lastAppointmentTypeId,
+              existingCallLog.lastAppointmentTypeName,
+              existingCallLog.lastAppointmentDuration
+            );
+          }
+          if (existingCallLog.nexhealthPatientId) {
+            conversationState.updatePatient(existingCallLog.nexhealthPatientId);
+          }
         }
       } catch (fallbackError) {
         console.error(`[ToolCallHandler] Error fetching CallLog for context:`, fallbackError);
@@ -956,9 +1259,29 @@ export async function POST(req: NextRequest) {
         toolCallId,
         assistantId: assistantId || "unknown",
         callSummaryForNote, // Pass the summary
+        conversationState, // Pass the conversation state
       };
       
       const toolResult = await executeToolSafely(tool, toolCall, context, callLogContextData);
+      
+      // Update CallLog with findAppointmentType results
+      if (tool.name === 'find_appointment_type' && toolResult.success && 'data' in toolResult && toolResult.data?.matched) {
+        try {
+          await prisma.callLog.update({
+            where: { vapiCallId: context.vapiCallId },
+            data: {
+              // IMPORTANT: Store the Laine CUID for internal tracking
+              lastAppointmentTypeId: context.conversationState.determinedAppointmentTypeId,
+              lastAppointmentTypeName: context.conversationState.determinedAppointmentTypeName,
+              lastAppointmentDuration: context.conversationState.determinedDurationMinutes,
+              updatedAt: new Date()
+            }
+          });
+          console.log(`[ToolCallHandler] Updated CallLog for ${context.vapiCallId} with appointment type: ${context.conversationState.determinedAppointmentTypeName}`);
+        } catch (dbError) {
+          console.error(`[ToolCallHandler] Error updating CallLog with appointment type for ${context.vapiCallId}:`, dbError);
+        }
+      }
       
       let vapiToolResponseItem: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 

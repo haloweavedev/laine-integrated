@@ -59,7 +59,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
   ],
   
   async run({ args, context }): Promise<ToolResult> {
-    const { practice, vapiCallId, callSummaryForNote } = context;
+    const { practice, vapiCallId, conversationState } = context;
     
     if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
       return {
@@ -80,32 +80,85 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
     }
 
     try {
-      console.log(`[bookAppointment] Booking appointment for patient ${args.patientId} on ${args.requestedDate} at ${args.selectedTime}`);
+      console.log(`[bookAppointment] Starting booking process...`);
+
+      // Source data primarily from ConversationState, use args as fallback
+      const patientId = conversationState.identifiedPatientId || args.patientId;
+      const appointmentTypeId_LaineCUID = conversationState.determinedAppointmentTypeId || args.appointmentTypeId;
+      const requestedDate = conversationState.requestedDate || args.requestedDate;
+      const durationMinutes = conversationState.determinedDurationMinutes || args.durationMinutes;
+      const selectedTime = args.selectedTime || (conversationState.selectedTimeSlot?.display_time as string);
+      const callSummaryForNote = conversationState.callSummaryForNote;
+
+      console.log(`[bookAppointment] Using booking data from ConversationState:`, {
+        patientId,
+        appointmentTypeId_LaineCUID,
+        requestedDate,
+        durationMinutes,
+        selectedTime
+      });
+
+      // Critical validation that all necessary values from ConversationState are available
+      if (!patientId) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Patient ID missing from conversation context"
+        };
+      }
+
+      if (!appointmentTypeId_LaineCUID) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Appointment type ID missing from conversation context"
+        };
+      }
+
+      if (!requestedDate) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Requested date missing from conversation context"
+        };
+      }
+
+      if (!selectedTime) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Selected time missing from conversation context"
+        };
+      }
 
       // Validate patient ID before proceeding
-      if (!args.patientId || args.patientId === 'null' || args.patientId === 'undefined' || args.patientId === 'new_patient') {
+      if (patientId === 'null' || patientId === 'undefined' || patientId === 'new_patient') {
         return {
           success: false,
           error_code: "INVALID_PATIENT_ID",
           message_to_patient: "", // Will be filled by dynamic generation
-          details: `Invalid patient ID provided: ${args.patientId}`
+          details: `Invalid patient ID provided: ${patientId}`
         };
       }
 
       // Validate that patient ID is numeric (NexHealth requirement)
-      if (isNaN(parseInt(args.patientId))) {
+      if (isNaN(parseInt(patientId))) {
         return {
           success: false,
           error_code: "INVALID_PATIENT_ID_FORMAT",
           message_to_patient: "", // Will be filled by dynamic generation
-          details: `Patient ID must be numeric, received: ${args.patientId}`
+          details: `Patient ID must be numeric, received: ${patientId}`
         };
       }
 
       // Validate selected time format
       const timePattern = /^(1[0-2]|[1-9]):([0-5][0-9])\s?(AM|PM)$/i;
-      if (!timePattern.test(args.selectedTime.trim())) {
-      return {
+      if (!timePattern.test(selectedTime.trim())) {
+        return {
          success: false,
          error_code: "INVALID_TIME_FORMAT",
          message_to_patient: "", // Will be filled by dynamic generation
@@ -125,10 +178,21 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        };
      }
 
-     // Find the appointment type to help with provider selection
+     // Resolve NexHealth Appointment Type ID from Laine CUID
      const appointmentType = practice.appointmentTypes?.find(
-       at => at.nexhealthAppointmentTypeId === args.appointmentTypeId
+       at => at.id === appointmentTypeId_LaineCUID
      );
+
+     if (!appointmentType) {
+       return {
+         success: false,
+         error_code: "APPOINTMENT_TYPE_NOT_FOUND",
+         message_to_patient: "", // Will be filled by dynamic generation
+         details: `Appointment type not found for ID: ${appointmentTypeId_LaineCUID}`
+       };
+     }
+
+     const nexhealthAppointmentTypeId = appointmentType.nexhealthAppointmentTypeId;
 
      // IMPROVED LOGIC: Select provider based on accepted appointment types
      const eligibleProviders = activeProviders.filter(sp => {
@@ -138,7 +202,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        }
        // Check if provider accepts this appointment type
        return sp.acceptedAppointmentTypes.some(
-         relation => relation.appointmentType.id === appointmentType?.id
+         relation => relation.appointmentType.id === appointmentType.id
        );
      });
 
@@ -148,7 +212,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
          error_code: "NO_PROVIDERS_FOR_TYPE",
          message_to_patient: "", // Will be filled by dynamic generation
          data: {
-           appointment_type_name: appointmentType?.name || 'this appointment type'
+           appointment_type_name: appointmentType.name || 'this appointment type'
          }
        };
      }
@@ -175,13 +239,13 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
      // Convert selected time to proper start_time format
      const { startTime } = parseSelectedTimeToNexHealthFormat(
-       args.selectedTime,
-       args.requestedDate,
+       selectedTime,
+       requestedDate,
        'America/Chicago' // Default practice timezone
      );
 
      // Get appointment type name for notes
-     const appointmentTypeNameForNote = appointmentType?.name || "Appointment";
+     const appointmentTypeNameForNote = appointmentType.name || "Appointment";
 
      let finalNote = `${appointmentTypeNameForNote} - Scheduled via LAINE AI.`;
      if (callSummaryForNote && callSummaryForNote.trim() !== "" && !callSummaryForNote.toLowerCase().includes("failed") && !callSummaryForNote.toLowerCase().includes("not available")) {
@@ -196,11 +260,11 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        finalNote = finalNote.substring(0, 247) + "...";
      }
 
-     // Prepare booking data
+     // Prepare booking data with NexHealth IDs
      const bookingData = {
-       patient_id: parseInt(args.patientId),
+       patient_id: parseInt(patientId),
        provider_id: parseInt(selectedProvider.provider.nexhealthProviderId),
-       appointment_type_id: parseInt(args.appointmentTypeId),
+       appointment_type_id: parseInt(nexhealthAppointmentTypeId),
        operatory_id: parseInt(selectedOperatory.nexhealthOperatoryId),
        start_time: startTime,
        note: finalNote
@@ -216,7 +280,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        'POST'
      );
 
-     if (!bookingResponse?.id) {
+     if (!bookingResponse?.id && !bookingResponse?.data?.id) {
        console.error('[bookAppointment] Booking failed: Invalid response format');
        return {
          success: false,
@@ -226,43 +290,70 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        };
      }
 
+     // Extract appointment ID from response
+     const appointmentId = bookingResponse.data?.id || bookingResponse.id;
+     
+     // Update ConversationState with booking details
+     conversationState.bookedAppointmentDetails = {
+       appointmentId: String(appointmentId),
+       patientId,
+       appointmentType: appointmentType.name,
+       date: requestedDate,
+       time: selectedTime,
+       provider: selectedProvider.provider.firstName ? 
+         `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
+         selectedProvider.provider.lastName || 'your provider'
+     };
+
      // Update call log with booking information
-     const appointmentId = bookingResponse.data?.id || bookingResponse.data?.appointment?.id;
      if (appointmentId) {
-       await updateCallLogWithBooking(vapiCallId, String(appointmentId), args.requestedDate, args.selectedTime);
+       await updateCallLogWithBooking(vapiCallId, String(appointmentId), requestedDate, selectedTime);
      }
 
      // Format appointment details for confirmation
-     const formattedDate = formatDate(args.requestedDate);
+     const formattedDate = formatDate(requestedDate);
      const providerName = selectedProvider.provider.firstName ? 
        `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
        selectedProvider.provider.lastName || 'your provider';
-     const appointmentTypeName = appointmentType?.name || "your appointment";
+     const appointmentTypeName = appointmentType.name || "your appointment";
 
      return {
        success: true,
        message_to_patient: "", // Will be filled by dynamic generation
        data: {
          appointment_id: String(appointmentId),
-         patient_id: args.patientId,
+         patient_id: patientId,
          appointment_type: appointmentTypeName,
          appointment_type_name: appointmentTypeName, // Alternative key for consistency
-         date: args.requestedDate,
+         date: requestedDate,
          date_friendly: formattedDate,
-         time: args.selectedTime,
+         time: selectedTime,
          provider_name: providerName,
          practice_name: practice.name,
-         booked: true,
-         booking_successful: true
+         operatory_name: selectedOperatory.name,
+         note_summary: finalNote,
+         booked: true
        }
      };
 
     } catch (error) {
       console.error(`[bookAppointment] Error:`, error);
       
+      let errorCode = "BOOKING_ERROR";
+      
+      if (error instanceof Error) {
+        if (error.message.includes("400") || error.message.includes("validation")) {
+          errorCode = "VALIDATION_ERROR";
+        } else if (error.message.includes("409") || error.message.includes("conflict")) {
+          errorCode = "SLOT_UNAVAILABLE";
+        } else if (error.message.includes("401")) {
+          errorCode = "AUTH_ERROR";
+        }
+      }
+      
       return {
         success: false,
-        error_code: "BOOKING_ERROR",
+        error_code: errorCode,
         message_to_patient: "", // Will be filled by dynamic generation
         details: error instanceof Error ? error.message : "Unknown error"
       };
