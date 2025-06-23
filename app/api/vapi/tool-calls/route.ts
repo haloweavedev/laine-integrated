@@ -335,11 +335,12 @@ You are Laine, a friendly AI dental assistant. Based on the tool execution resul
 GUIDELINES:
 - Be empathetic and conversational
 - Acknowledge what was checked/done
-- State the result clearly
+- State the result clearly and directly
 - If successful and more steps needed, ask the next question
 - If failed, politely explain and suggest actionable next steps
-- Sound human, avoid robotic language
+- Sound human, avoid robotic language or procedural descriptions
 - Always offer alternatives when possible
+- Avoid filler phrases like "Hold on", "Just a sec", "Let me process that"
 
 ERROR RECOVERY BY CODE:
 - PATIENT_NOT_FOUND: "I couldn't find your record. Could you verify your name and date of birth, or should I register you as a new patient?"
@@ -359,7 +360,8 @@ FLOW GUIDANCE PATTERNS:
 - ASK_FOR_APPOINTMENT_TYPE_FIRST: "What type of appointment are you looking for today?"
 - ASK_FOR_DATE_FIRST: "What date would you like for your appointment?"
 - CHECK_AVAILABILITY_FIRST: "Let me check our availability for you first."
-- SELECT_SPECIFIC_SLOT_FIRST: "Which of those available times works best for you?"
+- CONFIRM_SLOT_FIRST: "Which of those available times works best for you?"
+- PROCEED_WITH_NEW_PATIENT_REGISTRATION: "Since you're a new patient, let me get you registered first. What's your first name?"
 
 TOOL-SPECIFIC PATTERNS:
 - find_appointment_type SUCCESS: "Okay, a [type] is about [duration] minutes. What date works for you?"
@@ -511,6 +513,15 @@ function getNextLogicalStep(
   conversationState: ConversationState
 ): { requiredNextToolName?: string; guidanceMessageKey?: string; suggestedAuxiliaryTool?: string } | null {
   
+  // If trying to find patient but user already confirmed they are new, skip to new patient creation
+  if (toolNameAttempted === 'find_patient_in_ehr' && conversationState.patientStatus === 'new') {
+    console.log(`[${toolNameAttempted}] Skipping find_patient_in_ehr - user confirmed new patient status`);
+    return { 
+      requiredNextToolName: 'create_new_patient',
+      guidanceMessageKey: 'PROCEED_WITH_NEW_PATIENT_REGISTRATION' 
+    };
+  }
+  
   // If trying to check slots but appointment type not determined
   if (toolNameAttempted === 'check_available_slots' && !conversationState.determinedAppointmentTypeId) {
     return { 
@@ -548,7 +559,7 @@ function getNextLogicalStep(
       // Only trigger slot confirmation if slots were previously checked for the current date
       if (conversationState.availableSlotsForDate && conversationState.availableSlotsForDate.length > 0) {
         return { 
-          guidanceMessageKey: 'SELECT_SPECIFIC_SLOT_FIRST' 
+          guidanceMessageKey: 'CONFIRM_SLOT_FIRST' 
         };
       } else {
         // If no slots have been checked yet, guide to check slots first
@@ -675,28 +686,78 @@ async function executeToolSafely(
         } else {
           console.log(`[${tool.name}] No matching slot found for selectedTime "${selectedTimeStr}" in available slots`);
         }
-      }
-      
-              // Generate call summary for appointment note if not already available
-        if (!context.conversationState.callSummaryForNote) {
-          try {
-            // For now, we'll use a placeholder since transcript extraction from VAPI may require additional setup
-            // In a production environment, this would extract the transcript from the VAPI call
-            const transcript: string = ""; // TODO: Extract transcript from VAPI call when available
-            if (transcript.trim() !== "") {
-              console.log(`[${tool.name}] Generating call summary from transcript...`);
-              const summary = await generateCallSummaryForNote(transcript);
-              context.conversationState.setCallSummary(summary);
-              console.log(`[${tool.name}] Call summary generated: ${summary}`);
-            } else {
-              console.log(`[${tool.name}] No transcript available, using default summary`);
-              context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
-            }
-          } catch (error) {
-            console.error(`[${tool.name}] Error generating call summary:`, error);
-            context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
+             }
+      // This handles cases where user changes their mind or LLM provides different formatting
+      if (parsedArgs.selectedTime && context.conversationState.selectedTimeSlot && context.conversationState.availableSlotsForDate) {
+        const selectedTimeStr = String(parsedArgs.selectedTime).trim();
+        const currentSelectedDisplay = String(context.conversationState.selectedTimeSlot.display_time || '');
+        
+        // If the selected time from LLM doesn't match what's stored, try to find a better match
+        if (selectedTimeStr.toLowerCase() !== currentSelectedDisplay.toLowerCase()) {
+          console.log(`[${tool.name}] Time mismatch detected. LLM selected: "${selectedTimeStr}", ConversationState has: "${currentSelectedDisplay}"`);
+          
+          const matchedSlot = (context.conversationState.availableSlotsForDate as Record<string, unknown>[]).find((slot: Record<string, unknown>) => 
+            slot.display_time && String(slot.display_time).toLowerCase() === selectedTimeStr.toLowerCase()
+          );
+          
+          if (matchedSlot) {
+            console.log(`[${tool.name}] Found better matching slot, updating ConversationState.selectedTimeSlot:`, matchedSlot);
+            context.conversationState.updateSelectedTimeSlot(matchedSlot);
+            parsedArgs.selectedTime = String(matchedSlot.display_time);
+          } else {
+            console.log(`[${tool.name}] No better match found, keeping existing ConversationState.selectedTimeSlot`);
+            // Keep the existing selection and update parsedArgs to match
+            parsedArgs.selectedTime = currentSelectedDisplay;
           }
         }
+      }
+      
+      // ENHANCED: Also try to match selectedTime even if ConversationState.selectedTimeSlot IS set but different
+      // This handles cases where user changes their mind or LLM provides different formatting
+      if (parsedArgs.selectedTime && context.conversationState.selectedTimeSlot && context.conversationState.availableSlotsForDate) {
+        const selectedTimeStr = String(parsedArgs.selectedTime).trim();
+        const currentSelectedDisplay = String(context.conversationState.selectedTimeSlot.display_time || '');
+        
+        // If the selected time from LLM doesn't match what's stored, try to find a better match
+        if (selectedTimeStr.toLowerCase() !== currentSelectedDisplay.toLowerCase()) {
+          console.log(`[${tool.name}] Time mismatch detected. LLM selected: "${selectedTimeStr}", ConversationState has: "${currentSelectedDisplay}"`);
+          
+          const matchedSlot = (context.conversationState.availableSlotsForDate as Record<string, unknown>[]).find((slot: Record<string, unknown>) => 
+            slot.display_time && String(slot.display_time).toLowerCase() === selectedTimeStr.toLowerCase()
+          );
+          
+          if (matchedSlot) {
+            console.log(`[${tool.name}] Found better matching slot, updating ConversationState.selectedTimeSlot:`, matchedSlot);
+            context.conversationState.updateSelectedTimeSlot(matchedSlot);
+            parsedArgs.selectedTime = String(matchedSlot.display_time);
+          } else {
+            console.log(`[${tool.name}] No better match found, keeping existing ConversationState.selectedTimeSlot`);
+            // Keep the existing selection and update parsedArgs to match
+            parsedArgs.selectedTime = currentSelectedDisplay;
+          }
+        }
+      }
+      
+      // Generate call summary for appointment note if not already available
+      if (!context.conversationState.callSummaryForNote) {
+        try {
+          // For now, we'll use a placeholder since transcript extraction from VAPI may require additional setup
+          // In a production environment, this would extract the transcript from the VAPI call
+          const transcript: string = ""; // TODO: Extract transcript from VAPI call when available
+          if (transcript.trim() !== "") {
+            console.log(`[${tool.name}] Generating call summary from transcript...`);
+            const summary = await generateCallSummaryForNote(transcript);
+            context.conversationState.setCallSummary(summary);
+            console.log(`[${tool.name}] Call summary generated: ${summary}`);
+          } else {
+            console.log(`[${tool.name}] No transcript available, using default summary`);
+            context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
+          }
+        } catch (error) {
+          console.error(`[${tool.name}] Error generating call summary:`, error);
+          context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
+        }
+      }
     }
     
     // Check prerequisites before executing tool

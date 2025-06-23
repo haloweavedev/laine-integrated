@@ -106,6 +106,9 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       // Store patient context in ConversationState
       conversationState.updatePatient(String(patient.id));
       
+      // Update patient status to 'existing' since they were found in the system
+      conversationState.updatePatientStatus('existing');
+      
       // Also update call log for backward compatibility
       await updateCallLogWithPatient(vapiCallId, practice.id, String(patient.id));
       

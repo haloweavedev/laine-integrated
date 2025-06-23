@@ -161,6 +161,9 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       // Update ConversationState with new patient ID
       conversationState.updatePatient(String(newPatientId));
       
+      // Update patient status to 'existing' since they now exist in the system
+      conversationState.updatePatientStatus('existing');
+      
       // Clear the collected new patient info since creation is complete
       conversationState.clearNewPatientInfo();
 

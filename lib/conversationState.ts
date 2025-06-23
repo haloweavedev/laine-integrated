@@ -15,6 +15,7 @@ export class ConversationState {
   
   // Patient identification
   public identifiedPatientId: string | null = null;
+  public patientStatus: 'new' | 'existing' | 'unknown' = 'unknown';
   
   // Appointment type determination
   public determinedAppointmentTypeId: string | null = null; // Laine CUID of AppointmentType
@@ -56,6 +57,15 @@ export class ConversationState {
   updatePatient(patientId: string): void {
     this.identifiedPatientId = patientId;
     console.log('[ConversationState] Updated identifiedPatientId to:', this.identifiedPatientId);
+  }
+
+  /**
+   * Updates the patient status (new, existing, or unknown)
+   * @param status - The patient status
+   */
+  updatePatientStatus(status: 'new' | 'existing'): void {
+    this.patientStatus = status;
+    console.log('[ConversationState] Updated patientStatus to:', status);
   }
 
   /**
@@ -116,6 +126,7 @@ export class ConversationState {
       this.collectedInfoForNewPatient = {};
     }
     this.collectedInfoForNewPatient[field] = value;
+    console.log('[ConversationState] Updated new patient info field:', field, 'to:', value);
   }
 
   /**
@@ -123,6 +134,7 @@ export class ConversationState {
    */
   clearNewPatientInfo(): void {
     this.collectedInfoForNewPatient = null;
+    console.log('[ConversationState] Cleared collectedInfoForNewPatient');
   }
 
   /**
@@ -131,6 +143,7 @@ export class ConversationState {
    */
   setCallSummary(summary: string): void {
     this.callSummaryForNote = summary;
+    console.log('[ConversationState] Updated callSummaryForNote');
   }
 
   /**
@@ -144,6 +157,7 @@ export class ConversationState {
       vapiCallId: this.vapiCallId,
       assistantId: this.assistantId,
       identifiedPatientId: this.identifiedPatientId,
+      patientStatus: this.patientStatus,
       determinedAppointmentTypeId: this.determinedAppointmentTypeId,
       determinedAppointmentTypeName: this.determinedAppointmentTypeName,
       determinedDurationMinutes: this.determinedDurationMinutes,
