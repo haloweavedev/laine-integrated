@@ -35,14 +35,7 @@ export const createNewPatientSchema = z.object({
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: `
-    Creates a new patient record in the EHR system with complete patient information.
-    WHEN TO USE: Call this tool when a patient is NEW to the practice or when 'find_patient_in_ehr' fails to find an existing record.
-    REQUIRED INPUTS: 'firstName', 'lastName', 'dateOfBirth' (YYYY-MM-DD), 'phone' (10+ digits), 'email' (valid email format). 'insurance_name' is optional.
-    OUTPUTS: On success, returns 'patient_id', 'patient_name', and other patient details. Sets patient context for subsequent booking.
-    CRITICAL: Only call when you have collected ALL required information from the patient. Do not call with missing or empty values.
-    SEQUENCE NOTE: After successful creation, the returned 'patient_id' can be used for 'book_appointment'.
-  `.trim(),
+  description: "Creates a new patient record in the EHR system. Call when patient is NEW or find_patient_in_ehr fails. Requires firstName, lastName, dateOfBirth (YYYY-MM-DD), phone (10+ digits), email. Optional insurance_name. Returns patient_id, patient_name. Only call with ALL required info collected.",
   schema: createNewPatientSchema,
   prerequisites: [
     { argName: 'firstName', askUserMessage: "To create your patient record, could you please tell me your first name?" },

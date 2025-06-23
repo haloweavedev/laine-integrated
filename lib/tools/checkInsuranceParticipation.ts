@@ -8,14 +8,7 @@ export const checkInsuranceParticipationSchema = z.object({
 
 const checkInsuranceParticipationTool: ToolDefinition<typeof checkInsuranceParticipationSchema> = {
   name: "check_insurance_participation",
-  description: `
-    Checks whether the practice is in-network or out-of-network with the patient's dental insurance provider.
-    WHEN TO USE: Call this tool when a patient mentions their dental insurance provider or asks about insurance acceptance.
-    REQUIRED INPUTS: 'insuranceProviderName' (the name of the patient's dental insurance company, e.g., "Cigna", "MetLife").
-    OUTPUTS: Returns 'participation' status ("in-network" or "out-of-network"), 'is_in_network' boolean, and practice accepted insurances list.
-    USE CASE: Helps patients understand their coverage and potential out-of-pocket costs before booking appointments.
-    NOTE: This tool works independently and doesn't require patient identification first.
-  `.trim(),
+  description: "Checks whether the practice is in-network or out-of-network with patient's dental insurance provider. Call when patient mentions insurance provider or asks about acceptance. Requires insuranceProviderName. Returns participation status, is_in_network boolean, accepted insurances list. Works independently.",
   schema: checkInsuranceParticipationSchema,
   prerequisites: [
     {

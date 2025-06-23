@@ -23,17 +23,7 @@ export const bookAppointmentSchema = z.object({
 
 const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
   name: "book_appointment",
-  description: `
-    Books the appointment in the EHR system once all details are confirmed.
-    CRITICAL: Only call this tool as the FINAL step in the booking process.
-    WHEN TO USE: Call this tool AFTER:
-    1. Patient identity is confirmed (via 'find_patient_in_ehr' or 'create_new_patient', providing a 'patientId').
-    2. Appointment type is determined (via 'find_appointment_type', providing an 'appointmentTypeId' and 'durationMinutes').
-    3. Available slots were checked (via 'check_available_slots') and the patient has explicitly selected a 'selectedTime' from those options for a specific 'requestedDate'.
-    REQUIRED INPUTS: 'selectedTime' (e.g., "8:00 AM"), 'patientId', 'appointmentTypeId', 'requestedDate' (YYYY-MM-DD), 'durationMinutes'.
-    OUTPUTS: On success, confirms the booking and returns 'appointment_id', 'booked_date', 'booked_time', etc.
-    DO NOT CALL if any of the required inputs are missing or if the preceding steps have not been completed.
-  `.trim(),
+  description: "Books the appointment in the EHR system as the FINAL step. Call after: patient identity confirmed, appointment type determined, available slots checked, and patient selected time. Requires selectedTime, patientId, appointmentTypeId, requestedDate, durationMinutes. Returns appointment_id, booked_date, booked_time.",
   schema: bookAppointmentSchema,
   prerequisites: [
     {

@@ -56,13 +56,7 @@ export const checkAvailableSlotsSchema = z.object({
 
 const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> = {
   name: "check_available_slots",
-  description: `
-    Checks and returns available appointment slots for a specific date and appointment type.
-    WHEN TO USE: Call this tool AFTER 'find_appointment_type' has successfully provided an 'appointmentTypeId' AND the user has specified a 'requestedDate'.
-    REQUIRED INPUTS: 'requestedDate' (YYYY-MM-DD format), 'appointmentTypeId' (Laine CUID from 'find_appointment_type' tool), 'days' (number of days to check, defaults to 1).
-    OUTPUTS: On success, returns 'available_slots' (a list of time slots), 'appointment_type_name', 'requested_date_friendly', and 'has_availability' boolean.
-    SEQUENCE NOTE: This tool typically follows 'find_appointment_type'. Do not call if 'appointmentTypeId' is unknown.
-  `.trim(),
+  description: "Checks and returns available appointment slots for a specific date and appointment type. Call after find_appointment_type provides appointmentTypeId and user specifies requestedDate. Returns available_slots, appointment_type_name, requested_date_friendly, has_availability. Follows find_appointment_type tool.",
   schema: checkAvailableSlotsSchema,
   prerequisites: [
     {

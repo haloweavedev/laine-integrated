@@ -8,14 +8,7 @@ export const getServiceCostEstimateSchema = z.object({
 
 const getServiceCostEstimateTool: ToolDefinition<typeof getServiceCostEstimateSchema> = {
   name: "get_service_cost_estimate",
-  description: `
-    Provides cost estimates for dental services based on practice configuration.
-    WHEN TO USE: Call this tool when a patient asks about pricing, costs, or fees for specific services or procedures.
-    REQUIRED INPUTS: 'serviceName' (the specific service or procedure name the patient is asking about).
-    OUTPUTS: On success, returns 'estimate' (cost), 'found' boolean, and 'practice_name'. May suggest alternative services if exact match not found.
-    USE CASE: Particularly helpful for out-of-network patients or self-pay patients who want to understand costs before booking.
-    NOTE: This tool works independently and doesn't require patient identification first.
-  `.trim(),
+  description: "Provides cost estimates for dental services based on practice configuration. Call when patient asks about pricing, costs, or fees for specific services. Requires serviceName. Returns estimate, found boolean, practice_name. Helpful for out-of-network/self-pay patients. Works independently.",
   schema: getServiceCostEstimateSchema,
   prerequisites: [
     {

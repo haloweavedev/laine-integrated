@@ -10,15 +10,7 @@ export const findAppointmentTypeSchema = z.object({
 
 const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {
   name: "find_appointment_type",
-  description: `
-    Uses AI to intelligently match the patient's requested service to available appointment types and returns the corresponding appointment type details.
-    WHEN TO USE: Call this tool when a patient mentions what type of service or appointment they need (e.g., "cleaning", "checkup", "filling").
-    REQUIRED INPUTS: 'userRequest' (patient's description of the service they want).
-    OUTPUTS: On success, returns 'appointment_type_id' (Laine CUID), 'appointment_type_name', 'duration_minutes', 'nexhealth_appointment_type_id', and 'matched' boolean. On no match, returns available options.
-    SEQUENCE NOTE: This tool should typically be called BEFORE 'check_available_slots' to obtain the required 'appointmentTypeId'. The output provides essential data for subsequent booking steps.
-    IMPORTANT: The returned 'appointment_type_id' is the Laine CUID for internal tracking, while 'nexhealth_appointment_type_id' is required for 'check_available_slots' and 'book_appointment'.
-    AI MATCHING: This tool uses advanced AI to match patient requests to appointment types considering names, keywords, and dental terminology.
-  `.trim(),
+  description: "Uses AI to match patient's requested service to available appointment types. Call when patient mentions service type (cleaning, checkup, filling). Returns appointment_type_id (Laine CUID), appointment_type_name, duration_minutes, nexhealth_appointment_type_id. Call before check_available_slots. Uses AI matching for dental terminology.",
   schema: findAppointmentTypeSchema,
   prerequisites: [
     {

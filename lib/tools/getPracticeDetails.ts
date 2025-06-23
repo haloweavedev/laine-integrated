@@ -5,14 +5,7 @@ export const getPracticeDetailsSchema = z.object({});
 
 const getPracticeDetailsTool: ToolDefinition<typeof getPracticeDetailsSchema> = {
   name: "get_practice_details",
-  description: `
-    Retrieves practice information including address and location details.
-    WHEN TO USE: Call this tool when a patient asks for the practice's address, location, or directions, or when confirming appointment location.
-    REQUIRED INPUTS: None (no arguments needed).
-    OUTPUTS: Returns 'address' and 'practice_name' if available, or indicates if address is not configured.
-    USE CASE: Helpful for providing directions, confirming appointment locations, or answering general practice information inquiries.
-    NOTE: This tool works independently and can be called at any time during the conversation.
-  `.trim(),
+  description: "Retrieves practice information including address and location details. Call when patient asks for practice address, location, or directions. No arguments needed. Returns address and practice_name. Works independently, can be called anytime.",
   schema: getPracticeDetailsSchema,
   
   async run({ context }): Promise<ToolResult> {

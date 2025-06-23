@@ -28,13 +28,7 @@ export const findPatientSchema = z.object({
 
 const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
   name: "find_patient_in_ehr",
-  description: `
-    Verifies an existing patient's identity and retrieves their EHR record using their first name, last name, and date of birth.
-    WHEN TO USE: Call this tool when a patient indicates they are an existing patient and provides their full name and complete date of birth.
-    REQUIRED INPUTS: 'firstName', 'lastName', 'dateOfBirth' (in YYYY-MM-DD format).
-    OUTPUTS: On success, returns 'patient_id', 'confirmed_patient_name', and 'confirmed_patient_dob_friendly'. Sets patient context for the call.
-    IMPORTANT: Ensure you have collected all three pieces of information (first name, last name, full date of birth) before calling. If information is partial, ask the user for the missing parts first.
-  `.trim(),
+  description: "Verifies an existing patient's identity and retrieves their EHR record using their first name, last name, and date of birth. Call when a patient indicates they are existing and provides full name and complete DOB. Returns patient_id, confirmed_patient_name, and confirmed_patient_dob_friendly. Ensure you have all three pieces before calling.",
   schema: findPatientSchema,
   
   async run({ args, context }): Promise<ToolResult> {
