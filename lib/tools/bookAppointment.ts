@@ -77,15 +77,18 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
       const appointmentTypeId_LaineCUID = conversationState.determinedAppointmentTypeId || args.appointmentTypeId;
       const requestedDate = conversationState.requestedDate || args.requestedDate;
       const durationMinutes = conversationState.determinedDurationMinutes || args.durationMinutes;
-      const selectedTime = args.selectedTime || (conversationState.selectedTimeSlot?.display_time as string);
+      const selectedTimeDisplay = args.selectedTime || (conversationState.selectedTimeSlot?.display_time as string);
+      const selectedTimeRaw = conversationState.selectedTimeSlot?.time as string; // Raw ISO string for NexHealth
       const callSummaryForNote = conversationState.callSummaryForNote;
 
-      console.log(`[bookAppointment] Using booking data from ConversationState:`, {
+      console.log(`[bookAppointment] Using booking data:`, {
         patientId,
         appointmentTypeId_LaineCUID,
         requestedDate,
         durationMinutes,
-        selectedTime
+        selectedTimeDisplay,
+        selectedTimeRaw: selectedTimeRaw ? 'present' : 'missing',
+        selectedTimeSlot: conversationState.selectedTimeSlot ? 'present' : 'missing'
       });
 
       // Critical validation that all necessary values from ConversationState are available
@@ -116,12 +119,22 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
         };
       }
 
-      if (!selectedTime) {
+      if (!selectedTimeDisplay) {
         return {
           success: false,
           error_code: "INCOMPLETE_BOOKING_CONTEXT",
           message_to_patient: "", // Will be filled by dynamic generation
           details: "Selected time missing from conversation context"
+        };
+      }
+
+      // Improved validation: check if selectedTimeSlot is set in ConversationState
+      if (!conversationState.selectedTimeSlot) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Selected time slot not confirmed in conversation state"
         };
       }
 
@@ -147,7 +160,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
       // Validate selected time format
       const timePattern = /^(1[0-2]|[1-9]):([0-5][0-9])\s?(AM|PM)$/i;
-      if (!timePattern.test(selectedTime.trim())) {
+      if (!timePattern.test(selectedTimeDisplay.trim())) {
         return {
          success: false,
          error_code: "INVALID_TIME_FORMAT",
@@ -227,9 +240,10 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      console.log(`[bookAppointment] Selected provider: ${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName} (ID: ${selectedProvider.provider.nexhealthProviderId})`);
      console.log(`[bookAppointment] Selected operatory: ${selectedOperatory.name} (ID: ${selectedOperatory.nexhealthOperatoryId})`);
 
-     // Convert selected time to proper start_time format
+     // Convert selected time to proper start_time format - use raw time if available, otherwise parse display time
+     const timeForParsing = selectedTimeRaw || selectedTimeDisplay;
      const { startTime } = parseSelectedTimeToNexHealthFormat(
-       selectedTime,
+       timeForParsing,
        requestedDate,
        'America/Chicago' // Default practice timezone
      );
@@ -289,7 +303,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
        patientId,
        appointmentType: appointmentType.name,
        date: requestedDate,
-       time: selectedTime,
+       time: selectedTimeDisplay,
        provider: selectedProvider.provider.firstName ? 
          `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
          selectedProvider.provider.lastName || 'your provider'
@@ -297,7 +311,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
      // Update call log with booking information
      if (appointmentId) {
-       await updateCallLogWithBooking(vapiCallId, String(appointmentId), requestedDate, selectedTime);
+       await updateCallLogWithBooking(vapiCallId, String(appointmentId), requestedDate, selectedTimeDisplay);
      }
 
      // Format appointment details for confirmation
@@ -317,7 +331,7 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
          appointment_type_name: appointmentTypeName, // Alternative key for consistency
          date: requestedDate,
          date_friendly: formattedDate,
-         time: selectedTime,
+         time: selectedTimeDisplay,
          provider_name: providerName,
          practice_name: practice.name,
          operatory_name: selectedOperatory.name,

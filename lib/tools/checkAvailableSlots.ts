@@ -517,7 +517,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       
       // After successfully processing slots, update ConversationState
       conversationState.updateRequestedDate(args.requestedDate);
-      conversationState.availableSlotsForDate = formattedSlots; // Will be empty array if no slots found
+      conversationState.updateAvailableSlotsForDate(formattedSlots); // Will be empty array if no slots found
       
       console.log("✅ ConversationState updated:");
       console.log("  - requestedDate:", args.requestedDate);

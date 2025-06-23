@@ -55,6 +55,7 @@ export class ConversationState {
    */
   updatePatient(patientId: string): void {
     this.identifiedPatientId = patientId;
+    console.log('[ConversationState] Updated identifiedPatientId to:', this.identifiedPatientId);
   }
 
   /**
@@ -67,6 +68,7 @@ export class ConversationState {
     this.determinedAppointmentTypeId = typeId;
     this.determinedAppointmentTypeName = name;
     this.determinedDurationMinutes = duration;
+    console.log('[ConversationState] Updated appointment type:', { typeId, name, duration });
   }
 
   /**
@@ -75,6 +77,7 @@ export class ConversationState {
    */
   updateRequestedDate(date: string): void {
     this.requestedDate = date;
+    console.log('[ConversationState] Updated requestedDate to:', this.requestedDate);
   }
 
   /**
@@ -83,6 +86,24 @@ export class ConversationState {
    */
   updateSelectedSlot(slot: Record<string, unknown>): void {
     this.selectedTimeSlot = slot;
+  }
+
+  /**
+   * Updates the selected time slot details
+   * @param slot - The slot details object from availableSlotsForDate
+   */
+  updateSelectedTimeSlot(slot: Record<string, unknown> | null): void {
+    this.selectedTimeSlot = slot;
+    console.log('[ConversationState] Updated selectedTimeSlot to:', this.selectedTimeSlot);
+  }
+
+  /**
+   * Updates available slots for the requested date
+   * @param slots - Array of available slot objects
+   */
+  updateAvailableSlotsForDate(slots: unknown[]): void {
+    this.availableSlotsForDate = slots;
+    console.log('[ConversationState] Updated availableSlotsForDate with', slots?.length || 0, 'slots');
   }
 
   /**

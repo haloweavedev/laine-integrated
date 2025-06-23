@@ -354,9 +354,17 @@ ERROR RECOVERY BY CODE:
 - SYSTEM_ERROR/TIMEOUT_ERROR: "I'm having a technical hiccup. You can try again, or I can connect you with our office staff."
 - FLOW_INTERCEPTION: Use provided guidance naturally
 
+FLOW GUIDANCE PATTERNS:
+- IDENTIFY_PATIENT_FIRST: "To book your appointment, I need to identify you first. Could you please provide your full name and date of birth?"
+- ASK_FOR_APPOINTMENT_TYPE_FIRST: "What type of appointment are you looking for today?"
+- ASK_FOR_DATE_FIRST: "What date would you like for your appointment?"
+- CHECK_AVAILABILITY_FIRST: "Let me check our availability for you first."
+- SELECT_SPECIFIC_SLOT_FIRST: "Which of those available times works best for you?"
+
 TOOL-SPECIFIC PATTERNS:
 - find_appointment_type SUCCESS: "Okay, a [type] is about [duration] minutes. What date works for you?"
-- check_available_slots SUCCESS: "For [type] on [date], I have [times] available. Which works?"
+- check_available_slots SUCCESS with times: "For [type] on [date], I have [times] available. Which works best for you?"
+- check_available_slots SUCCESS no times: "I don't see any openings for [type] on [date]. Would you like me to check another date?"
 - find_patient_in_ehr SUCCESS: "Found you, [name]! Let's continue with your appointment."
 - book_appointment SUCCESS: "Confirmed! Your [type] with [provider] is set for [date] at [time]. Need directions?"
 - create_new_patient SUCCESS: "Great, [name]! You're registered. Now let's schedule your [type] appointment."
@@ -386,9 +394,11 @@ Return ONLY the sentence.
             available: toolResult.data.has_availability,
             type: toolResult.data.appointment_type_name,
             date: toolResult.data.requested_date_friendly,
-            times: typeof toolResult.data.offered_time_list_string === 'string' 
-              ? toolResult.data.offered_time_list_string.split(', ').slice(0, 3).join(', ')
-              : '' // Limit to 3 times
+            times: toolResult.data.has_availability && toolResult.data.offered_time_list_string_for_message_suggestion 
+              ? toolResult.data.offered_time_list_string_for_message_suggestion
+              : (toolResult.data.has_availability && Array.isArray(toolResult.data.available_slots) && toolResult.data.available_slots.length > 0
+                ? toolResult.data.available_slots.slice(0, 3).map((slot: Record<string, unknown>) => slot.display_time).join(', ')
+                : '')
           };
           break;
         case 'find_patient_in_ehr':
@@ -416,7 +426,7 @@ Return ONLY the sentence.
     }
 
     // Build minimal execution outcome
-    const executionOutcome: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const executionOutcome: Record<string, unknown> = {
       success: toolResult.success,
       data: compactData,
       error_code: toolResult.error_code
@@ -509,30 +519,45 @@ function getNextLogicalStep(
     };
   }
   
-  // If trying to book appointment but patient not identified
-  if (toolNameAttempted === 'book_appointment' && !conversationState.identifiedPatientId) {
-    return { 
-      guidanceMessageKey: 'IDENTIFY_PATIENT_FIRST' 
-    };
-  }
-  
-  // If trying to book appointment but appointment type not determined
-  if (toolNameAttempted === 'book_appointment' && !conversationState.determinedAppointmentTypeId) {
-    return { 
-      requiredNextToolName: 'find_appointment_type',
-      guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
-    };
-  }
-  
-  // If trying to book appointment but no slot selected (even if patient and appt type are known)
-  if (toolNameAttempted === 'book_appointment' && 
-      conversationState.identifiedPatientId && 
-      conversationState.determinedAppointmentTypeId && 
-      !conversationState.selectedTimeSlot && 
-      !conversationState.requestedDate) {
-    return { 
-      guidanceMessageKey: 'CONFIRM_SLOT_FIRST' 
-    };
+  // If trying to book appointment, check prerequisites in order of importance
+  if (toolNameAttempted === 'book_appointment') {
+    // First, ensure patient is identified
+    if (!conversationState.identifiedPatientId) {
+      return { 
+        guidanceMessageKey: 'IDENTIFY_PATIENT_FIRST' 
+      };
+    }
+    
+    // Second, ensure appointment type is determined
+    if (!conversationState.determinedAppointmentTypeId) {
+      return { 
+        requiredNextToolName: 'find_appointment_type',
+        guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
+      };
+    }
+    
+    // Third, ensure requested date is set
+    if (!conversationState.requestedDate) {
+      return { 
+        guidanceMessageKey: 'ASK_FOR_DATE_FIRST' 
+      };
+    }
+    
+    // Finally, ensure a specific time slot has been selected
+    if (!conversationState.selectedTimeSlot) {
+      // Only trigger slot confirmation if slots were previously checked for the current date
+      if (conversationState.availableSlotsForDate && conversationState.availableSlotsForDate.length > 0) {
+        return { 
+          guidanceMessageKey: 'SELECT_SPECIFIC_SLOT_FIRST' 
+        };
+      } else {
+        // If no slots have been checked yet, guide to check slots first
+        return { 
+          requiredNextToolName: 'check_available_slots',
+          guidanceMessageKey: 'CHECK_AVAILABILITY_FIRST' 
+        };
+      }
+    }
   }
   
   // If trying to create new patient but should check existing patients first
@@ -559,6 +584,7 @@ async function executeToolSafely(
     const startTime = Date.now();
     
     console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
+    console.log('[ToolCallHandler] ConversationState before tool execution:', JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
     
     // FLOW ENFORCEMENT: Check if the tool call is appropriate for the current conversation state
     const flowCheck = getNextLogicalStep(tool.name, context.conversationState);
@@ -633,6 +659,24 @@ async function executeToolSafely(
         parsedArgs.selectedTime = context.conversationState.selectedTimeSlot.display_time;
       }
       
+      // If user provided selectedTime but ConversationState.selectedTimeSlot is not set, try to match and update it
+      if (parsedArgs.selectedTime && !context.conversationState.selectedTimeSlot && context.conversationState.availableSlotsForDate) {
+        console.log(`[${tool.name}] Attempting to match selectedTime "${parsedArgs.selectedTime}" with available slots`);
+        const selectedTimeStr = String(parsedArgs.selectedTime).trim();
+        const matchedSlot = (context.conversationState.availableSlotsForDate as Record<string, unknown>[]).find((slot: Record<string, unknown>) => 
+          slot.display_time && String(slot.display_time).toLowerCase() === selectedTimeStr.toLowerCase()
+        );
+        
+        if (matchedSlot) {
+          console.log(`[${tool.name}] Matched slot found, updating ConversationState.selectedTimeSlot:`, matchedSlot);
+          context.conversationState.updateSelectedTimeSlot(matchedSlot);
+          // Update parsedArgs.selectedTime with the exact display_time from the matched slot for consistency
+          parsedArgs.selectedTime = String(matchedSlot.display_time);
+        } else {
+          console.log(`[${tool.name}] No matching slot found for selectedTime "${selectedTimeStr}" in available slots`);
+        }
+      }
+      
               // Generate call summary for appointment note if not already available
         if (!context.conversationState.callSummaryForNote) {
           try {
@@ -691,9 +735,9 @@ async function executeToolSafely(
         if (isArgStillMissingOrEmpty) {
           console.log(`[${tool.name}] Prerequisite missing: ${prereq.argName}. Prompting user.`);
 
-          const prerequisiteFailureResult: any = { // eslint-disable-line @typescript-eslint/no-explicit-any
-            success: false, // Mark as not successful for the tool's main goal
-            error_code: "PREREQUISITE_MISSING",
+          const prerequisiteFailureResult = {
+            success: false as const, // Mark as not successful for the tool's main goal
+            error_code: "PREREQUISITE_MISSING" as string,
             details: `Missing prerequisite: ${prereq.argName}. User needs to be asked: "${prereq.askUserMessage}"`,
             // The actual message_to_patient will be generated by generateDynamicMessage
             _internal_prereq_failure_info: {
@@ -777,6 +821,11 @@ async function executeToolSafely(
       args: validatedArgs,
       context
     });
+    
+    // Log ConversationState after successful tool execution (if state might have changed)
+    if (toolResult.success && ['find_patient_in_ehr', 'create_new_patient', 'find_appointment_type', 'check_available_slots', 'book_appointment'].includes(tool.name)) {
+      console.log('[ToolCallHandler] ConversationState after successful tool execution:', JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
+    }
     
     // Generate dynamic message for successful execution
     toolResult.message_to_patient = await generateDynamicMessage(
