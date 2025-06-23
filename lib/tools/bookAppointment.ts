@@ -9,16 +9,17 @@ export const bookAppointmentSchema = z.object({
     .describe(`Time patient selected from available options. Include AM/PM. Examples: "I'll take 8 AM" → "8:00 AM", "The 2:30 slot" → "2:30 PM"`),
   patientId: z.string()
     .min(1)
-    .describe(`CRITICAL: Numeric patient ID (e.g., "381872342") from previous find_patient_in_ehr or create_new_patient tool call. NOT patient name. Required for EHR linking.`),
+    .describe(`CRITICAL: Numeric patient ID (e.g., "381872342") from previous find_patient_in_ehr or create_new_patient tool call. NOT patient name. Required for EHR linking. Note: ConversationState is the primary source for this value.`),
   appointmentTypeId: z.string()
     .min(1)
-    .describe("Appointment type ID from successful find_appointment_type tool call data.appointment_type_id field"),
+    .describe("Appointment type ID from successful find_appointment_type tool call data.appointment_type_id field. Note: ConversationState is the primary source for this value."),
   requestedDate: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
-    .describe("Appointment date in YYYY-MM-DD format from check_available_slots or user input"),
+    .describe("Appointment date in YYYY-MM-DD format from check_available_slots or user input. Note: ConversationState is the primary source for this value."),
   durationMinutes: z.number()
     .min(1)
-    .describe("Appointment duration in minutes from find_appointment_type tool call data.duration_minutes field")
+    .describe("Appointment duration in minutes from find_appointment_type tool call data.duration_minutes field. Note: ConversationState is the primary source for this value."),
+  userHasConfirmedBooking: z.boolean().optional().describe("Set to true if the user has explicitly confirmed all booking details presented by Laine.")
 });
 
 const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
@@ -72,14 +73,96 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
     try {
       console.log(`[bookAppointment] Starting booking process...`);
 
-      // Source data primarily from ConversationState, use args as fallback
-      const patientId = conversationState.identifiedPatientId || args.patientId;
-      const appointmentTypeId_LaineCUID = conversationState.determinedAppointmentTypeId || args.appointmentTypeId;
-      const requestedDate = conversationState.requestedDate || args.requestedDate;
-      const durationMinutes = conversationState.determinedDurationMinutes || args.durationMinutes;
-      const selectedTimeDisplay = args.selectedTime || (conversationState.selectedTimeSlot?.display_time as string);
-      const selectedTimeRaw = conversationState.selectedTimeSlot?.time as string; // Raw ISO string for NexHealth
+      // Source ALL necessary booking parameters from ConversationState
+      const patientId = conversationState.identifiedPatientId;
+      const appointmentTypeId_LaineCUID = conversationState.determinedAppointmentTypeId;
+      const requestedDate = conversationState.requestedDate;
+      const durationMinutes = conversationState.determinedDurationMinutes;
+      const selectedTimeSlotObject = conversationState.selectedTimeSlot;
       const callSummaryForNote = conversationState.callSummaryForNote;
+
+      // Critical Validation: Check if any essential values from ConversationState are null or undefined
+      if (!patientId) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Patient ID missing from conversation context"
+        };
+      }
+
+      if (!appointmentTypeId_LaineCUID) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Appointment type ID missing from conversation context"
+        };
+      }
+
+      if (!requestedDate) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Requested date missing from conversation context"
+        };
+      }
+
+      if (!durationMinutes) {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Duration minutes missing from conversation context"
+        };
+      }
+
+      // Handle selectedTime argument to find and confirm the matching slot
+      let selectedTimeDisplay: string;
+      let selectedTimeRaw: string;
+
+      if (args.selectedTime) {
+        // Use args.selectedTime to find matching slot within conversationState.availableSlotsForDate
+        if (!conversationState.availableSlotsForDate) {
+          return {
+            success: false,
+            error_code: "SLOT_NOT_RECOGNIZED_OR_EXPIRED",
+            message_to_patient: "", // Will be filled by dynamic generation
+            details: "No available slots found in conversation state"
+          };
+        }
+
+        // Find matching slot based on display_time
+        const matchedSlot = (conversationState.availableSlotsForDate as Record<string, unknown>[])?.find(slot => 
+          slot.display_time === args.selectedTime
+        );
+
+        if (!matchedSlot) {
+          return {
+            success: false,
+            error_code: "SLOT_NOT_RECOGNIZED_OR_EXPIRED",
+            message_to_patient: "", // Will be filled by dynamic generation
+            details: `Selected time "${args.selectedTime}" not found in available slots`
+          };
+        }
+
+        // Update conversationState with the matched slot
+        conversationState.updateSelectedTimeSlot(matchedSlot);
+        selectedTimeDisplay = matchedSlot.display_time as string;
+        selectedTimeRaw = matchedSlot.time as string;
+      } else if (selectedTimeSlotObject) {
+        // Use existing selectedTimeSlot from conversationState
+        selectedTimeDisplay = selectedTimeSlotObject.display_time as string;
+        selectedTimeRaw = selectedTimeSlotObject.time as string;
+      } else {
+        return {
+          success: false,
+          error_code: "INCOMPLETE_BOOKING_CONTEXT",
+          message_to_patient: "", // Will be filled by dynamic generation
+          details: "Selected time slot missing from conversation context"
+        };
+      }
 
       console.log(`[bookAppointment] Using booking data:`, {
         patientId,
@@ -90,6 +173,76 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
         selectedTimeRaw: selectedTimeRaw ? 'present' : 'missing',
         selectedTimeSlot: conversationState.selectedTimeSlot ? 'present' : 'missing'
       });
+
+      // **SUBPHASE 2: Pre-NexHealth Call User Confirmation Logic**
+      // Check if booking details have been presented for confirmation
+      const userHasConfirmed = args.userHasConfirmedBooking;
+      const detailsPresentedForConfirmation = conversationState.bookingDetailsPresentedForConfirmation;
+
+      // Scenario 1: Details NOT YET Confirmed by User
+      if (!userHasConfirmed && !detailsPresentedForConfirmation) {
+        // This is the first time book_appointment is called for this specific slot, or confirmation is pending
+        // Prepare data for the confirmation message
+        
+        // Get appointment type details
+        const appointmentType = practice.appointmentTypes?.find(
+          at => at.id === appointmentTypeId_LaineCUID
+        );
+
+        if (!appointmentType) {
+          return {
+            success: false,
+            error_code: "APPOINTMENT_TYPE_NOT_FOUND",
+            message_to_patient: "", // Will be filled by dynamic generation
+            details: `Appointment type not found for ID: ${appointmentTypeId_LaineCUID}`
+          };
+        }
+
+        // Get provider info from selectedTimeSlot
+        const providerName = (selectedTimeSlotObject?.provider_info as { name?: string })?.name || "your provider";
+        
+        // Format date for display
+        const formattedDate = formatDate(requestedDate);
+
+        // Update conversationState to indicate details have been presented
+        conversationState.updateBookingDetailsPresentedForConfirmation(true);
+
+        return {
+          success: true,
+          message_to_patient: "", // Will be filled by dynamic generation
+          data: {
+            action_needed: "confirm_booking_details",
+            details_for_confirmation: {
+              appointmentTypeName: appointmentType.name,
+              providerName: providerName,
+              dateFriendly: formattedDate, // e.g., "Monday, December 29th"
+              timeDisplay: selectedTimeDisplay   // e.g., "7:00 AM"
+            }
+          }
+        };
+      }
+
+      // Scenario 2: User HAS Confirmed - proceed to booking
+      if (userHasConfirmed === true) {
+        // Reset the confirmation flag and proceed to NexHealth API call
+        conversationState.updateBookingDetailsPresentedForConfirmation(false);
+        // Continue with the booking logic below...
+      }
+
+      // Scenario 3: User DECLINED or wants to change something
+      if (userHasConfirmed === false || (!userHasConfirmed && detailsPresentedForConfirmation)) {
+        // Reset confirmation flag and ask what to change
+        conversationState.updateBookingDetailsPresentedForConfirmation(false);
+        
+        return {
+          success: true,
+          message_to_patient: "", // Will be filled by dynamic generation
+          data: {
+            action_needed: "clarify_booking_correction",
+            message_suggestion: "Okay, what details would you like to change?"
+          }
+        };
+      }
 
       // Critical validation that all necessary values from ConversationState are available
       if (!patientId) {
@@ -276,16 +429,56 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
 
      console.log(`[bookAppointment] Booking data with note:`, JSON.stringify(bookingData, null, 2));
 
-     // Make the booking API call
-     const bookingResponse = await fetchNexhealthAPI(
-       '/appointments',
-       practice.nexhealthSubdomain,
-       bookingData,
-       'POST'
-     );
+     // **SUBPHASE 3: Make the NexHealth booking API call with graceful error handling**
+     let bookingResponse;
+     try {
+       bookingResponse = await fetchNexhealthAPI(
+         '/appointments',
+         practice.nexhealthSubdomain,
+         bookingData,
+         'POST'
+       );
+     } catch (apiError) {
+       console.error('[bookAppointment] NexHealth API error:', apiError);
+       
+       // Reset confirmation flag and clear booking details on API failure
+       conversationState.updateBookingDetailsPresentedForConfirmation(false);
+       conversationState.updateBookedAppointmentDetails(null);
+       
+       // Handle specific NexHealth API errors
+       if (apiError instanceof Error) {
+         if (apiError.message.includes("409") || apiError.message.includes("conflict")) {
+           return {
+             success: false,
+             error_code: "SLOT_UNAVAILABLE",
+             message_to_patient: "", // Will be filled by dynamic generation
+             details: "The selected time slot is no longer available"
+           };
+         } else if (apiError.message.includes("400")) {
+           return {
+             success: false,
+             error_code: "VALIDATION_ERROR",
+             message_to_patient: "", // Will be filled by dynamic generation
+             details: apiError.message
+           };
+         }
+       }
+       
+       return {
+         success: false,
+         error_code: "NEXHEALTH_API_ERROR",
+         message_to_patient: "", // Will be filled by dynamic generation
+         details: apiError instanceof Error ? apiError.message : "NexHealth API error"
+       };
+     }
 
      if (!bookingResponse?.id && !bookingResponse?.data?.id) {
        console.error('[bookAppointment] Booking failed: Invalid response format');
+       
+       // Reset confirmation flag and clear booking details on invalid response
+       conversationState.updateBookingDetailsPresentedForConfirmation(false);
+       conversationState.updateBookedAppointmentDetails(null);
+       
        return {
          success: false,
          error_code: "BOOKING_FAILED",
@@ -297,17 +490,17 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      // Extract appointment ID from response
      const appointmentId = bookingResponse.data?.id || bookingResponse.id;
      
-     // Update ConversationState with booking details
-     conversationState.bookedAppointmentDetails = {
-       appointmentId: String(appointmentId),
-       patientId,
-       appointmentType: appointmentType.name,
+     // **SUBPHASE 4: Update ConversationState with booking outcome**
+     conversationState.updateBookedAppointmentDetails({
+       nexhealthAppointmentId: String(appointmentId),
+       patientId: patientId,
+       appointmentTypeName: appointmentType.name,
        date: requestedDate,
        time: selectedTimeDisplay,
-       provider: selectedProvider.provider.firstName ? 
+       providerName: selectedProvider.provider.firstName ? 
          `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
          selectedProvider.provider.lastName || 'your provider'
-     };
+     });
 
      // Update call log with booking information
      if (appointmentId) {
@@ -319,29 +512,36 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
      const providerName = selectedProvider.provider.firstName ? 
        `${selectedProvider.provider.firstName} ${selectedProvider.provider.lastName || ''}`.trim() : 
        selectedProvider.provider.lastName || 'your provider';
-     const appointmentTypeName = appointmentType.name || "your appointment";
+     const appointmentTypeDisplayName = appointmentType.name || "your appointment";
 
-     return {
-       success: true,
-       message_to_patient: "", // Will be filled by dynamic generation
-       data: {
-         appointment_id: String(appointmentId),
-         patient_id: patientId,
-         appointment_type: appointmentTypeName,
-         appointment_type_name: appointmentTypeName, // Alternative key for consistency
-         date: requestedDate,
-         date_friendly: formattedDate,
-         time: selectedTimeDisplay,
-         provider_name: providerName,
-         practice_name: practice.name,
-         operatory_name: selectedOperatory.name,
-         note_summary: finalNote,
-         booked: true
-       }
-     };
+            return {
+         success: true,
+         message_to_patient: "", // Will be filled by dynamic generation
+         data: {
+           appointment_id: String(appointmentId),
+           patient_id: patientId,
+           appointment_type: appointmentTypeDisplayName,
+           appointment_type_name: appointmentTypeDisplayName, // Alternative key for consistency
+           date: requestedDate,
+           date_friendly: formattedDate,
+           time: selectedTimeDisplay,
+           provider_name: providerName,
+           practice_name: practice.name,
+           operatory_name: selectedOperatory.name,
+           note_summary: finalNote,
+           booked: true
+         }
+       };
 
     } catch (error) {
       console.error(`[bookAppointment] Error:`, error);
+      
+      // **SUBPHASE 3 & 4: Graceful error handling and ConversationState update**
+      // Reset confirmation flag on failure
+      conversationState.updateBookingDetailsPresentedForConfirmation(false);
+      
+      // Clear booked appointment details on failure
+      conversationState.updateBookedAppointmentDetails(null);
       
       let errorCode = "BOOKING_ERROR";
       

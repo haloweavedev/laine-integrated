@@ -32,7 +32,14 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
     }
 
     try {
-      const userRequest = args.userRequest.trim();
+      // Use conversationState.reasonForVisit as primary input if available, fallback to userRequest
+      let userQueryForMatching = args.userRequest.trim();
+      if (conversationState.reasonForVisit && conversationState.reasonForVisit.trim() !== "") {
+        console.log(`[findAppointmentType] Using reasonForVisit from ConversationState for matching: "${conversationState.reasonForVisit}"`);
+        userQueryForMatching = conversationState.reasonForVisit.trim();
+      } else {
+        console.log(`[findAppointmentType] Using userRequest argument for matching: "${args.userRequest.trim()}"`);
+      }
       
       // Transform practice appointment types to MatcherAppointmentType format
       const availableTypes: MatcherAppointmentType[] = practice.appointmentTypes.map(type => ({
@@ -43,16 +50,16 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
         nexhealthAppointmentTypeId: type.nexhealthAppointmentTypeId
       }));
 
-      console.log(`[findAppointmentType] Using AI to match "${userRequest}" against ${availableTypes.length} appointment types`);
+      console.log(`[findAppointmentType] Using AI to match "${userQueryForMatching}" against ${availableTypes.length} appointment types`);
 
       // Use LLM to match the appointment type
-      const matchedInfo = await matchAppointmentTypeWithLLM(userRequest, availableTypes);
+      const matchedInfo = await matchAppointmentTypeWithLLM(userQueryForMatching, availableTypes);
 
       if (matchedInfo.matched && matchedInfo.id && matchedInfo.name && matchedInfo.duration && matchedInfo.nexhealthAppointmentTypeId) {
         // Update conversation state with the determined appointment type
         conversationState.updateAppointmentType(matchedInfo.id, matchedInfo.name, matchedInfo.duration);
         
-        console.log(`[findAppointmentType] AI successfully matched "${userRequest}" to "${matchedInfo.name}" (${matchedInfo.id})`);
+        console.log(`[findAppointmentType] AI successfully matched "${userQueryForMatching}" to "${matchedInfo.name}" (${matchedInfo.id})`);
 
         return {
           success: true,
@@ -63,7 +70,7 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
             appointment_type_name: matchedInfo.name,
             duration_minutes: matchedInfo.duration,
             nexhealth_appointment_type_id: matchedInfo.nexhealthAppointmentTypeId, // For booking
-            user_request: userRequest,
+            user_request: userQueryForMatching, // Ensure this reflects what was used
             match_reasoning: matchedInfo.reasoning
           }
         };
@@ -73,14 +80,14 @@ const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> 
           .slice(0, 5) // Limit to 5 options for voice
           .map(type => type.name);
           
-        console.log(`[findAppointmentType] AI could not match "${userRequest}". Reason: ${matchedInfo.reasoning}`);
+        console.log(`[findAppointmentType] AI could not match "${userQueryForMatching}". Reason: ${matchedInfo.reasoning}`);
 
         return {
           success: true,
           message_to_patient: "", // Will be filled by dynamic generation
           data: {
             matched: false,
-            user_request: userRequest,
+            user_request: userQueryForMatching, // Ensure this reflects what was used
             match_reasoning: matchedInfo.reasoning,
             available_types_list_for_prompt: typeOptions,
             total_types_available: availableTypes.length

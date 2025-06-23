@@ -34,6 +34,19 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
   async run({ args, context }): Promise<ToolResult> {
     const { practice, vapiCallId, conversationState } = context;
     
+    // Check if patient status is already 'new' - skip search
+    if (conversationState.patientStatus === 'new') {
+      console.log('[findPatient] Skipping search, patientStatus is "new".');
+      return {
+        success: true,
+        message_to_patient: "",
+        data: {
+          patient_exists: false,
+          skipped_search_reason: "User identified as new patient in ConversationState."
+        }
+      };
+    }
+    
     if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
       return {
         success: false,
@@ -89,7 +102,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
         
         return {
           success: true,
-          message_to_patient: "", // Will be filled by dynamic generation
+          message_to_patient: "",
           data: { 
             found_patients: [], 
             patient_exists: false,
@@ -109,6 +122,11 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       // Update patient status to 'existing' since they were found in the system
       conversationState.updatePatientStatus('existing');
       
+      // Populate newPatientInfo with found patient details for consistency
+      conversationState.updateNewPatientDetail('firstName', patient.first_name || args.firstName, true);
+      conversationState.updateNewPatientDetail('lastName', patient.last_name || args.lastName, true);
+      conversationState.updateNewPatientDetail('dob', patient.bio?.date_of_birth || patient.date_of_birth || args.dateOfBirth, true);
+      
       // Also update call log for backward compatibility
       await updateCallLogWithPatient(vapiCallId, practice.id, String(patient.id));
       
@@ -124,7 +142,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       
       return {
         success: true,
-        message_to_patient: "", // Will be filled by dynamic generation
+        message_to_patient: "",
         data: {
           found_patients: [{
             id: patient.id,
@@ -146,7 +164,7 @@ const findPatientTool: ToolDefinition<typeof findPatientSchema> = {
       return {
         success: false,
         error_code: "NEXHEALTH_API_ERROR",
-        message_to_patient: "", // Will be filled by dynamic generation
+        message_to_patient: "",
         details: error instanceof Error ? error.message : "Unknown error"
       };
     }

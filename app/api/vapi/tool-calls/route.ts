@@ -379,6 +379,9 @@ Return ONLY the sentence.
     if (toolResult.data) {
       // Extract only the most essential fields per tool to reduce payload size
       switch (toolName) {
+        case 'get_intent':
+          // For get_intent, we don't generate any message since it's silent
+          return "";
         case 'find_appointment_type':
           compactData = toolResult.data.matched ? {
             matched: true,
@@ -484,6 +487,7 @@ Return ONLY the sentence.
     };
 
     const toolFallbacks: Record<string, string> = {
+      'get_intent': '', // Silent tool, no fallback message
       'find_appointment_type': 'What type of appointment are you looking for?',
       'check_available_slots': 'Let me check our availability for you.',
       'find_patient_in_ehr': 'Could you please provide your name and date of birth?',
@@ -513,12 +517,43 @@ function getNextLogicalStep(
   conversationState: ConversationState
 ): { requiredNextToolName?: string; guidanceMessageKey?: string; suggestedAuxiliaryTool?: string } | null {
   
+  // If intent is not set and the tool being attempted is not get_intent, suggest calling get_intent first
+  // This helps ensure we capture user intent early in the conversation
+  if (!conversationState.intent && toolNameAttempted !== 'get_intent') {
+    // However, allow certain informational tools to proceed without intent
+    const informationalTools = ['get_practice_details', 'check_insurance_participation', 'get_service_cost_estimate'];
+    if (!informationalTools.includes(toolNameAttempted)) {
+      console.log(`[${toolNameAttempted}] No intent captured yet, consider calling get_intent first`);
+      // Don't force get_intent for now, but this could be enabled for stricter flow control
+      // return {
+      //   requiredNextToolName: 'get_intent',
+      //   guidanceMessageKey: 'CAPTURE_INTENT_FIRST'
+      // };
+    }
+  }
+  
+  // Enhanced patient status handling for onboarding flow
+  if (conversationState.intent && conversationState.intent.includes('BOOK') && conversationState.patientStatus === 'unknown') {
+    // User wants to book but we don't know if they're new or existing
+    return {
+      guidanceMessageKey: 'DETERMINE_PATIENT_STATUS_FIRST'
+    };
+  }
+  
   // If trying to find patient but user already confirmed they are new, skip to new patient creation
   if (toolNameAttempted === 'find_patient_in_ehr' && conversationState.patientStatus === 'new') {
     console.log(`[${toolNameAttempted}] Skipping find_patient_in_ehr - user confirmed new patient status`);
     return { 
       requiredNextToolName: 'create_new_patient',
       guidanceMessageKey: 'PROCEED_WITH_NEW_PATIENT_REGISTRATION' 
+    };
+  }
+  
+  // If trying to create new patient for existing patient status
+  if (toolNameAttempted === 'create_new_patient' && conversationState.patientStatus === 'existing' && conversationState.identifiedPatientId) {
+    console.log(`[${toolNameAttempted}] Skipping create_new_patient - patient already exists`);
+    return {
+      guidanceMessageKey: 'PATIENT_ALREADY_EXISTS'
     };
   }
   
@@ -841,39 +876,7 @@ async function executeToolSafely(
       }
     }
     
-    // Pre-validation for create_new_patient to prevent premature calls
-    if (tool.name === 'create_new_patient') {
-      const preValidationResult = validateCreateNewPatientArgs(parsedArgs, context.conversationState);
-      if (!preValidationResult.isValid) {
-        console.log(`[${tool.name}] Pre-validation failed:`, preValidationResult.reason);
-        
-        const preValidationError = {
-          success: false,
-          error_code: preValidationResult.errorCode,
-          message_to_patient: preValidationResult.message || "Missing information",
-          details: preValidationResult.reason
-        };
-        
-        // Generate dynamic message for pre-validation error
-        preValidationError.message_to_patient = await generateDynamicMessage(
-          tool.name,
-          parsedArgs,
-          preValidationError
-        );
-        
-        // Log the pre-validation failure
-        await logToolExecution(
-          context,
-          tool.name,
-          parsedArgs,
-          preValidationError,
-          false,
-          preValidationResult.reason
-        );
-        
-        return preValidationError;
-      }
-    }
+    // Pre-validation removed - create_new_patient now handles staged collection internally
     
     // Validate arguments with tool schema
     const validatedArgs = tool.schema.parse(parsedArgs);
@@ -940,123 +943,8 @@ async function executeToolSafely(
   }
 }
 
-/**
- * Pre-validation for create_new_patient to prevent premature tool calls
- */
-function validateCreateNewPatientArgs(args: any, conversationState: ConversationState): { // eslint-disable-line @typescript-eslint/no-explicit-any
-  isValid: boolean;
-  errorCode?: string;
-  message?: string;
-  reason?: string;
-} {
-  // Merge args with collected information from ConversationState
-  let mergedArgs = { ...args };
-  if (conversationState.collectedInfoForNewPatient) {
-    mergedArgs = {
-      ...conversationState.collectedInfoForNewPatient,
-      ...args // Args from LLM take precedence
-    };
-  }
-
-  // Check if any required field is missing or empty
-  const requiredFields = ['firstName', 'lastName', 'dateOfBirth', 'phone', 'email'];
-  const missingFields = [];
-  
-  for (const field of requiredFields) {
-    if (!mergedArgs[field] || typeof mergedArgs[field] !== 'string' || mergedArgs[field].trim().length === 0) {
-      missingFields.push(field);
-    }
-  }
-  
-  // If multiple fields are missing, provide comprehensive guidance
-  if (missingFields.length > 1) {
-    const missingFieldsStr = missingFields.join(', ');
-    let message = "";
-    
-    if (missingFields.includes('firstName') || missingFields.includes('lastName') || missingFields.includes('dateOfBirth')) {
-      message = "I need to collect some information to create your patient record. Could you spell your first and last name letter by letter, then give me your date of birth?";
-    } else if (missingFields.includes('phone') && missingFields.includes('email')) {
-      message = "I still need your phone number and email address to finish creating your patient record. What's your phone number?";
-    } else {
-      message = getMissingFieldMessage(missingFields[0]);
-    }
-    
-    return {
-      isValid: false,
-      errorCode: getMissingFieldErrorCode(missingFields[0]),
-      message,
-      reason: `Multiple missing fields: ${missingFieldsStr}`
-    };
-  }
-  
-  // Single field missing
-  if (missingFields.length === 1) {
-    const field = missingFields[0];
-    return {
-      isValid: false,
-      errorCode: getMissingFieldErrorCode(field),
-      message: getMissingFieldMessage(field),
-      reason: `Missing or empty ${field}: "${args[field]}"`
-    };
-  }
-  
-  // Additional validation for phone (minimum 10 digits)
-  const phoneDigits = mergedArgs.phone.replace(/\D/g, '');
-  if (phoneDigits.length < 10) {
-    return {
-      isValid: false,
-      errorCode: 'MISSING_PHONE',
-      message: "I need your phone number to create your patient record. What's your phone number?",
-      reason: `Phone number too short: "${mergedArgs.phone}" (${phoneDigits.length} digits)`
-    };
-  }
-  
-  // Additional validation for email (basic @ check)
-  if (!mergedArgs.email.includes('@') || !mergedArgs.email.includes('.')) {
-    return {
-      isValid: false,
-      errorCode: 'MISSING_EMAIL',
-      message: "I need your email address to create your patient record. What's your email address?",
-      reason: `Invalid email format: "${mergedArgs.email}"`
-    };
-  }
-  
-  return { isValid: true };
-}
-
-/**
- * Get error code for missing field
- */
-function getMissingFieldErrorCode(field: string): string {
-  switch (field) {
-    case 'firstName': return 'MISSING_FIRST_NAME';
-    case 'lastName': return 'MISSING_LAST_NAME';
-    case 'dateOfBirth': return 'INVALID_DATE_OF_BIRTH';
-    case 'phone': return 'MISSING_PHONE';
-    case 'email': return 'MISSING_EMAIL';
-    default: return 'VALIDATION_ERROR';
-  }
-}
-
-/**
- * Get error message for missing field
- */
-function getMissingFieldMessage(field: string): string {
-  switch (field) {
-    case 'firstName': 
-      return "I need your first name to create your patient record. Could you tell me your first name?";
-    case 'lastName': 
-      return "I need your last name to create your patient record. Could you tell me your last name?";
-    case 'dateOfBirth': 
-      return "I need your date of birth to create your patient record. Could you tell me your date of birth?";
-    case 'phone': 
-      return "I need your phone number to create your patient record. What's your phone number?";
-    case 'email': 
-      return "I need your email address to create your patient record. What's your email address?";
-    default: 
-      return "I need some additional information to complete your registration.";
-  }
-}
+// validateCreateNewPatientArgs and related helper functions removed - 
+// create_new_patient tool now handles staged collection internally
 
 async function logToolExecution(
   context: ToolExecutionContext,
@@ -1395,6 +1283,8 @@ export async function POST(req: NextRequest) {
       
       let vapiToolResponseItem: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+      const currentConversationStateSnapshot = context.conversationState.getStateSnapshot();
+
       // Apply dynamic message structure for ALL tools
       if (toolResult.success) {
         vapiToolResponseItem = {
@@ -1405,6 +1295,8 @@ export async function POST(req: NextRequest) {
             type: "request-complete", // Vapi specific type
             content: toolResult.message_to_patient, // Dynamic message to be spoken
           },
+          // ADD THIS: Include conversation state snapshot for VAPI LLM to maintain context
+          conversationState: currentConversationStateSnapshot
         };
         console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared SUCCESS response for Vapi with immediate message:`, toolResult.message_to_patient);
       } else {
@@ -1415,6 +1307,8 @@ export async function POST(req: NextRequest) {
             type: "request-failed", // Vapi specific type
             content: toolResult.message_to_patient, // Dynamic error message to be spoken
           },
+          // ADD THIS: Include conversation state snapshot for VAPI LLM to maintain context
+          conversationState: currentConversationStateSnapshot
         };
         console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared FAILURE response for Vapi with immediate message:`, toolResult.message_to_patient);
       }

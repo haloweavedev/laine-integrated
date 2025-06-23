@@ -14,28 +14,27 @@ function getCurrentDateContext(): string {
 }
 
 export const createNewPatientSchema = z.object({
-  firstName: z.string()
-    .min(1)
+  firstName: z.string().optional()
     .describe(`Patient's first name. If spelled out (B-O-B), convert to proper form (Bob). Example: "My name is Sarah" → "Sarah"`),
-  lastName: z.string()
-    .min(1)
+  lastName: z.string().optional()
     .describe(`Patient's last name. If spelled out (T-E-S-T), convert to proper form (Test). Example: "Last name is Johnson" → "Johnson"`),
   dateOfBirth: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD")
+    .optional()
     .describe(`Date of birth in YYYY-MM-DD format. ${getCurrentDateContext()} Example: "January 20, 1990" → "1990-01-20"`),
-  phone: z.string()
-    .min(10)
+  phone: z.string().optional()
     .describe(`Phone number as digits only. Example: "313-555-1200" → "3135551200"`),
-  email: z.string()
-    .email()
+  email: z.string().optional()
     .describe(`Email address. Convert spoken format. Example: "john at gmail dot com" → "john@gmail.com"`),
   insurance_name: z.string().optional()
-    .describe("Dental insurance company name if provided (e.g., Cigna, MetLife). Optional.")
+    .describe("Dental insurance company name if provided (e.g., Cigna, MetLife). Optional."),
+  userConfirmation: z.boolean().optional()
+    .describe("True when user confirms all collected details are correct before creating patient record")
 });
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: "Creates a new patient record in the EHR system. Call when patient is NEW or find_patient_in_ehr fails. Requires firstName, lastName, dateOfBirth (YYYY-MM-DD), phone (10+ digits), email. Optional insurance_name. Returns patient_id, patient_name. Only call with ALL required info collected.",
+  description: "Creates a new patient record in the EHR system through staged collection. Call when patient is NEW or find_patient_in_ehr fails. Gathers information step-by-step: firstName, lastName, dateOfBirth (YYYY-MM-DD), phone (10+ digits), email. Confirms all details before API call. Returns patient_id, patient_name.",
   schema: createNewPatientSchema,
   prerequisites: [
     { argName: 'firstName', askUserMessage: "To create your patient record, could you please tell me your first name?" },
@@ -52,7 +51,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       return {
         success: false,
         error_code: "PRACTICE_CONFIG_MISSING",
-        message_to_patient: "", // Will be filled by dynamic generation
+        message_to_patient: "",
         details: "Missing practice configuration"
       };
     }
@@ -61,28 +60,109 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       return {
         success: false,
         error_code: "NO_SAVED_PROVIDERS",
-        message_to_patient: "", // Will be filled by dynamic generation
+        message_to_patient: "",
         details: "No providers configured"
       };
     }
 
+    // Set patient status to 'new' if not already set
+    if (conversationState.patientStatus === 'unknown') {
+      conversationState.updatePatientStatus('new');
+    }
+
     try {
-      // Merge collected information from ConversationState with provided args
-      let finalArgs = { ...args };
-      if (conversationState.collectedInfoForNewPatient) {
-        finalArgs = {
-          ...conversationState.collectedInfoForNewPatient,
-          ...args // Args from LLM take precedence
+      // Update ConversationState with any new information from args
+      if (args.firstName && typeof args.firstName === 'string') {
+        conversationState.updateNewPatientDetail('firstName', args.firstName.trim());
+      }
+      if (args.lastName && typeof args.lastName === 'string') {
+        conversationState.updateNewPatientDetail('lastName', args.lastName.trim());
+      }
+      if (args.dateOfBirth && typeof args.dateOfBirth === 'string') {
+        conversationState.updateNewPatientDetail('dob', args.dateOfBirth);
+      }
+      if (args.phone && typeof args.phone === 'string') {
+        // Clean phone number to digits only
+        const cleanPhone = args.phone.replace(/\D/g, '');
+        conversationState.updateNewPatientDetail('phone', cleanPhone);
+      }
+      if (args.email && typeof args.email === 'string') {
+        conversationState.updateNewPatientDetail('email', args.email.toLowerCase().trim());
+      }
+      if (args.insurance_name && typeof args.insurance_name === 'string') {
+        conversationState.updateNewPatientDetail('insuranceName', args.insurance_name.trim());
+      }
+
+      // Check if all required fields are collected
+      const { firstName, lastName, dob, phone, email } = conversationState.newPatientInfo;
+      const allFieldsCollected = firstName && lastName && dob && phone && email;
+
+      // If not all fields collected, determine what to ask for next
+      if (!allFieldsCollected) {
+        let nextDetailToCollect = null;
+        
+        if (!firstName) {
+          nextDetailToCollect = 'firstName';
+        } else if (!lastName) {
+          nextDetailToCollect = 'lastName';
+        } else if (!dob) {
+          nextDetailToCollect = 'dateOfBirth';
+        } else if (!phone) {
+          nextDetailToCollect = 'phone';
+        } else if (!email) {
+          nextDetailToCollect = 'email';
+        }
+
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "collect_next_detail",
+            next_detail_to_collect: nextDetailToCollect,
+            current_details: conversationState.newPatientInfo
+          }
         };
       }
 
-      // Validate all required fields are present and valid
-      const validationResult = validatePatientData(finalArgs);
+      // All details collected - check if user has confirmed
+      if (!conversationState.newPatientInfoConfirmation.allDetailsConfirmed && !args.userConfirmation) {
+        return {
+          success: true,
+          message_to_patient: "",
+          data: {
+            action_needed: "confirm_all_details",
+            patient_details_for_confirmation: {
+              firstName: conversationState.newPatientInfo.firstName,
+              lastName: conversationState.newPatientInfo.lastName,
+              dateOfBirth: conversationState.newPatientInfo.dob,
+              phone: formatPhoneForDisplay(conversationState.newPatientInfo.phone!),
+              email: conversationState.newPatientInfo.email,
+              insuranceName: conversationState.newPatientInfo.insuranceName
+            }
+          }
+        };
+      }
+
+      // User has confirmed OR userConfirmation is true - proceed with API call
+      if (args.userConfirmation || conversationState.newPatientInfoConfirmation.allDetailsConfirmed) {
+        conversationState.setAllNewPatientDetailsConfirmed(true);
+      }
+
+      // Validate all required fields before API call
+      const patientData = {
+        firstName: conversationState.newPatientInfo.firstName!,
+        lastName: conversationState.newPatientInfo.lastName!,
+        dateOfBirth: conversationState.newPatientInfo.dob!,
+        phone: conversationState.newPatientInfo.phone!,
+        email: conversationState.newPatientInfo.email!
+      };
+
+      const validationResult = validatePatientData(patientData);
       if (!validationResult.isValid) {
         return {
           success: false,
           error_code: validationResult.errorCode || "VALIDATION_ERROR",
-          message_to_patient: "", // Will be filled by dynamic generation
+          message_to_patient: "",
           details: validationResult.details || "Validation failed"
         };
       }
@@ -93,26 +173,26 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         return {
           success: false,
           error_code: "NO_ACTIVE_PROVIDERS",
-          message_to_patient: "", // Will be filled by dynamic generation
+          message_to_patient: "",
           details: "No active providers"
         };
       }
 
-      // Prepare new patient data in EXACT NexHealth API format (matching your curl example)
+      // Prepare new patient data in EXACT NexHealth API format
       const patientBio: {
         date_of_birth: string;
         phone_number: string;
         gender: string;
         insurance_name?: string;
       } = {
-        date_of_birth: finalArgs.dateOfBirth,
-        phone_number: finalArgs.phone,
+        date_of_birth: patientData.dateOfBirth,
+        phone_number: patientData.phone,
         gender: "Female" // Default as per API example - this can be enhanced later
       };
 
       // Add insurance_name if provided
-      if (finalArgs.insurance_name && finalArgs.insurance_name.trim() !== "") {
-        patientBio.insurance_name = finalArgs.insurance_name.trim();
+      if (conversationState.newPatientInfo.insuranceName && conversationState.newPatientInfo.insuranceName.trim() !== "") {
+        patientBio.insurance_name = conversationState.newPatientInfo.insuranceName.trim();
       }
 
       const newPatientData = {
@@ -120,14 +200,14 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
           provider_id: parseInt(activeProvider.provider.nexhealthProviderId) 
         },
         patient: {
-          first_name: finalArgs.firstName,
-          last_name: finalArgs.lastName,
-          email: finalArgs.email,
+          first_name: patientData.firstName,
+          last_name: patientData.lastName,
+          email: patientData.email,
           bio: patientBio
         }
       };
 
-      console.log(`[createNewPatient] Creating patient: ${finalArgs.firstName} ${finalArgs.lastName}`);
+      console.log(`[createNewPatient] Creating patient: ${patientData.firstName} ${patientData.lastName}`);
       console.log(`[createNewPatient] Patient data:`, JSON.stringify(newPatientData, null, 2));
 
       const createResponse = await fetchNexhealthAPI(
@@ -140,7 +220,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
 
       console.log(`[createNewPatient] API Response:`, JSON.stringify(createResponse, null, 2));
 
-      // Extract patient ID from response (following your curl response format)
+      // Extract patient ID from response
       let newPatientId = null;
       if (createResponse?.data?.user?.id) {
         newPatientId = createResponse.data.user.id;
@@ -153,7 +233,7 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         return {
           success: false,
           error_code: "PATIENT_CREATION_FAILED",
-          message_to_patient: "", // Will be filled by dynamic generation
+          message_to_patient: "",
           details: "Could not extract patient ID from response"
         };
       }
@@ -165,29 +245,29 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       conversationState.updatePatientStatus('existing');
       
       // Clear the collected new patient info since creation is complete
-      conversationState.clearNewPatientInfo();
+      conversationState.resetNewPatientInfo();
 
       // Update call log with new patient ID for backward compatibility
       await updateCallLogWithPatient(vapiCallId, practice.id, String(newPatientId));
 
       // Format confirmation message
-      const formattedPhone = formatPhoneForDisplay(finalArgs.phone);
+      const formattedPhone = formatPhoneForDisplay(patientData.phone);
 
       return {
         success: true,
-        message_to_patient: "", // Will be filled by dynamic generation
+        message_to_patient: "",
         data: {
-          patient_id: String(newPatientId), // Ensure string format for consistency with bookAppointment.ts
-          patient_name: `${finalArgs.firstName} ${finalArgs.lastName}`,
-          first_name: finalArgs.firstName,
-          last_name: finalArgs.lastName,
-          date_of_birth: finalArgs.dateOfBirth,
+          patient_id: String(newPatientId),
+          patient_name: `${patientData.firstName} ${patientData.lastName}`,
+          first_name: patientData.firstName,
+          last_name: patientData.lastName,
+          date_of_birth: patientData.dateOfBirth,
           phone: formattedPhone,
-          email: finalArgs.email,
-          insurance_name: finalArgs.insurance_name || null,
+          email: patientData.email,
+          insurance_name: conversationState.newPatientInfo.insuranceName || null,
           practice_name: practice.name,
           created: true,
-          has_insurance: !!(finalArgs.insurance_name && finalArgs.insurance_name.trim() !== "")
+          has_insurance: !!(conversationState.newPatientInfo.insuranceName && conversationState.newPatientInfo.insuranceName.trim() !== "")
         }
       };
 
@@ -209,12 +289,12 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
       return {
         success: false,
         error_code: errorCode,
-        message_to_patient: "", // Will be filled by dynamic generation
+        message_to_patient: "",
         details: error instanceof Error ? error.message : "Unknown error",
         data: {
-          attempted_patient_name: `${args.firstName} ${args.lastName}`,
-          first_name: args.firstName,
-          last_name: args.lastName
+          attempted_patient_name: `${conversationState.newPatientInfo.firstName || ''} ${conversationState.newPatientInfo.lastName || ''}`.trim() || 'Unknown',
+          first_name: conversationState.newPatientInfo.firstName,
+          last_name: conversationState.newPatientInfo.lastName
         }
       };
     }

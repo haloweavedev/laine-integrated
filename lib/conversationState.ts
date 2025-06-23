@@ -17,6 +17,25 @@ export class ConversationState {
   public identifiedPatientId: string | null = null;
   public patientStatus: 'new' | 'existing' | 'unknown' = 'unknown';
   
+  // New patient information (structured)
+  public newPatientInfo: {
+    firstName: string | null;
+    lastName: string | null;
+    dob: string | null; // YYYY-MM-DD
+    phone: string | null; // Digits only
+    email: string | null;
+    insuranceName?: string | null; // Optional
+  } = { firstName: null, lastName: null, dob: null, phone: null, email: null, insuranceName: null };
+
+  public newPatientInfoConfirmation: {
+    firstNameConfirmed: boolean;
+    lastNameConfirmed: boolean;
+    dobConfirmed: boolean;
+    phoneConfirmed: boolean;
+    emailConfirmed: boolean;
+    allDetailsConfirmed: boolean; // Overall confirmation before API call
+  } = { firstNameConfirmed: false, lastNameConfirmed: false, dobConfirmed: false, phoneConfirmed: false, emailConfirmed: false, allDetailsConfirmed: false };
+  
   // Appointment type determination
   public determinedAppointmentTypeId: string | null = null; // Laine CUID of AppointmentType
   public determinedAppointmentTypeName: string | null = null;
@@ -29,14 +48,14 @@ export class ConversationState {
   
   // Intent and user context
   public lastUserIntent: string | null = null;
-  
-  // New patient information collection
-  public collectedInfoForNewPatient: Record<string, string> | null = null; // e.g., { firstName, lastName, dob, phone, email }
+  public intent: string | null = null;
+  public reasonForVisit: string | null = null;
   
   // Call summary and booking context
   public callSummaryForNote: string | undefined = undefined;
   public bookedAppointmentDetails: Record<string, unknown> | null = null;
   public practiceDetails: Record<string, unknown> | null = null;
+  public bookingDetailsPresentedForConfirmation: boolean = false;
 
   /**
    * Constructor to initialize conversation state
@@ -66,6 +85,24 @@ export class ConversationState {
   updatePatientStatus(status: 'new' | 'existing'): void {
     this.patientStatus = status;
     console.log('[ConversationState] Updated patientStatus to:', status);
+  }
+
+  /**
+   * Updates the conversation intent
+   * @param intent - The identified intent
+   */
+  updateIntent(intent: string): void {
+    this.intent = intent;
+    console.log('[ConversationState] Updated intent to:', this.intent);
+  }
+
+  /**
+   * Updates the reason for visit
+   * @param reason - The reason for the visit
+   */
+  updateReasonForVisit(reason: string): void {
+    this.reasonForVisit = reason;
+    console.log('[ConversationState] Updated reasonForVisit to:', this.reasonForVisit);
   }
 
   /**
@@ -117,24 +154,45 @@ export class ConversationState {
   }
 
   /**
-   * Updates new patient information incrementally
-   * @param field - The field name (firstName, lastName, dob, phone, email, etc.)
+   * Updates individual fields in newPatientInfo and their confirmation status
+   * @param field - The field name to update
    * @param value - The field value
+   * @param isConfirmed - Whether this field has been confirmed by the user
    */
-  updateNewPatientInfo(field: string, value: string): void {
-    if (!this.collectedInfoForNewPatient) {
-      this.collectedInfoForNewPatient = {};
+  updateNewPatientDetail(field: keyof ConversationState['newPatientInfo'], value: string | null, isConfirmed: boolean = false): void {
+    if (field in this.newPatientInfo) {
+      (this.newPatientInfo as any)[field] = value; // eslint-disable-line @typescript-eslint/no-explicit-any
+      console.log(`[ConversationState] Updated newPatientInfo.${field} to:`, value);
+      
+      // Update corresponding confirmation status if the field name matches
+      const confField = `${field}Confirmed` as keyof ConversationState['newPatientInfoConfirmation'];
+      if (confField in this.newPatientInfoConfirmation) {
+        (this.newPatientInfoConfirmation as any)[confField] = isConfirmed; // eslint-disable-line @typescript-eslint/no-explicit-any
+        if (isConfirmed) {
+          console.log(`[ConversationState] Confirmed newPatientInfo.${field}`);
+        }
+      }
+    } else {
+      console.warn(`[ConversationState] Attempted to update unknown newPatientInfo field: ${field}`);
     }
-    this.collectedInfoForNewPatient[field] = value;
-    console.log('[ConversationState] Updated new patient info field:', field, 'to:', value);
   }
 
   /**
-   * Clears all collected new patient information
+   * Sets the overall confirmation status for all new patient details
+   * @param status - Whether all details have been confirmed by the user
    */
-  clearNewPatientInfo(): void {
-    this.collectedInfoForNewPatient = null;
-    console.log('[ConversationState] Cleared collectedInfoForNewPatient');
+  setAllNewPatientDetailsConfirmed(status: boolean): void {
+    this.newPatientInfoConfirmation.allDetailsConfirmed = status;
+    console.log('[ConversationState] Updated newPatientInfoConfirmation.allDetailsConfirmed to:', status);
+  }
+
+  /**
+   * Clears all new patient data and confirmations (e.g., if user wants to start over)
+   */
+  resetNewPatientInfo(): void {
+    this.newPatientInfo = { firstName: null, lastName: null, dob: null, phone: null, email: null, insuranceName: null };
+    this.newPatientInfoConfirmation = { firstNameConfirmed: false, lastNameConfirmed: false, dobConfirmed: false, phoneConfirmed: false, emailConfirmed: false, allDetailsConfirmed: false };
+    console.log('[ConversationState] Reset newPatientInfo and newPatientInfoConfirmation.');
   }
 
   /**
@@ -144,6 +202,28 @@ export class ConversationState {
   setCallSummary(summary: string): void {
     this.callSummaryForNote = summary;
     console.log('[ConversationState] Updated callSummaryForNote');
+  }
+
+  /**
+   * Updates the booking details presented for confirmation flag
+   * @param status - Whether booking details have been presented to the user for confirmation
+   */
+  updateBookingDetailsPresentedForConfirmation(status: boolean): void {
+    this.bookingDetailsPresentedForConfirmation = status;
+    console.log('[ConversationState] Updated bookingDetailsPresentedForConfirmation to:', status);
+  }
+
+  /**
+   * Updates the booked appointment details
+   * @param details - The booked appointment details or null to clear
+   */
+  updateBookedAppointmentDetails(details: Record<string, unknown> | null): void {
+    this.bookedAppointmentDetails = details;
+    if (details) {
+      console.log('[ConversationState] Updated bookedAppointmentDetails:', this.bookedAppointmentDetails);
+    } else {
+      console.log('[ConversationState] Cleared bookedAppointmentDetails.');
+    }
   }
 
   /**
@@ -158,6 +238,8 @@ export class ConversationState {
       assistantId: this.assistantId,
       identifiedPatientId: this.identifiedPatientId,
       patientStatus: this.patientStatus,
+      newPatientInfo: this.newPatientInfo,
+      newPatientInfoConfirmation: this.newPatientInfoConfirmation,
       determinedAppointmentTypeId: this.determinedAppointmentTypeId,
       determinedAppointmentTypeName: this.determinedAppointmentTypeName,
       determinedDurationMinutes: this.determinedDurationMinutes,
@@ -165,10 +247,12 @@ export class ConversationState {
       selectedTimeSlot: this.selectedTimeSlot,
       availableSlotsForDate: this.availableSlotsForDate,
       lastUserIntent: this.lastUserIntent,
-      collectedInfoForNewPatient: this.collectedInfoForNewPatient,
+      intent: this.intent,
+      reasonForVisit: this.reasonForVisit,
       callSummaryForNote: this.callSummaryForNote,
       bookedAppointmentDetails: this.bookedAppointmentDetails,
-      practiceDetails: this.practiceDetails
+      practiceDetails: this.practiceDetails,
+      bookingDetailsPresentedForConfirmation: this.bookingDetailsPresentedForConfirmation
     };
   }
 } 

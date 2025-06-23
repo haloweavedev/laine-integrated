@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     const updateConfig = {
       model: {
         provider: "openai" as const,
-        model: "gpt-4.1-nano-2025-04-14",
+        model: "gpt-4o-mini",
         temperature: 0.7,
         messages: [
           {

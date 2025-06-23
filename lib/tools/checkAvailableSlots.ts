@@ -119,96 +119,61 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
     }
 
     try {
-      // SUBPHASE 1: Correct Appointment Type and Duration Sourcing
-      console.log("🎯 APPOINTMENT TYPE SOURCING");
-      console.log("=============================");
+      // SUBPHASE 2: Strictly use ConversationState for appointment type and duration
+      console.log("🎯 APPOINTMENT TYPE SOURCING - STRICT CONVERSATIONSTATE");
+      console.log("========================================================");
       
-      // CRUCIAL STEP A: Get appointment type from ConversationState first, then validate against args
-      let appointmentTypeId = conversationState.determinedAppointmentTypeId;
-      
-      // If not in conversation state, use the one from args
-      if (!appointmentTypeId) {
-        appointmentTypeId = args.appointmentTypeId;
-        console.log("⚠️ appointmentTypeId not found in ConversationState, using from args");
-      } else {
-        console.log("✅ Using appointmentTypeId from ConversationState:", appointmentTypeId);
-      }
-      
-      // Verify they match if both are present, prioritize ConversationState
-      if (conversationState.determinedAppointmentTypeId && 
-          conversationState.determinedAppointmentTypeId !== args.appointmentTypeId) {
-        console.log("⚠️ appointmentTypeId mismatch between ConversationState and args, prioritizing ConversationState");
-        console.log("  - ConversationState:", conversationState.determinedAppointmentTypeId);
-        console.log("  - Args:", args.appointmentTypeId);
-        appointmentTypeId = conversationState.determinedAppointmentTypeId;
-      }
+      // Get appointment type and duration from ConversationState first
+      const appointmentTypeIdFromState = conversationState.determinedAppointmentTypeId;
+      const durationMinutesFromState = conversationState.determinedDurationMinutes;
 
-      // Find the AppointmentType record using Laine CUID
+      if (!appointmentTypeIdFromState || !durationMinutesFromState) {
+        console.error("[checkAvailableSlots] Critical context missing: determinedAppointmentTypeId or determinedDurationMinutes not in ConversationState.");
+        console.log("ConversationState data:");
+        console.log("  - determinedAppointmentTypeId:", appointmentTypeIdFromState);
+        console.log("  - determinedDurationMinutes:", durationMinutesFromState);
+        console.log("  - Args provided appointmentTypeId:", args.appointmentTypeId);
+        
+        return {
+          success: false,
+          error_code: "MISSING_APPOINTMENT_CONTEXT_FOR_SLOTS",
+          message_to_patient: "", // Dynamic message will ask for appointment type
+          details: "Appointment type or duration not determined in ConversationState before checking slots."
+        };
+      }
+      
+      // Use appointmentTypeIdFromState to find the appointmentType record from practice.appointmentTypes
       const appointmentType = practice.appointmentTypes?.find(
-        at => at.id === appointmentTypeId
+        at => at.id === appointmentTypeIdFromState
       );
 
       if (!appointmentType) {
-        console.log("❌ AppointmentType not found for Laine CUID:", appointmentTypeId);
-        // Try with args.appointmentTypeId as fallback
-        if (appointmentTypeId !== args.appointmentTypeId) {
-          console.log("🔄 Fallback: Trying with args.appointmentTypeId:", args.appointmentTypeId);
-          const fallbackAppointmentType = practice.appointmentTypes?.find(
-            at => at.id === args.appointmentTypeId
-          );
-          if (fallbackAppointmentType) {
-            console.log("✅ Found AppointmentType using fallback args.appointmentTypeId");
-            appointmentTypeId = args.appointmentTypeId;
-          } else {
-            return {
-              success: false,
-              error_code: "INVALID_APPOINTMENT_TYPE",
-              message_to_patient: "",
-              details: "Appointment type not found or doesn't belong to practice"
-            };
-          }
-        } else {
-          return {
-            success: false,
-            error_code: "INVALID_APPOINTMENT_TYPE",
-            message_to_patient: "",
-            details: "Appointment type not found or doesn't belong to practice"
-          };
-        }
-      }
-
-      // Re-fetch appointmentType after potential fallback
-      const finalAppointmentType = practice.appointmentTypes?.find(
-        at => at.id === appointmentTypeId
-      );
-
-      if (!finalAppointmentType) {
+        console.error("[checkAvailableSlots] AppointmentType not found for ConversationState appointmentTypeId:", appointmentTypeIdFromState);
+        // This case should ideally be prevented by find_appointment_type ensuring valid state.
         return {
           success: false,
-          error_code: "INVALID_APPOINTMENT_TYPE",
+          error_code: "INVALID_APPOINTMENT_TYPE_IN_STATE",
           message_to_patient: "",
-          details: "Appointment type not found or doesn't belong to practice"
+          details: "Appointment type from ConversationState not found in practice configuration"
         };
       }
 
-      // CRITICALLY, use determinedDurationMinutes from ConversationState as primary source
-      let slotLength: number;
-      let durationSource: string;
+      const slotLength = durationMinutesFromState; // This is the duration to use for NexHealth's slot_length
+      const appointmentTypeName = appointmentType.name; // For messages
+      const nexhealthAppointmentTypeIdForFiltering = appointmentType.nexhealthAppointmentTypeId; // For potential future direct filtering if API changes
       
-      if (conversationState.determinedDurationMinutes !== null && conversationState.determinedDurationMinutes > 0) {
-        slotLength = conversationState.determinedDurationMinutes;
-        durationSource = "ConversationState.determinedDurationMinutes";
-      } else {
-        slotLength = finalAppointmentType.duration;
-        durationSource = "AppointmentType.duration (fallback)";
+      // The args.appointmentTypeId from the LLM can be used as a cross-check
+      if (args.appointmentTypeId && args.appointmentTypeId !== appointmentTypeIdFromState) {
+        console.log("⚠️ Cross-check: args.appointmentTypeId differs from ConversationState");
+        console.log("  - ConversationState (used):", appointmentTypeIdFromState);
+        console.log("  - Args (ignored):", args.appointmentTypeId);
       }
       
-      console.log("✅ Found AppointmentType:");
-      console.log("  - Laine CUID:", finalAppointmentType.id);
-      console.log("  - Name:", finalAppointmentType.name);
-      console.log("  - NexHealth ID:", finalAppointmentType.nexhealthAppointmentTypeId);
-      console.log("  - Duration source:", durationSource);
-      console.log("  - Duration (for slot_length):", slotLength, "minutes");
+      console.log("✅ Using ConversationState data:");
+      console.log("  - Appointment Type ID:", appointmentTypeIdFromState);
+      console.log("  - Appointment Type Name:", appointmentTypeName);
+      console.log("  - Duration (slot_length):", slotLength, "minutes");
+      console.log("  - NexHealth Appointment Type ID:", nexhealthAppointmentTypeIdForFiltering);
 
       // SUBPHASE 2: Accurate Provider Filtering Logic
       console.log("👨‍⚕️ PROVIDER FILTERING");
@@ -230,7 +195,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         
         // Otherwise, check if they accept this specific appointment type using Laine CUID
         const acceptsType = sp.acceptedAppointmentTypes.some(
-          relation => relation.appointmentType.id === finalAppointmentType.id
+          relation => relation.appointmentType.id === appointmentType.id
         );
         console.log(`  - Provider ${sp.provider.firstName} ${sp.provider.lastName}: accepts this type = ${acceptsType} (${sp.acceptedAppointmentTypes.length} restrictions)`);
         return acceptsType;
@@ -259,7 +224,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           error_code: "NO_PROVIDERS_FOR_TYPE",
           message_to_patient: "",
           data: {
-            appointment_type_name: finalAppointmentType.name
+            appointment_type_name: appointmentType.name
           }
         };
       }
@@ -508,7 +473,6 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
       formattedSlots.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
       console.log("  - Total formatted slots:", formattedSlots.length);
 
-      const appointmentTypeName = finalAppointmentType.name;
       const friendlyDate = formatDate(args.requestedDate);
 
       // SUBPHASE 7: Update ConversationState and Final Review
@@ -534,7 +498,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
           data: {
             requested_date: args.requestedDate,
             requested_date_friendly: friendlyDate,
-            appointment_type_name: appointmentTypeName,
+            appointment_type_name: appointmentType.name,
             available_slots: [],
             has_availability: false,
             total_slots_found: 0,
@@ -584,7 +548,7 @@ const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> 
         data: {
           requested_date: args.requestedDate,
           requested_date_friendly: friendlyDate,
-          appointment_type_name: appointmentTypeName,
+          appointment_type_name: appointmentType.name,
           available_slots: formattedSlots,
           has_availability: true,
           total_slots_found: formattedSlots.length,

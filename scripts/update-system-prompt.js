@@ -185,7 +185,7 @@ async function updateSystemPrompt() {
     const updateData = {
       model: {
         provider: "openai",
-        model: "gpt-4.1-nano-2025-04-14",
+        model: "gpt-4.1--2025-04-14",
         temperature: 0.7,
         messages: [
           {
