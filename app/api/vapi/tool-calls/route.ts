@@ -7,6 +7,7 @@ import { generateCallSummaryForNote } from "@/lib/ai/summarization";
 import { generateText, CoreMessage } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { ConversationState } from "@/lib/conversationState";
+import { addLogEntry } from "@/lib/debugLogStore";
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -703,6 +704,17 @@ async function executeToolSafely(
     console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
     console.log(`[executeToolSafely] For Tool: ${tool.name} - ConversationState BEFORE run:`, JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
     
+    // Debug Logging: State before tool execution
+    addLogEntry({
+      event: "TOOL_STATE_BEFORE_RUN",
+      source: `executeToolSafely:${tool.name}`,
+      details: {
+        toolName: tool.name,
+        arguments: parsedArgs,
+        conversationStateBefore: context.conversationState.getStateSnapshot()
+      }
+    }, context.vapiCallId);
+    
     // FLOW ENFORCEMENT: Check if the tool call is appropriate for the current conversation state
     const flowCheck = getNextLogicalStep(tool.name, context.conversationState);
     if (flowCheck) {
@@ -957,6 +969,18 @@ async function executeToolSafely(
       context
     });
     
+    // Debug Logging: Tool execution result
+    addLogEntry({
+      event: "TOOL_EXECUTION_RESULT",
+      source: `executeToolSafely:${tool.name}`,
+      details: {
+        toolName: tool.name,
+        success: toolResult.success,
+        result: toolResult,
+        conversationStateAfter: context.conversationState.getStateSnapshot()
+      }
+    }, context.vapiCallId);
+    
     // Log ConversationState after tool execution
     console.log(`[executeToolSafely] For Tool: ${tool.name} - ConversationState AFTER run:`, JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
     
@@ -1049,6 +1073,20 @@ export async function POST(req: NextRequest) {
     
     const payload: VapiPayload = await req.json();
     
+    // Get VAPI call ID early for debug logging
+    const vapiCallId = payload.message.call.id;
+    
+    // Debug Logging: Start of request
+    addLogEntry({
+      event: "VAPI_REQUEST_RECEIVED",
+      source: "ToolCallRoute:POST",
+      details: {
+        type: payload.message.type,
+        toolCallsCount: payload.message.toolCallList?.length || 0,
+        firstToolName: payload.message.toolCallList?.[0]?.function?.name || payload.message.toolCallList?.[0]?.name
+      }
+    }, vapiCallId);
+    
     // SUBPHASE 1: Add detailed logging of the raw VAPI payload
     console.log("[ToolCallRoute] RAW VAPI Payload:", JSON.stringify(payload, null, 2));
     
@@ -1086,7 +1124,6 @@ export async function POST(req: NextRequest) {
     // TODO: Implement request verification when VAPI provides signing
     
     const { message } = payload;
-    const vapiCallId = message.call.id;
     
     let assistantId: string;
     let practice: any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -1131,10 +1168,27 @@ export async function POST(req: NextRequest) {
     // Initialize ConversationState - prioritize embedded state from VAPI LLM
     const conversationState = new ConversationState(practice.id, vapiCallId, assistantId);
     
+    // Debug Logging: Conversation state initialization
+    addLogEntry({
+      event: "CONVERSATION_STATE_INIT",
+      source: "ToolCallRoute:POST",
+      details: conversationState.getStateSnapshot()
+    }, vapiCallId);
+    
     // If we found conversation state from the LLM's previous tool call, restore it
     if (foundConversationState) {
       console.log("[ToolCallRoute] Restoring ConversationState from VAPI LLM:", JSON.stringify(foundConversationState, null, 2));
       conversationState.restoreFromSnapshot(foundConversationState);
+      
+      // Debug Logging: State restored from VAPI
+      addLogEntry({
+        event: "CONVERSATION_STATE_RESTORED",
+        source: "ToolCallRoute:POST",
+        details: {
+          restoredFrom: foundConversationState,
+          finalState: conversationState.getStateSnapshot()
+        }
+      }, vapiCallId);
     }
     
     console.log("[ToolCallRoute] Final ConversationState:", JSON.stringify(conversationState.getStateSnapshot(), null, 2));
@@ -1227,6 +1281,20 @@ export async function POST(req: NextRequest) {
       const toolCallId = extractToolCallId(toolCall);
       
       console.log(`Tool: ${toolName}, ID: ${toolCallId}`);
+      
+      // Debug Logging: Tool call start
+      if (toolName) {
+        addLogEntry({
+          event: "TOOL_CALL_START",
+          source: `ToolCallRoute:${toolName}`,
+          details: {
+            toolName,
+            toolCallId,
+            toolCallIndex: i,
+            arguments: extractToolCallArguments(toolCall)
+          }
+        }, vapiCallId);
+      }
      
       if (!toolName) {
         console.error(`❌ Unable to extract tool name from tool call ${i + 1}`);
@@ -1440,10 +1508,39 @@ export async function POST(req: NextRequest) {
 
       results.push(vapiToolResponseItem);
       
+      // Debug Logging: VAPI response prepared
+      addLogEntry({
+        event: "VAPI_RESPONSE_PREPARED",
+        source: `ToolCallRoute:${toolName}`,
+        details: {
+          toolCallId,
+          toolName,
+          success: toolResult.success,
+          messageType: vapiToolResponseItem.message.type,
+          messageContent: vapiToolResponseItem.message.content,
+          resultStringLength: resultStringForVapi.length,
+          embeddedStateStringLength: conversationStateStringForEmbedding.length
+        }
+      }, vapiCallId);
+      
       console.log(`✅ Tool ${toolName} completed. Success: ${toolResult.success}`);
     }
     
     console.log("Sending results to VAPI:", JSON.stringify({ results }));
+    
+    // Debug Logging: Final response to VAPI
+    addLogEntry({
+      event: "VAPI_RESPONSE_SENT",
+      source: "ToolCallRoute:POST",
+      details: {
+        resultsCount: results.length,
+        allToolsProcessed: results.map(r => ({ 
+          toolCallId: r.toolCallId, 
+          messageType: 'message' in r ? r.message.type : 'unknown'
+        }))
+      }
+    }, vapiCallId);
+    
     return NextResponse.json({ results });
      
   } catch (error) {
