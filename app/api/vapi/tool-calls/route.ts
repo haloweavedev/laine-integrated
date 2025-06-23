@@ -379,6 +379,13 @@ FLOW GUIDANCE PATTERNS:
 - MATCH_APPOINTMENT_TYPE_FROM_REASON: "Let me find the right appointment type for your [reason]..."
 
 TOOL-SPECIFIC PATTERNS:
+- get_intent SUCCESS (intent captured):
+  - If intent is BOOKING_RELATED (e.g., BOOK_APPOINTMENT, NEW_PATIENT_BOOKING, ROUTINE_BOOKING, URGENT_BOOKING, EXISTING_PATIENT_BOOKING) and reasonForVisit is known: "Okay, I can help you schedule a [reasonForVisit]. To get started, are you a new or existing patient with us?"
+  - If intent is BOOKING_RELATED and reasonForVisit is NOT known: "Okay, I can help with scheduling. To get started, are you a new or existing patient with us?"
+  - If intent is INQUIRY_PRACTICE_DETAILS: "Sure, I can help with that. What specifically about the practice would you like to know?"
+  - If intent is INQUIRY_FINANCIAL: "I can help you with that information. What specific financial or insurance question do you have?"
+  - If intent is RESCHEDULE_APPOINTMENT or CANCEL_APPOINTMENT: "I can help you with that. Can you provide me with your name and date of birth to look up your appointment?"
+  - If intent is GENERAL_INQUIRY or UNCLEAR: "How can I help you today?"
 - find_appointment_type SUCCESS: "Okay, a [type] is about [duration] minutes. What date works for you?"
 - check_available_slots SUCCESS with times: "For [type] on [date], I have [times] available. Which works best for you?"
 - check_available_slots SUCCESS no times: "I don't see any openings for [type] on [date]. Would you like me to check another date?"
@@ -400,8 +407,13 @@ Return ONLY the sentence.
       // Extract only the most essential fields per tool to reduce payload size
       switch (toolName) {
         case 'get_intent':
-          // For get_intent, we don't generate any message since it's silent
-          return "";
+          // For get_intent, extract intent and reason to generate the first guiding question
+          compactData = {
+            intent: toolResult.data?.intent,
+            reasonForVisit: toolResult.data?.reasonForVisit,
+            intent_analysis_complete: toolResult.data?.intent_analysis_complete
+          };
+          break;
         case 'find_appointment_type':
           compactData = toolResult.data.matched ? {
             matched: true,
