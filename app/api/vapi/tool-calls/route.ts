@@ -1052,7 +1052,7 @@ export async function POST(req: NextRequest) {
     // SUBPHASE 1: Add detailed logging of the raw VAPI payload
     console.log("[ToolCallRoute] RAW VAPI Payload:", JSON.stringify(payload, null, 2));
     
-    // Check if conversationState exists in any tool call arguments (NEW METHOD)
+    // VAPI-COMPLIANT: Check if conversationState exists in any tool call arguments
     const toolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
     let foundConversationState = null;
     
@@ -1060,9 +1060,22 @@ export async function POST(req: NextRequest) {
       const toolCall = toolCalls[i];
       const args = extractToolCallArguments(toolCall);
       
-      // Look for embedded conversation state in the conversationState argument
-      if (args.conversationState) {
-        console.log(`[ToolCallRoute] Found conversationState in tool call ${i}:`, JSON.stringify(args.conversationState, null, 2));
+      // Look for the conversationState string in the conversationState argument
+      if (args.conversationState && typeof args.conversationState === 'string') {
+        console.log(`[ToolCallRoute] Found conversationState string in tool call ${i}:`, args.conversationState);
+        try {
+          // Parse the JSON string to get the actual state object
+          const parsedState = JSON.parse(args.conversationState as string);
+          console.log(`[ToolCallRoute] Successfully parsed conversationState:`, JSON.stringify(parsedState, null, 2));
+          foundConversationState = parsedState;
+          break;
+        } catch (parseError) {
+          console.error(`[ToolCallRoute] Error parsing conversationState string from tool call ${i}:`, parseError);
+          console.log(`[ToolCallRoute] Raw conversationState string was:`, args.conversationState);
+        }
+      } else if (args.conversationState) {
+        // Fallback: if it's already an object (shouldn't happen with new format but keeping for safety)
+        console.log(`[ToolCallRoute] Found conversationState object in tool call ${i}:`, JSON.stringify(args.conversationState, null, 2));
         foundConversationState = args.conversationState;
         break;
       } else {
@@ -1384,40 +1397,45 @@ export async function POST(req: NextRequest) {
       
       console.log(`[ToolCallRoute] Embedding ConversationState in VAPI result for ${tool.name}:`, JSON.stringify(currentConversationStateSnapshot, null, 2));
 
-      // Apply dynamic message structure for ALL tools
+      // VAPI-COMPLIANT: Embed conversationState within the result field as required by VAPI
+      const updatedStateSnapshotObject = context.conversationState.getStateSnapshot();
+      const conversationStateStringForEmbedding = JSON.stringify(updatedStateSnapshotObject);
+
+      // Prepare the object that will be stringified for the 'result' field
+      const resultObjectForVapi = {
+        tool_output_data: toolResult.success ? (('data' in toolResult ? toolResult.data : {}) || {}) : { error: toolResult.error_code, details: toolResult.details },
+        // Embed our stringified conversationState here
+        // We'll name the key 'current_conversation_state_snapshot' to be clear
+        current_conversation_state_snapshot: conversationStateStringForEmbedding
+      };
+
+      const resultStringForVapi = JSON.stringify(resultObjectForVapi);
+      
+      console.log(`[ToolCallRoute] Preparing VAPI result string for tool ${tool.name}:`, resultStringForVapi);
+      console.log(`[ToolCallRoute] (Embedded conversationState string length: ${conversationStateStringForEmbedding.length})`);
+
       if (toolResult.success) {
-        // CRITICAL: Embed conversationState in the result field that VAPI passes to the LLM
-        const resultWithState = {
-          ...(toolResult.success && 'data' in toolResult ? toolResult.data : {}),
-          // Embed state in the result so LLM can access it and pass it back in next tool call
-          _conversation_state: currentConversationStateSnapshot
-        };
-        
         vapiToolResponseItem = {
           toolCallId,
-          result: JSON.stringify(resultWithState), // Data for LLM context with embedded state
+          result: resultStringForVapi, // This is now a string containing tool_output_data and current_conversation_state_snapshot
           message: {
-            type: "request-complete", // Vapi specific type
-            content: toolResult.message_to_patient, // Dynamic message to be spoken
+            type: "request-complete",
+            content: toolResult.message_to_patient,
           }
+          // NO top-level conversationState field here anymore
         };
-        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared SUCCESS response for Vapi with embedded state. Message:`, toolResult.message_to_patient);
       } else {
-        // Also embed state in error responses
-        const errorWithState = {
-          error: toolResult.error_code || toolResult.details || "Tool execution failed",
-          _conversation_state: currentConversationStateSnapshot
-        };
-        
         vapiToolResponseItem = {
           toolCallId,
-          result: JSON.stringify(errorWithState), // Error info for LLM with embedded state
+          // Even for errors, we send back the state. The 'result' field can convey the error.
+          result: resultStringForVapi, // Contains error info in tool_output_data and the state
+          // error: toolResult.error_code || toolResult.details, // VAPI docs don't show a top-level error field here, error info is in result
           message: {
-            type: "request-failed", // Vapi specific type
-            content: toolResult.message_to_patient, // Dynamic error message to be spoken
+            type: "request-failed",
+            content: toolResult.message_to_patient,
           }
+          // NO top-level conversationState field here anymore
         };
-        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared FAILURE response for Vapi with embedded state. Message:`, toolResult.message_to_patient);
       }
 
       results.push(vapiToolResponseItem);

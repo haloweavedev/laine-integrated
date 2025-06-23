@@ -109,40 +109,6 @@ export interface VapiServerMessage {
   message: VapiToolCallsMessage;
 }
 
-// Shared conversationState schema for all tools to include
-export const conversationStateSchema = z.object({
-  practiceId: z.string().optional(),
-  vapiCallId: z.string().optional(),
-  assistantId: z.string().optional(),
-  identifiedPatientId: z.string().optional().nullable(),
-  patientStatus: z.enum(['new', 'existing', 'unknown']).optional(),
-  newPatientInfo: z.object({
-    firstName: z.string().optional().nullable(),
-    lastName: z.string().optional().nullable(),
-    dob: z.string().optional().nullable(),
-    phone: z.string().optional().nullable(),
-    email: z.string().optional().nullable(),
-    insuranceName: z.string().optional().nullable(),
-  }).optional(),
-  newPatientInfoConfirmation: z.object({
-    firstNameConfirmed: z.boolean().optional(),
-    lastNameConfirmed: z.boolean().optional(),
-    dobConfirmed: z.boolean().optional(),
-    phoneConfirmed: z.boolean().optional(),
-    emailConfirmed: z.boolean().optional(),
-    allDetailsConfirmed: z.boolean().optional(),
-  }).optional(),
-  determinedAppointmentTypeId: z.string().optional().nullable(),
-  determinedAppointmentTypeName: z.string().optional().nullable(),
-  determinedDurationMinutes: z.number().optional().nullable(),
-  requestedDate: z.string().optional().nullable(),
-  selectedTimeSlot: z.record(z.unknown()).optional().nullable(),
-  availableSlotsForDate: z.array(z.unknown()).optional().nullable(),
-  lastUserIntent: z.string().optional().nullable(),
-  intent: z.string().optional().nullable(),
-  reasonForVisit: z.string().optional().nullable(),
-  callSummaryForNote: z.string().optional(),
-  bookedAppointmentDetails: z.record(z.unknown()).optional().nullable(),
-  practiceDetails: z.record(z.unknown()).optional().nullable(),
-  bookingDetailsPresentedForConfirmation: z.boolean().optional(),
-}).optional().describe("The current conversation state context. MUST be passed with every tool call to maintain context continuity. This is populated by the backend and should be included exactly as received from previous tool responses."); 
+// VAPI-COMPLIANT: Shared conversationState schema for all tools to include
+// Now expects a JSON string instead of an object, since VAPI LLM will extract this from result.current_conversation_state_snapshot
+export const conversationStateSchema = z.string().optional().describe("The JSON string captured from the `current_conversation_state_snapshot` field of the previous tool's `result`. MUST be passed with every tool call to maintain context continuity. Extract this string from parsing the previous tool response's `result` field, then pass it exactly as a string (do not parse it again). For the first tool call, this can be omitted or an empty JSON object string '{}'."); 
