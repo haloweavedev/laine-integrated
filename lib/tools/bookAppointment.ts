@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolDefinition, ToolResult } from "./types";
+import { ToolDefinition, ToolResult, conversationStateSchema } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { DateTime } from "luxon";
 
@@ -19,7 +19,8 @@ export const bookAppointmentSchema = z.object({
   durationMinutes: z.number()
     .min(1)
     .describe("Appointment duration in minutes from find_appointment_type tool call data.duration_minutes field. Note: ConversationState is the primary source for this value."),
-  userHasConfirmedBooking: z.boolean().optional().describe("Set to true if the user has explicitly confirmed all booking details presented by Laine.")
+  userHasConfirmedBooking: z.boolean().optional().describe("Set to true if the user has explicitly confirmed all booking details presented by Laine."),
+  conversationState: conversationStateSchema,
 });
 
 const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {

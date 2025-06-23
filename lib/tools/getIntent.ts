@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { ToolDefinition, ToolResult } from "./types";
+import { ToolDefinition, ToolResult, conversationStateSchema } from "./types";
 
 export const getIntentSchema = z.object({
   userUtterance: z.string().min(1).describe("The user's first significant utterance or the initial part of the conversation transcript that indicates their purpose for calling."),
+  conversationState: conversationStateSchema,
 });
 
 const getIntentTool: ToolDefinition<typeof getIntentSchema> = {

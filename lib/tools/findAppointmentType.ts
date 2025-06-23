@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { ToolDefinition, ToolResult } from "./types";
+import { ToolDefinition, ToolResult, conversationStateSchema } from "./types";
 import { matchAppointmentTypeWithLLM, MatcherAppointmentType } from "@/lib/ai/appointmentMatcher";
 
 export const findAppointmentTypeSchema = z.object({
   userRequest: z.string()
     .min(1)
-    .describe(`Patient's requested service type. Common variations: cleaning/hygiene/prophy, checkup/exam, emergency/pain, filling/cavity, crown/cap, root canal, extraction/pull tooth. Example: "I need a cleaning" → "cleaning"`)
+    .describe(`Patient's requested service type. Common variations: cleaning/hygiene/prophy, checkup/exam, emergency/pain, filling/cavity, crown/cap, root canal, extraction/pull tooth. Example: "I need a cleaning" → "cleaning"`),
+  conversationState: conversationStateSchema,
 });
 
 const findAppointmentTypeTool: ToolDefinition<typeof findAppointmentTypeSchema> = {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolDefinition, ToolResult } from "./types";
+import { ToolDefinition, ToolResult, conversationStateSchema } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 
 // Helper for current date context
@@ -35,7 +35,8 @@ export const createNewPatientSchema = z.object({
   insurance_name: z.string().optional()
     .describe("Dental insurance company name if provided (e.g., Cigna, MetLife). Optional."),
   userConfirmation: z.boolean().optional()
-    .describe("True when user confirms all collected details are correct before creating patient record")
+    .describe("True when user confirms all collected details are correct before creating patient record"),
+  conversationState: conversationStateSchema,
 });
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {

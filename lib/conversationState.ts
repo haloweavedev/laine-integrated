@@ -255,4 +255,93 @@ export class ConversationState {
       bookingDetailsPresentedForConfirmation: this.bookingDetailsPresentedForConfirmation
     };
   }
+
+  /**
+   * Restores conversation state from a snapshot object
+   * @param snapshot - A snapshot object previously created with getStateSnapshot()
+   */
+  restoreFromSnapshot(snapshot: Record<string, unknown>): void {
+    // Restore basic fields
+    if (typeof snapshot.identifiedPatientId === 'string') {
+      this.identifiedPatientId = snapshot.identifiedPatientId;
+    }
+    if (snapshot.patientStatus === 'new' || snapshot.patientStatus === 'existing' || snapshot.patientStatus === 'unknown') {
+      this.patientStatus = snapshot.patientStatus;
+    }
+    
+    // Restore new patient info
+    if (snapshot.newPatientInfo && typeof snapshot.newPatientInfo === 'object') {
+      const info = snapshot.newPatientInfo as Record<string, unknown>;
+      this.newPatientInfo = {
+        firstName: typeof info.firstName === 'string' ? info.firstName : null,
+        lastName: typeof info.lastName === 'string' ? info.lastName : null,
+        dob: typeof info.dob === 'string' ? info.dob : null,
+        phone: typeof info.phone === 'string' ? info.phone : null,
+        email: typeof info.email === 'string' ? info.email : null,
+        insuranceName: typeof info.insuranceName === 'string' ? info.insuranceName : null,
+      };
+    }
+    
+    // Restore confirmation status
+    if (snapshot.newPatientInfoConfirmation && typeof snapshot.newPatientInfoConfirmation === 'object') {
+      const conf = snapshot.newPatientInfoConfirmation as Record<string, unknown>;
+      this.newPatientInfoConfirmation = {
+        firstNameConfirmed: Boolean(conf.firstNameConfirmed),
+        lastNameConfirmed: Boolean(conf.lastNameConfirmed),
+        dobConfirmed: Boolean(conf.dobConfirmed),
+        phoneConfirmed: Boolean(conf.phoneConfirmed),
+        emailConfirmed: Boolean(conf.emailConfirmed),
+        allDetailsConfirmed: Boolean(conf.allDetailsConfirmed),
+      };
+    }
+    
+    // Restore appointment type
+    if (typeof snapshot.determinedAppointmentTypeId === 'string') {
+      this.determinedAppointmentTypeId = snapshot.determinedAppointmentTypeId;
+    }
+    if (typeof snapshot.determinedAppointmentTypeName === 'string') {
+      this.determinedAppointmentTypeName = snapshot.determinedAppointmentTypeName;
+    }
+    if (typeof snapshot.determinedDurationMinutes === 'number') {
+      this.determinedDurationMinutes = snapshot.determinedDurationMinutes;
+    }
+    
+    // Restore scheduling context
+    if (typeof snapshot.requestedDate === 'string') {
+      this.requestedDate = snapshot.requestedDate;
+    }
+    if (snapshot.selectedTimeSlot && typeof snapshot.selectedTimeSlot === 'object') {
+      this.selectedTimeSlot = { ...snapshot.selectedTimeSlot as Record<string, unknown> };
+    }
+    if (Array.isArray(snapshot.availableSlotsForDate)) {
+      this.availableSlotsForDate = [...snapshot.availableSlotsForDate];
+    }
+    
+    // Restore intent and context
+    if (typeof snapshot.lastUserIntent === 'string') {
+      this.lastUserIntent = snapshot.lastUserIntent;
+    }
+    if (typeof snapshot.intent === 'string') {
+      this.intent = snapshot.intent;
+    }
+    if (typeof snapshot.reasonForVisit === 'string') {
+      this.reasonForVisit = snapshot.reasonForVisit;
+    }
+    
+    // Restore call summary and booking details
+    if (typeof snapshot.callSummaryForNote === 'string') {
+      this.callSummaryForNote = snapshot.callSummaryForNote;
+    }
+    if (snapshot.bookedAppointmentDetails && typeof snapshot.bookedAppointmentDetails === 'object') {
+      this.bookedAppointmentDetails = { ...snapshot.bookedAppointmentDetails as Record<string, unknown> };
+    }
+    if (snapshot.practiceDetails && typeof snapshot.practiceDetails === 'object') {
+      this.practiceDetails = { ...snapshot.practiceDetails as Record<string, unknown> };
+    }
+    if (typeof snapshot.bookingDetailsPresentedForConfirmation === 'boolean') {
+      this.bookingDetailsPresentedForConfirmation = snapshot.bookingDetailsPresentedForConfirmation;
+    }
+    
+    console.log('[ConversationState] Successfully restored state from snapshot');
+  }
 } 

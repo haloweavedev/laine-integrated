@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolDefinition, ToolResult } from "./types";
+import { ToolDefinition, ToolResult, conversationStateSchema } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 
 // Generate current date dynamically for LLM context
@@ -51,7 +51,8 @@ export const checkAvailableSlotsSchema = z.object({
   appointmentTypeId: z.string().min(1).describe("Appointment type ID (Laine CUID) from previous find_appointment_type tool call"),
   days: z.number().min(1).max(7).default(1).describe("Number of days to check (default 1)"),
   providerIds: z.array(z.string()).optional().describe("Optional array of provider IDs (Laine CUIDs of SavedProvider) to filter by"),
-  operatoryIds: z.array(z.string()).optional().describe("Optional array of operatory IDs (Laine CUIDs of SavedOperatory) to filter by")
+  operatoryIds: z.array(z.string()).optional().describe("Optional array of operatory IDs (Laine CUIDs of SavedOperatory) to filter by"),
+  conversationState: conversationStateSchema,
 });
 
 const checkAvailableSlotsTool: ToolDefinition<typeof checkAvailableSlotsSchema> = {

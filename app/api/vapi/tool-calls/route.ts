@@ -1052,13 +1052,19 @@ export async function POST(req: NextRequest) {
     // SUBPHASE 1: Add detailed logging of the raw VAPI payload
     console.log("[ToolCallRoute] RAW VAPI Payload:", JSON.stringify(payload, null, 2));
     
-    // Check if conversationState exists in any tool call arguments
+    // Check if conversationState exists in any tool call arguments (NEW METHOD)
     const toolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
+    let foundConversationState = null;
+    
     for (let i = 0; i < toolCalls.length; i++) {
       const toolCall = toolCalls[i];
       const args = extractToolCallArguments(toolCall);
+      
+      // Look for embedded conversation state in the conversationState argument
       if (args.conversationState) {
         console.log(`[ToolCallRoute] Found conversationState in tool call ${i}:`, JSON.stringify(args.conversationState, null, 2));
+        foundConversationState = args.conversationState;
+        break;
       } else {
         console.log(`[ToolCallRoute] No conversationState found in tool call ${i} arguments`);
       }
@@ -1109,10 +1115,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results: errorResults });
     }
     
-    // Initialize ConversationState
+    // Initialize ConversationState - prioritize embedded state from VAPI LLM
     const conversationState = new ConversationState(practice.id, vapiCallId, assistantId);
     
-    console.log("[ToolCallRoute] Initialized/Loaded ConversationState:", JSON.stringify(conversationState.getStateSnapshot(), null, 2));
+    // If we found conversation state from the LLM's previous tool call, restore it
+    if (foundConversationState) {
+      console.log("[ToolCallRoute] Restoring ConversationState from VAPI LLM:", JSON.stringify(foundConversationState, null, 2));
+      conversationState.restoreFromSnapshot(foundConversationState);
+    }
+    
+    console.log("[ToolCallRoute] Final ConversationState:", JSON.stringify(conversationState.getStateSnapshot(), null, 2));
     
     // Update call log status and fetch existing context data
     let callLogContextData = null;
@@ -1359,38 +1371,53 @@ export async function POST(req: NextRequest) {
         }
       }
       
-      let vapiToolResponseItem: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      let vapiToolResponseItem: {
+        toolCallId: string;
+        result: string;
+        message: {
+          type: string;
+          content: string;
+        };
+      };
 
       const currentConversationStateSnapshot = context.conversationState.getStateSnapshot();
       
-      console.log(`[ToolCallRoute] Attaching ConversationState to VAPI response for ${tool.name}:`, JSON.stringify(currentConversationStateSnapshot, null, 2));
+      console.log(`[ToolCallRoute] Embedding ConversationState in VAPI result for ${tool.name}:`, JSON.stringify(currentConversationStateSnapshot, null, 2));
 
       // Apply dynamic message structure for ALL tools
       if (toolResult.success) {
+        // CRITICAL: Embed conversationState in the result field that VAPI passes to the LLM
+        const resultWithState = {
+          ...(toolResult.success && 'data' in toolResult ? toolResult.data : {}),
+          // Embed state in the result so LLM can access it and pass it back in next tool call
+          _conversation_state: currentConversationStateSnapshot
+        };
+        
         vapiToolResponseItem = {
           toolCallId,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          result: JSON.stringify((toolResult as any).data || {}), // Data for LLM context
+          result: JSON.stringify(resultWithState), // Data for LLM context with embedded state
           message: {
             type: "request-complete", // Vapi specific type
             content: toolResult.message_to_patient, // Dynamic message to be spoken
-          },
-          // ADD THIS: Include conversation state snapshot for VAPI LLM to maintain context
-          conversationState: currentConversationStateSnapshot
+          }
         };
-        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared SUCCESS response for Vapi with immediate message:`, toolResult.message_to_patient);
+        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared SUCCESS response for Vapi with embedded state. Message:`, toolResult.message_to_patient);
       } else {
+        // Also embed state in error responses
+        const errorWithState = {
+          error: toolResult.error_code || toolResult.details || "Tool execution failed",
+          _conversation_state: currentConversationStateSnapshot
+        };
+        
         vapiToolResponseItem = {
           toolCallId,
-          error: toolResult.error_code || toolResult.details || "Tool execution failed", // Error info for LLM
+          result: JSON.stringify(errorWithState), // Error info for LLM with embedded state
           message: {
             type: "request-failed", // Vapi specific type
             content: toolResult.message_to_patient, // Dynamic error message to be spoken
-          },
-          // ADD THIS: Include conversation state snapshot for VAPI LLM to maintain context
-          conversationState: currentConversationStateSnapshot
+          }
         };
-        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared FAILURE response for Vapi with immediate message:`, toolResult.message_to_patient);
+        console.log(`[ToolCallHandler] Tool: ${tool.name}. Prepared FAILURE response for Vapi with embedded state. Message:`, toolResult.message_to_patient);
       }
 
       results.push(vapiToolResponseItem);
