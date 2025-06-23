@@ -344,4 +344,184 @@ export class ConversationState {
     
     console.log('[ConversationState] Successfully restored state from snapshot');
   }
+
+  /**
+   * VAPI COMPLIANCE: Validates the integrity of the conversation state
+   * Checks for common issues that could cause VAPI flow problems
+   * @returns Object containing validation results and any issues found
+   */
+  validateStateIntegrity(): {
+    isValid: boolean;
+    issues: string[];
+    warnings: string[];
+    recommendations: string[];
+  } {
+    const issues: string[] = [];
+    const warnings: string[] = [];
+    const recommendations: string[] = [];
+
+    // Core identity validation
+    if (!this.practiceId || typeof this.practiceId !== 'string') {
+      issues.push('Missing or invalid practiceId');
+    }
+    if (!this.vapiCallId || typeof this.vapiCallId !== 'string') {
+      issues.push('Missing or invalid vapiCallId');
+    }
+    if (!this.assistantId || typeof this.assistantId !== 'string') {
+      issues.push('Missing or invalid assistantId');
+    }
+
+    // Patient status consistency validation
+    if (this.patientStatus === 'new' && this.identifiedPatientId) {
+      warnings.push('Patient status is "new" but identifiedPatientId is set - potential inconsistency');
+    }
+    if (this.patientStatus === 'existing' && !this.identifiedPatientId) {
+      warnings.push('Patient status is "existing" but no identifiedPatientId set');
+    }
+
+    // New patient info validation for "new" patients
+    if (this.patientStatus === 'new') {
+      if (!this.newPatientInfo.firstName && !this.newPatientInfo.lastName) {
+        recommendations.push('New patient registration in progress - collect name details next');
+      }
+      
+      // Check for incomplete confirmations
+      if (this.newPatientInfo.firstName && !this.newPatientInfoConfirmation.firstNameConfirmed) {
+        recommendations.push('First name collected but not confirmed - consider spelling confirmation');
+      }
+      if (this.newPatientInfo.lastName && !this.newPatientInfoConfirmation.lastNameConfirmed) {
+        recommendations.push('Last name collected but not confirmed - consider spelling confirmation');
+      }
+      
+      // Check for missing required fields if names are confirmed
+      if (this.newPatientInfoConfirmation.firstNameConfirmed && this.newPatientInfoConfirmation.lastNameConfirmed) {
+        if (!this.newPatientInfo.dob) {
+          recommendations.push('Names confirmed but missing date of birth');
+        }
+        if (!this.newPatientInfo.phone) {
+          recommendations.push('Names confirmed but missing phone number');
+        }
+        if (!this.newPatientInfo.email) {
+          recommendations.push('Names confirmed but missing email address');
+        }
+      }
+    }
+
+    // Appointment type consistency validation
+    if (this.determinedAppointmentTypeId && !this.determinedAppointmentTypeName) {
+      warnings.push('Appointment type ID set without corresponding name');
+    }
+    if (this.determinedAppointmentTypeName && !this.determinedAppointmentTypeId) {
+      warnings.push('Appointment type name set without corresponding ID');
+    }
+    if (this.determinedAppointmentTypeId && !this.determinedDurationMinutes) {
+      warnings.push('Appointment type set but duration is missing');
+    }
+
+    // Scheduling flow validation
+    if (this.requestedDate && !this.determinedAppointmentTypeId) {
+      recommendations.push('Date requested but appointment type not determined yet');
+    }
+    if (this.selectedTimeSlot && !this.requestedDate) {
+      warnings.push('Time slot selected but no requested date set');
+    }
+    if (this.availableSlotsForDate && !this.requestedDate) {
+      warnings.push('Available slots loaded but no requested date set');
+    }
+
+    // Intent validation
+    if (this.intent && this.intent.includes('BOOK') && this.patientStatus === 'unknown') {
+      recommendations.push('Booking intent detected but patient status unknown - determine if new or existing');
+    }
+    if (this.reasonForVisit && !this.intent) {
+      warnings.push('Reason for visit captured but no intent set');
+    }
+
+    // Booking confirmation flow validation
+    if (this.bookingDetailsPresentedForConfirmation && !this.selectedTimeSlot) {
+      warnings.push('Booking details presented for confirmation but no time slot selected');
+    }
+
+    // Date format validation
+    if (this.requestedDate && !/^\d{4}-\d{2}-\d{2}$/.test(this.requestedDate)) {
+      issues.push('Requested date is not in YYYY-MM-DD format');
+    }
+    if (this.newPatientInfo.dob && !/^\d{4}-\d{2}-\d{2}$/.test(this.newPatientInfo.dob)) {
+      issues.push('Date of birth is not in YYYY-MM-DD format');
+    }
+
+    const isValid = issues.length === 0;
+
+    return {
+      isValid,
+      issues,
+      warnings,
+      recommendations
+    };
+  }
+
+  /**
+   * VAPI COMPLIANCE: Generates a health report for debugging and monitoring
+   * @returns Comprehensive state health information
+   */
+  generateHealthReport(): {
+    stateSize: number;
+    completeness: {
+      identityComplete: boolean;
+      intentCaptured: boolean;
+      patientStatusDetermined: boolean;
+      appointmentTypeSelected: boolean;
+      schedulingInProgress: boolean;
+      readyForBooking: boolean;
+    };
+    flowPosition: string;
+    validation: ReturnType<ConversationState['validateStateIntegrity']>;
+  } {
+    const snapshot = this.getStateSnapshot();
+    const stateSize = JSON.stringify(snapshot).length;
+
+    const completeness = {
+      identityComplete: !!(this.practiceId && this.vapiCallId && this.assistantId),
+      intentCaptured: !!this.intent,
+      patientStatusDetermined: this.patientStatus !== 'unknown',
+      appointmentTypeSelected: !!(this.determinedAppointmentTypeId && this.determinedAppointmentTypeName),
+      schedulingInProgress: !!(this.requestedDate || this.availableSlotsForDate),
+      readyForBooking: !!(
+        this.determinedAppointmentTypeId && 
+        (this.identifiedPatientId || (this.patientStatus === 'new' && this.newPatientInfo.firstName && this.newPatientInfo.lastName)) &&
+        this.selectedTimeSlot
+      )
+    };
+
+    // Determine current flow position
+    let flowPosition = 'initialization';
+    if (completeness.intentCaptured) {
+      if (!completeness.patientStatusDetermined) {
+        flowPosition = 'determining_patient_status';
+      } else if (this.patientStatus === 'new' && !this.newPatientInfo.firstName) {
+        flowPosition = 'collecting_patient_info';
+      } else if (this.patientStatus === 'existing' && !this.identifiedPatientId) {
+        flowPosition = 'finding_existing_patient';
+      } else if (!completeness.appointmentTypeSelected) {
+        flowPosition = 'selecting_appointment_type';
+      } else if (!completeness.schedulingInProgress) {
+        flowPosition = 'scheduling_setup';
+      } else if (!this.selectedTimeSlot) {
+        flowPosition = 'time_selection';
+      } else if (completeness.readyForBooking) {
+        flowPosition = 'ready_for_booking';
+      } else {
+        flowPosition = 'booking_prerequisites';
+      }
+    }
+
+    const validation = this.validateStateIntegrity();
+
+    return {
+      stateSize,
+      completeness,
+      flowPosition,
+      validation
+    };
+  }
 } 

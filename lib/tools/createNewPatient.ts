@@ -41,7 +41,7 @@ export const createNewPatientSchema = z.object({
 
 const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
   name: "create_new_patient",
-  description: "Creates a new patient record in the EHR system through staged collection. Call when patient is NEW or find_patient_in_ehr fails. Gathers information step-by-step: firstName, lastName, dateOfBirth (YYYY-MM-DD), phone (10+ digits), email. Confirms all details before API call. Returns patient_id, patient_name.",
+  description: "Creates a new patient record in the EHR system through multi-step data collection. Call when patient status is identified as NEW or when find_patient_in_ehr returns no results. Collects required information in stages: 1) Full name (first + last), 2) Spelling confirmations, 3) Date of birth (YYYY-MM-DD format), 4) Phone number (digits only), 5) Email address. Each field is individually confirmed during collection. This tool may be called multiple times during the patient registration flow as information is gathered step-by-step. Returns patient_id and patient_name upon successful creation.",
   schema: createNewPatientSchema,
   prerequisites: [
     { argName: 'fullName', askUserMessage: "To create your patient record, could you please tell me your first and last name?" },
@@ -77,262 +77,22 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
     }
 
     try {
-      // Handle fullName parsing into firstName and lastName
-      if (args.fullName && typeof args.fullName === 'string') {
-        const nameParts = args.fullName.trim().split(/\s+/);
-        if (nameParts.length >= 2) {
-          const firstName = nameParts[0];
-          const lastName = nameParts.slice(1).join(' '); // Handle middle names as part of last name
-          conversationState.updateNewPatientDetail('firstName', firstName);
-          conversationState.updateNewPatientDetail('lastName', lastName);
-        }
-      }
+      // Process incoming arguments and update conversation state
+      processIncomingArguments(args, conversationState);
       
-      // Handle individual firstName and lastName updates (for spelling corrections)
-      if (args.firstName && typeof args.firstName === 'string') {
-        conversationState.updateNewPatientDetail('firstName', args.firstName.trim());
-      }
-      if (args.lastName && typeof args.lastName === 'string') {
-        conversationState.updateNewPatientDetail('lastName', args.lastName.trim());
-      }
+      // Determine what action is needed next based on current state
+      const nextAction = determineNextAction(conversationState);
       
-      // Handle spelling confirmations
-      if (args.firstNameSpelling && typeof args.firstNameSpelling === 'string') {
-        // Convert spelling to proper name format (remove spaces/dashes, capitalize)
-        const spelledName = args.firstNameSpelling.replace(/[\s\-]/g, '').toLowerCase();
-        const properName = spelledName.charAt(0).toUpperCase() + spelledName.slice(1);
-        conversationState.updateNewPatientDetail('firstName', properName, true); // Mark as confirmed
-      }
-      if (args.lastNameSpelling && typeof args.lastNameSpelling === 'string') {
-        // Convert spelling to proper name format (remove spaces/dashes, capitalize)
-        const spelledName = args.lastNameSpelling.replace(/[\s\-]/g, '').toLowerCase();
-        const properName = spelledName.charAt(0).toUpperCase() + spelledName.slice(1);
-        conversationState.updateNewPatientDetail('lastName', properName, true); // Mark as confirmed
-      }
-      
-      // Update other details
-      if (args.dateOfBirth && typeof args.dateOfBirth === 'string') {
-        conversationState.updateNewPatientDetail('dob', args.dateOfBirth);
-      }
-      if (args.phone && typeof args.phone === 'string') {
-        // Clean phone number to digits only
-        const cleanPhone = args.phone.replace(/\D/g, '');
-        conversationState.updateNewPatientDetail('phone', cleanPhone);
-      }
-      if (args.email && typeof args.email === 'string') {
-        conversationState.updateNewPatientDetail('email', args.email.toLowerCase().trim());
-      }
-      if (args.insurance_name && typeof args.insurance_name === 'string') {
-        conversationState.updateNewPatientDetail('insuranceName', args.insurance_name.trim());
-      }
-
-      // Check if all required fields are collected and confirmed
-      const { firstName, lastName, dob, phone, email } = conversationState.newPatientInfo;
-      const { firstNameConfirmed, lastNameConfirmed } = conversationState.newPatientInfoConfirmation;
-      
-      // Handle staged collection and confirmation flow
-      if (!firstName || !lastName) {
+      if (nextAction.action_needed) {
         return {
           success: true,
           message_to_patient: "",
-          data: {
-            action_needed: "collect_full_name",
-            current_details: conversationState.newPatientInfo
-          }
-        };
-      }
-      
-      // If names are collected but not confirmed, ask for spelling confirmation
-      if (!firstNameConfirmed) {
-        return {
-          success: true,
-          message_to_patient: "",
-          data: {
-            action_needed: "confirm_firstName_spelling",
-            firstName: firstName,
-            current_details: conversationState.newPatientInfo
-          }
-        };
-      }
-      
-      if (!lastNameConfirmed) {
-        return {
-          success: true,
-          message_to_patient: "",
-          data: {
-            action_needed: "confirm_lastName_spelling",
-            lastName: lastName,
-            current_details: conversationState.newPatientInfo
-          }
-        };
-      }
-      
-      // Continue with other fields if names are confirmed
-      if (!dob) {
-        return {
-          success: true,
-          message_to_patient: "",
-          data: {
-            action_needed: "collect_next_detail",
-            next_detail_to_collect: 'dateOfBirth',
-            current_details: conversationState.newPatientInfo
-          }
-        };
-      }
-      
-      if (!phone) {
-        return {
-          success: true,
-          message_to_patient: "",
-          data: {
-            action_needed: "collect_next_detail",
-            next_detail_to_collect: 'phone',
-            current_details: conversationState.newPatientInfo
-          }
-        };
-      }
-      
-      if (!email) {
-        return {
-          success: true,
-          message_to_patient: "",
-          data: {
-            action_needed: "collect_next_detail",
-            next_detail_to_collect: 'email',
-            current_details: conversationState.newPatientInfo
-          }
+          data: nextAction
         };
       }
 
-      // All details collected - since individual confirmations were done during collection,
-      // we can proceed directly to API call without full re-summary
-      if (!conversationState.newPatientInfoConfirmation.allDetailsConfirmed) {
-        // Mark all details as confirmed since we reached this point with individual confirmations
-        conversationState.setAllNewPatientDetailsConfirmed(true);
-      }
-
-      // Validate all required fields before API call
-      const patientData = {
-        firstName: conversationState.newPatientInfo.firstName!,
-        lastName: conversationState.newPatientInfo.lastName!,
-        dateOfBirth: conversationState.newPatientInfo.dob!,
-        phone: conversationState.newPatientInfo.phone!,
-        email: conversationState.newPatientInfo.email!
-      };
-
-      const validationResult = validatePatientData(patientData);
-      if (!validationResult.isValid) {
-        return {
-          success: false,
-          error_code: validationResult.errorCode || "VALIDATION_ERROR",
-          message_to_patient: "",
-          details: validationResult.details || "Validation failed"
-        };
-      }
-
-      // Get the first active provider for new patient assignment
-      const activeProvider = practice.savedProviders.find(sp => sp.isActive);
-      if (!activeProvider) {
-        return {
-          success: false,
-          error_code: "NO_ACTIVE_PROVIDERS",
-          message_to_patient: "",
-          details: "No active providers"
-        };
-      }
-
-      // Prepare new patient data in EXACT NexHealth API format
-      const patientBio: {
-        date_of_birth: string;
-        phone_number: string;
-        gender: string;
-        insurance_name?: string;
-      } = {
-        date_of_birth: patientData.dateOfBirth,
-        phone_number: patientData.phone,
-        gender: "Female" // Default as per API example - this can be enhanced later
-      };
-
-      // Add insurance_name if provided
-      if (conversationState.newPatientInfo.insuranceName && conversationState.newPatientInfo.insuranceName.trim() !== "") {
-        patientBio.insurance_name = conversationState.newPatientInfo.insuranceName.trim();
-      }
-
-      const newPatientData = {
-        provider: { 
-          provider_id: parseInt(activeProvider.provider.nexhealthProviderId) 
-        },
-        patient: {
-          first_name: patientData.firstName,
-          last_name: patientData.lastName,
-          email: patientData.email,
-          bio: patientBio
-        }
-      };
-
-      console.log(`[createNewPatient] Creating patient: ${patientData.firstName} ${patientData.lastName}`);
-      console.log(`[createNewPatient] Patient data:`, JSON.stringify(newPatientData, null, 2));
-
-      const createResponse = await fetchNexhealthAPI(
-        '/patients',
-        practice.nexhealthSubdomain,
-        { location_id: practice.nexhealthLocationId },
-        'POST',
-        newPatientData
-      );
-
-      console.log(`[createNewPatient] API Response:`, JSON.stringify(createResponse, null, 2));
-
-      // Extract patient ID from response
-      let newPatientId = null;
-      if (createResponse?.data?.user?.id) {
-        newPatientId = createResponse.data.user.id;
-      } else if (createResponse?.data?.id) {
-        newPatientId = createResponse.data.id;
-      }
-
-      if (!newPatientId) {
-        console.error(`[createNewPatient] Failed to extract patient ID from response`);
-        return {
-          success: false,
-          error_code: "PATIENT_CREATION_FAILED",
-          message_to_patient: "",
-          details: "Could not extract patient ID from response"
-        };
-      }
-
-      // Update ConversationState with new patient ID
-      conversationState.updatePatient(String(newPatientId));
-      
-      // Update patient status to 'existing' since they now exist in the system
-      conversationState.updatePatientStatus('existing');
-      
-      // Clear the collected new patient info since creation is complete
-      conversationState.resetNewPatientInfo();
-
-      // Update call log with new patient ID for backward compatibility
-      await updateCallLogWithPatient(vapiCallId, practice.id, String(newPatientId));
-
-      // Format confirmation message
-      const formattedPhone = formatPhoneForDisplay(patientData.phone);
-
-      return {
-        success: true,
-        message_to_patient: "",
-        data: {
-          patient_id: String(newPatientId),
-          patient_name: `${patientData.firstName} ${patientData.lastName}`,
-          first_name: patientData.firstName,
-          last_name: patientData.lastName,
-          date_of_birth: patientData.dateOfBirth,
-          phone: formattedPhone,
-          email: patientData.email,
-          insurance_name: conversationState.newPatientInfo.insuranceName || null,
-          practice_name: practice.name,
-          created: true,
-          has_insurance: !!(conversationState.newPatientInfo.insuranceName && conversationState.newPatientInfo.insuranceName.trim() !== "")
-        }
-      };
+      // All required data collected - proceed with patient creation
+      return await createPatientInNexHealth(conversationState, practice, vapiCallId);
 
     } catch (error) {
       console.error(`[createNewPatient] Error:`, error);
@@ -346,6 +106,8 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
           errorCode = "DUPLICATE_PATIENT";
         } else if (error.message.includes("401")) {
           errorCode = "AUTH_ERROR";
+        } else if (error.message.includes("timeout")) {
+          errorCode = "TIMEOUT_ERROR";
         }
       }
       
@@ -357,12 +119,272 @@ const createNewPatientTool: ToolDefinition<typeof createNewPatientSchema> = {
         data: {
           attempted_patient_name: `${conversationState.newPatientInfo.firstName || ''} ${conversationState.newPatientInfo.lastName || ''}`.trim() || 'Unknown',
           first_name: conversationState.newPatientInfo.firstName,
-          last_name: conversationState.newPatientInfo.lastName
+          last_name: conversationState.newPatientInfo.lastName,
+          current_step: getCurrentStepDescription(conversationState)
         }
       };
     }
   }
 };
+
+// Helper functions for createNewPatient tool
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function processIncomingArguments(args: any, conversationState: any): void {
+  // Handle fullName parsing into firstName and lastName
+  if (args.fullName && typeof args.fullName === 'string') {
+    const nameParts = args.fullName.trim().split(/\s+/);
+    if (nameParts.length >= 2) {
+      const firstName = nameParts[0];
+      const lastName = nameParts.slice(1).join(' '); // Handle middle names as part of last name
+      conversationState.updateNewPatientDetail('firstName', firstName);
+      conversationState.updateNewPatientDetail('lastName', lastName);
+    }
+  }
+  
+  // Handle individual firstName and lastName updates
+  if (args.firstName && typeof args.firstName === 'string') {
+    conversationState.updateNewPatientDetail('firstName', args.firstName.trim());
+  }
+  if (args.lastName && typeof args.lastName === 'string') {
+    conversationState.updateNewPatientDetail('lastName', args.lastName.trim());
+  }
+  
+  // Handle spelling confirmations - these mark the names as confirmed
+  if (args.firstNameSpelling && typeof args.firstNameSpelling === 'string') {
+    // Convert spelling to proper name format (remove spaces/dashes, capitalize)
+    const spelledName = args.firstNameSpelling.replace(/[\s\-]/g, '').toLowerCase();
+    const properName = spelledName.charAt(0).toUpperCase() + spelledName.slice(1);
+    conversationState.updateNewPatientDetail('firstName', properName, true); // Mark as confirmed
+  }
+  if (args.lastNameSpelling && typeof args.lastNameSpelling === 'string') {
+    // Convert spelling to proper name format (remove spaces/dashes, capitalize)
+    const spelledName = args.lastNameSpelling.replace(/[\s\-]/g, '').toLowerCase();
+    const properName = spelledName.charAt(0).toUpperCase() + spelledName.slice(1);
+    conversationState.updateNewPatientDetail('lastName', properName, true); // Mark as confirmed
+  }
+  
+  // Handle date of birth
+  if (args.dateOfBirth && typeof args.dateOfBirth === 'string') {
+    conversationState.updateNewPatientDetail('dob', args.dateOfBirth, true); // DOB implicit confirmation
+  }
+  
+  // Handle phone number (clean to digits only)
+  if (args.phone && typeof args.phone === 'string') {
+    const cleanPhone = args.phone.replace(/\D/g, '');
+    conversationState.updateNewPatientDetail('phone', cleanPhone, true); // Phone implicit confirmation
+  }
+  
+  // Handle email address
+  if (args.email && typeof args.email === 'string') {
+    conversationState.updateNewPatientDetail('email', args.email.toLowerCase().trim(), true); // Email implicit confirmation
+  }
+  
+  // Handle optional insurance
+  if (args.insurance_name && typeof args.insurance_name === 'string') {
+    conversationState.updateNewPatientDetail('insuranceName', args.insurance_name.trim());
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function determineNextAction(conversationState: any): any {
+  const { firstName, lastName, dob, phone, email } = conversationState.newPatientInfo;
+  const { firstNameConfirmed, lastNameConfirmed } = conversationState.newPatientInfoConfirmation;
+  
+  // Stage 1: Collect full name (first + last)
+  if (!firstName || !lastName) {
+    return {
+      action_needed: "collect_full_name",
+      current_details: conversationState.newPatientInfo
+    };
+  }
+  
+  // Stage 2: Confirm first name spelling
+  if (!firstNameConfirmed) {
+    return {
+      action_needed: "confirm_firstName_spelling",
+      firstName: firstName,
+      current_details: conversationState.newPatientInfo
+    };
+  }
+  
+  // Stage 3: Confirm last name spelling  
+  if (!lastNameConfirmed) {
+    return {
+      action_needed: "confirm_lastName_spelling",
+      lastName: lastName,
+      current_details: conversationState.newPatientInfo
+    };
+  }
+  
+  // Stage 4: Collect date of birth
+  if (!dob) {
+    return {
+      action_needed: "collect_dob",
+      current_details: conversationState.newPatientInfo
+    };
+  }
+  
+  // Stage 5: Collect phone number
+  if (!phone) {
+    return {
+      action_needed: "collect_phone",
+      current_details: conversationState.newPatientInfo
+    };
+  }
+  
+  // Stage 6: Collect email address
+  if (!email) {
+    return {
+      action_needed: "collect_email",
+      current_details: conversationState.newPatientInfo
+    };
+  }
+  
+  // All required data collected
+  return { action_needed: null };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getCurrentStepDescription(conversationState: any): string {
+  const { firstName, lastName, dob, phone, email } = conversationState.newPatientInfo;
+  const { firstNameConfirmed, lastNameConfirmed } = conversationState.newPatientInfoConfirmation;
+  
+  if (!firstName || !lastName) return "collecting_name";
+  if (!firstNameConfirmed) return "confirming_first_name";
+  if (!lastNameConfirmed) return "confirming_last_name";
+  if (!dob) return "collecting_dob";
+  if (!phone) return "collecting_phone";
+  if (!email) return "collecting_email";
+  return "creating_patient";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function createPatientInNexHealth(conversationState: any, practice: any, vapiCallId: string): Promise<ToolResult> {
+  // Validate all required fields before API call
+  const patientData = {
+    firstName: conversationState.newPatientInfo.firstName!,
+    lastName: conversationState.newPatientInfo.lastName!,
+    dateOfBirth: conversationState.newPatientInfo.dob!,
+    phone: conversationState.newPatientInfo.phone!,
+    email: conversationState.newPatientInfo.email!
+  };
+
+  const validationResult = validatePatientData(patientData);
+  if (!validationResult.isValid) {
+    return {
+      success: false,
+      error_code: validationResult.errorCode || "VALIDATION_ERROR",
+      message_to_patient: "",
+      details: validationResult.details || "Validation failed"
+    };
+  }
+
+  // Get the first active provider for new patient assignment
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeProvider = practice.savedProviders.find((sp: any) => sp.isActive);
+  if (!activeProvider) {
+    return {
+      success: false,
+      error_code: "NO_ACTIVE_PROVIDERS",
+      message_to_patient: "",
+      details: "No active providers"
+    };
+  }
+
+  // Prepare new patient data in EXACT NexHealth API format
+  const patientBio: {
+    date_of_birth: string;
+    phone_number: string;
+    gender: string;
+    insurance_name?: string;
+  } = {
+    date_of_birth: patientData.dateOfBirth,
+    phone_number: patientData.phone,
+    gender: "Female" // Default as per API example - this can be enhanced later
+  };
+
+  // Add insurance_name if provided
+  if (conversationState.newPatientInfo.insuranceName && conversationState.newPatientInfo.insuranceName.trim() !== "") {
+    patientBio.insurance_name = conversationState.newPatientInfo.insuranceName.trim();
+  }
+
+  const newPatientData = {
+    provider: { 
+      provider_id: parseInt(activeProvider.provider.nexhealthProviderId) 
+    },
+    patient: {
+      first_name: patientData.firstName,
+      last_name: patientData.lastName,
+      email: patientData.email,
+      bio: patientBio
+    }
+  };
+
+  console.log(`[createNewPatient] Creating patient: ${patientData.firstName} ${patientData.lastName}`);
+  console.log(`[createNewPatient] Patient data:`, JSON.stringify(newPatientData, null, 2));
+
+  const createResponse = await fetchNexhealthAPI(
+    '/patients',
+    practice.nexhealthSubdomain,
+    { location_id: practice.nexhealthLocationId },
+    'POST',
+    newPatientData
+  );
+
+  console.log(`[createNewPatient] API Response:`, JSON.stringify(createResponse, null, 2));
+
+  // Extract patient ID from response
+  let newPatientId = null;
+  if (createResponse?.data?.user?.id) {
+    newPatientId = createResponse.data.user.id;
+  } else if (createResponse?.data?.id) {
+    newPatientId = createResponse.data.id;
+  }
+
+  if (!newPatientId) {
+    console.error(`[createNewPatient] Failed to extract patient ID from response`);
+    return {
+      success: false,
+      error_code: "PATIENT_CREATION_FAILED",
+      message_to_patient: "",
+      details: "Could not extract patient ID from response"
+    };
+  }
+
+  // Update ConversationState with new patient ID
+  conversationState.updatePatient(String(newPatientId));
+  
+  // Update patient status to 'existing' since they now exist in the system
+  conversationState.updatePatientStatus('existing');
+  
+  // Update call log with new patient ID for backward compatibility
+  await updateCallLogWithPatient(vapiCallId, practice.id, String(newPatientId));
+
+  // Format confirmation message data
+  const formattedPhone = formatPhoneForDisplay(patientData.phone);
+
+  return {
+    success: true,
+    message_to_patient: "",
+    data: {
+      patient_id: String(newPatientId),
+      patient_name: `${patientData.firstName} ${patientData.lastName}`,
+      first_name: patientData.firstName,
+      last_name: patientData.lastName,
+      date_of_birth: patientData.dateOfBirth,
+      phone: formattedPhone,
+      email: patientData.email,
+      insurance_name: conversationState.newPatientInfo.insuranceName || null,
+      practice_name: practice.name,
+      created: true,
+      has_insurance: !!(conversationState.newPatientInfo.insuranceName && conversationState.newPatientInfo.insuranceName.trim() !== ""),
+      // Include context for success message generation
+      intent: conversationState.intent,
+      reasonForVisit: conversationState.reasonForVisit,
+      determinedAppointmentTypeName: conversationState.determinedAppointmentTypeName
+    }
+  };
+}
 
 function validatePatientData(args: {
   firstName: string;

@@ -26,9 +26,25 @@ interface VapiPayload {
       id?: string;
       [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     };
-    toolCallList?: any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
+    // VAPI-COMPLIANT: According to VAPI docs, this should be toolCallList (not toolCalls)
+    toolCallList?: VapiIncomingToolCall[];
+    // Fallback for potential variations in VAPI payload structure
+    toolCalls?: VapiIncomingToolCall[];
     [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
+}
+
+// VAPI-COMPLIANT: Define the structure of incoming tool calls as per VAPI documentation
+interface VapiIncomingToolCall {
+  id: string; // VAPI docs specify this as required
+  name?: string; // Direct name property (alternative format)
+  arguments?: string | Record<string, unknown>; // Can be JSON string or object
+  function?: {
+    name: string; // VAPI docs specify function.name as the primary tool name location
+    arguments?: string | Record<string, unknown>; // Can be JSON string or object per VAPI docs
+  };
+  toolCallId?: string; // Alternative ID field for fallback
+  [key: string]: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 // Enhanced function to extract assistant ID with strict validation
@@ -224,28 +240,38 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
 }
 
 // Enhanced tool name extraction function
-function extractToolName(toolCall: any): string | null { // eslint-disable-line @typescript-eslint/no-explicit-any
+// VAPI-COMPLIANT: Extract tool name according to VAPI documentation structure
+function extractToolName(toolCall: VapiIncomingToolCall): string | null {
   // Log the tool call structure for debugging
   console.log("=== Tool Call Structure Debug ===");
   console.log("Tool call keys:", Object.keys(toolCall));
   console.log("Tool call object:", JSON.stringify(toolCall, null, 2));
   
-  // Method 1: Check function.name (most common)
+  // VAPI-COMPLIANT: Primary method - Check function.name (documented standard)
   if (toolCall.function && typeof toolCall.function === 'object' && toolCall.function.name) {
-    console.log("✅ Found tool name in function.name:", toolCall.function.name);
-    return toolCall.function.name;
+    const toolName = toolCall.function.name.trim();
+    if (toolName) {
+      console.log("✅ Found tool name in function.name (VAPI standard):", toolName);
+      return toolName;
+    }
   }
   
-  // Method 2: Check direct name property
+  // Fallback method: Check direct name property (alternative format)
   if (toolCall.name && typeof toolCall.name === 'string') {
-    console.log("✅ Found tool name in name:", toolCall.name);
-    return toolCall.name;
+    const toolName = toolCall.name.trim();
+    if (toolName) {
+      console.log("✅ Found tool name in name (fallback):", toolName);
+      return toolName;
+    }
   }
   
-  // Method 3: Check if function is a string (edge case)
+  // Edge case: Check if function is a string (non-standard but handle gracefully)
   if (typeof toolCall.function === 'string') {
-    console.log("✅ Found tool name as string in function:", toolCall.function);
-    return toolCall.function;
+    const toolName = (toolCall.function as string).trim();
+    if (toolName) {
+      console.log("✅ Found tool name as string in function (edge case):", toolName);
+      return toolName;
+    }
   }
   
   console.error("❌ Unable to extract tool name from tool call");
@@ -254,75 +280,98 @@ function extractToolName(toolCall: any): string | null { // eslint-disable-line 
     functionType: typeof toolCall.function,
     functionKeys: toolCall.function ? Object.keys(toolCall.function) : null,
     hasName: !!toolCall.name,
-    nameType: typeof toolCall.name
+    nameType: typeof toolCall.name,
+    id: toolCall.id
   });
   
   return null;
 }
 
-// Enhanced tool call ID extraction function
-function extractToolCallId(toolCall: any): string { // eslint-disable-line @typescript-eslint/no-explicit-any
-  // Method 1: Check id property
+// VAPI-COMPLIANT: Extract tool call ID according to VAPI documentation
+function extractToolCallId(toolCall: VapiIncomingToolCall): string {
+  // VAPI-COMPLIANT: Primary method - Check id property (documented as required)
   if (toolCall.id && typeof toolCall.id === 'string') {
-    console.log("✅ Found tool call ID in id:", toolCall.id);
-    return toolCall.id;
+    const toolCallId = toolCall.id.trim();
+    if (toolCallId) {
+      console.log("✅ Found tool call ID in id (VAPI standard):", toolCallId);
+      return toolCallId;
+    }
   }
   
-  // Method 2: Check toolCallId property
-  if (toolCall.toolCallId && typeof toolCall.toolCallId === 'string') {
-    console.log("✅ Found tool call ID in toolCallId:", toolCall.toolCallId);
-    return toolCall.toolCallId;
+  // Fallback method: Check toolCallId property (alternative naming)
+  const alternativeId = (toolCall as any).toolCallId; // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (alternativeId && typeof alternativeId === 'string') {
+    const toolCallId = alternativeId.trim();
+    if (toolCallId) {
+      console.log("✅ Found tool call ID in toolCallId (fallback):", toolCallId);
+      return toolCallId;
+    }
   }
   
-  // Method 3: Generate fallback ID
-  const fallbackId = `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  console.warn("⚠️ No tool call ID found, using fallback:", fallbackId);
+  // VAPI compliance issue: Generate deterministic fallback ID for tracking
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substr(2, 9);
+  const fallbackId = `vapi_missing_id_${timestamp}_${random}`;
+  
+  console.error("❌ VAPI COMPLIANCE ISSUE: No tool call ID found in payload");
+  console.error("This violates VAPI documentation - toolCallList[].id is required");
+  console.warn("⚠️ Using fallback ID for error recovery:", fallbackId);
   
   return fallbackId;
 }
 
-// Enhanced tool call argument extraction
-function extractToolCallArguments(toolCall: any): Record<string, unknown> { // eslint-disable-line @typescript-eslint/no-explicit-any
+// VAPI-COMPLIANT: Extract tool call arguments according to VAPI documentation
+function extractToolCallArguments(toolCall: VapiIncomingToolCall): Record<string, unknown> {
   console.log("=== Tool Call Arguments Extraction ===");
   console.log("Tool call structure:", Object.keys(toolCall));
   
-  // Handle multiple possible argument formats from VAPI
-  if (typeof toolCall.arguments === 'string') {
-    try {
-      const parsed = JSON.parse(toolCall.arguments);
-      console.log("✅ Parsed arguments from string:", parsed);
-      return parsed;
-    } catch (error) {
-      console.error("❌ Failed to parse tool call arguments as JSON string:", error);
-      return {};
-    }
-  }
-  
-  if (typeof toolCall.arguments === 'object' && toolCall.arguments !== null) {
-    console.log("✅ Using arguments object directly:", toolCall.arguments);
-    return toolCall.arguments;
-  }
-  
-  // Check if arguments are in toolCall.function.arguments
+  // VAPI-COMPLIANT: Primary method - Check function.arguments (documented standard)
   if (toolCall.function?.arguments) {
     if (typeof toolCall.function.arguments === 'string') {
       try {
         const parsed = JSON.parse(toolCall.function.arguments);
-        console.log("✅ Parsed function arguments from string:", parsed);
-        return parsed;
+        if (typeof parsed === 'object' && parsed !== null) {
+          console.log("✅ Parsed function.arguments from JSON string (VAPI standard):", parsed);
+          return parsed as Record<string, unknown>;
+        }
       } catch (error) {
-        console.error("❌ Failed to parse function arguments as JSON string:", error);
-        return {};
+        console.error("❌ Failed to parse function.arguments as JSON string:", error);
+        console.error("Raw arguments string:", toolCall.function.arguments);
       }
-    }
-    
-    if (typeof toolCall.function.arguments === 'object') {
-      console.log("✅ Using function arguments object:", toolCall.function.arguments);
-      return toolCall.function.arguments;
+    } else if (typeof toolCall.function.arguments === 'object' && toolCall.function.arguments !== null) {
+      console.log("✅ Using function.arguments object directly (VAPI standard):", toolCall.function.arguments);
+      return toolCall.function.arguments as Record<string, unknown>;
     }
   }
   
-  console.error("❌ Unable to extract arguments from tool call:", toolCall);
+  // Fallback method: Check direct arguments property
+  if (toolCall.arguments) {
+    if (typeof toolCall.arguments === 'string') {
+      try {
+        const parsed = JSON.parse(toolCall.arguments);
+        if (typeof parsed === 'object' && parsed !== null) {
+          console.log("✅ Parsed arguments from JSON string (fallback):", parsed);
+          return parsed as Record<string, unknown>;
+        }
+      } catch (error) {
+        console.error("❌ Failed to parse arguments as JSON string:", error);
+        console.error("Raw arguments string:", toolCall.arguments);
+      }
+    } else if (typeof toolCall.arguments === 'object' && toolCall.arguments !== null) {
+      console.log("✅ Using arguments object directly (fallback):", toolCall.arguments);
+      return toolCall.arguments as Record<string, unknown>;
+    }
+  }
+  
+  console.error("❌ Unable to extract valid arguments from tool call");
+  console.error("Available argument sources:", {
+    hasDirectArguments: !!toolCall.arguments,
+    directArgumentsType: typeof toolCall.arguments,
+    hasFunctionArguments: !!toolCall.function?.arguments,
+    functionArgumentsType: typeof toolCall.function?.arguments,
+    toolCallId: toolCall.id
+  });
+  
   return {};
 }
 
@@ -381,8 +430,15 @@ FLOW GUIDANCE PATTERNS:
 
 TOOL-SPECIFIC PATTERNS:
 - get_intent SUCCESS (intent captured):
-  - If intent is BOOKING_RELATED (e.g., BOOK_APPOINTMENT, NEW_PATIENT_BOOKING, ROUTINE_BOOKING, URGENT_BOOKING, EXISTING_PATIENT_BOOKING) and reasonForVisit is known: "Okay, I can help you schedule a [reasonForVisit]. To get started, are you a new or existing patient with us?"
-  - If intent is BOOKING_RELATED and reasonForVisit is NOT known: "Okay, I can help with scheduling. To get started, are you a new or existing patient with us?"
+  - If intent is NEW_PATIENT_BOOKING: "Perfect! Since you're a new patient, I'll help get you scheduled for a [reasonForVisit OR 'visit']. To get started, could you tell me your first and last name?"
+  - If intent is EXISTING_PATIENT_BOOKING: "Great! I can help schedule your [reasonForVisit OR 'appointment']. To look you up, could you provide your full name and date of birth?"
+  - If intent is BOOKING_RELATED (BOOK_APPOINTMENT, ROUTINE_BOOKING, URGENT_BOOKING, ELECTIVE_BOOKING) with reasonForVisit and patientStatus is 'new': "Okay, I can help you schedule a [reasonForVisit]. Since you're a new patient, could you tell me your first and last name?"
+  - If intent is BOOKING_RELATED (BOOK_APPOINTMENT, ROUTINE_BOOKING, URGENT_BOOKING, ELECTIVE_BOOKING) with reasonForVisit and patientStatus is 'existing': "I can help you schedule a [reasonForVisit]. To look you up, could you provide your full name and date of birth?"
+  - If intent is BOOKING_RELATED (BOOK_APPOINTMENT, ROUTINE_BOOKING, URGENT_BOOKING, ELECTIVE_BOOKING) with reasonForVisit and patientStatus is 'unknown': "Okay, I can help you schedule a [reasonForVisit]. To get started, are you a new or existing patient with us?"
+  - If intent is BOOKING_RELATED and reasonForVisit is NOT known and patientStatus is 'new': "I can help with scheduling. Since you're a new patient, could you tell me your first and last name?"
+  - If intent is BOOKING_RELATED and reasonForVisit is NOT known and patientStatus is 'existing': "I can help with scheduling. To look you up, could you provide your full name and date of birth?"
+  - If intent is BOOKING_RELATED and reasonForVisit is NOT known and patientStatus is 'unknown': "I can help with scheduling. To get started, are you a new or existing patient with us?"
+  - If intent is CHECK_AVAILABILITY: "Let me check our availability for you. What type of appointment are you looking for?"
   - If intent is INQUIRY_PRACTICE_DETAILS: "Sure, I can help with that. What specifically about the practice would you like to know?"
   - If intent is INQUIRY_FINANCIAL: "I can help you with that information. What specific financial or insurance question do you have?"
   - If intent is RESCHEDULE_APPOINTMENT or CANCEL_APPOINTMENT: "I can help you with that. Can you provide me with your name and date of birth to look up your appointment?"
@@ -392,12 +448,15 @@ TOOL-SPECIFIC PATTERNS:
 - check_available_slots SUCCESS no times: "I don't see any openings for [type] on [date]. Would you like me to check another date?"
 - find_patient_in_ehr SUCCESS: "Found you, [name]! Let's continue with your appointment."
 - book_appointment SUCCESS: "Confirmed! Your [type] with [provider] is set for [date] at [time]. Need directions?"
-- create_new_patient SUCCESS with appointment type: "Great, [name]! You're registered. We were discussing a [type] appointment. What date works for you?"
-- create_new_patient SUCCESS with reason: "Great, [name]! You're registered. You mentioned [reason] - let me find the right appointment type for that."
-- create_new_patient SUCCESS general: "Great, [name]! You're registered. What type of appointment are you looking for today?"
-- create_new_patient action_needed collect_full_name: "Could you please tell me your first and last name?"
-- create_new_patient action_needed confirm_firstName_spelling: "Thanks. Could you spell your first name, [firstName], for me?"
-- create_new_patient action_needed confirm_lastName_spelling: "And could you spell your last name, [lastName]?"
+- create_new_patient SUCCESS with appointment type: "Perfect, [name]! You're all set up in our system. Now, about scheduling that [type] for you, what date would work best?"
+- create_new_patient SUCCESS with reason: "Excellent, [name]! You're registered. You mentioned [reason] - let me find the right appointment type for that."
+- create_new_patient SUCCESS general: "Great, [name]! You're registered. What type of appointment can I help you schedule today?"
+- create_new_patient action_needed collect_full_name: "To get you registered, I'll need your first and last name. What's your full name?"
+- create_new_patient action_needed confirm_firstName_spelling: "Thanks, [firstName]. How do you spell that for me?"
+- create_new_patient action_needed confirm_lastName_spelling: "Got it. And the spelling for [lastName]?"
+- create_new_patient action_needed collect_dob: "Perfect. What's your date of birth, including the year?"
+- create_new_patient action_needed collect_phone: "Thanks. What's the best phone number to reach you?"
+- create_new_patient action_needed collect_email: "Almost done! What's your email address?"
 
 Return ONLY the sentence.
     `.trim();
@@ -408,11 +467,12 @@ Return ONLY the sentence.
       // Extract only the most essential fields per tool to reduce payload size
       switch (toolName) {
         case 'get_intent':
-          // For get_intent, extract intent and reason to generate the first guiding question
+          // For get_intent, extract intent, reason, and patient status to generate the first guiding question
           compactData = {
             intent: toolResult.data?.intent,
             reasonForVisit: toolResult.data?.reasonForVisit,
-            intent_analysis_complete: toolResult.data?.intent_analysis_complete
+            intent_analysis_complete: toolResult.data?.intent_analysis_complete,
+            patientStatus: toolResult.data?.patientStatus
           };
           break;
         case 'find_appointment_type':
@@ -460,10 +520,13 @@ Return ONLY the sentence.
             firstName: toolResult.data.firstName,
             lastName: toolResult.data.lastName,
             patient_name: toolResult.data.patient_name,
+            first_name: toolResult.data.first_name,
             created: toolResult.data.created,
-            hasAppointmentType: !!toolResult.data.determinedAppointmentTypeId,
-            appointmentTypeName: toolResult.data.determinedAppointmentTypeName,
-            reasonForVisit: toolResult.data.reasonForVisit
+            hasAppointmentType: !!(toolResult.data.determinedAppointmentTypeName || toolResult.data.appointmentTypeName),
+            appointmentTypeName: toolResult.data.determinedAppointmentTypeName || toolResult.data.appointmentTypeName,
+            reasonForVisit: toolResult.data.reasonForVisit,
+            intent: toolResult.data.intent,
+            current_step: toolResult.data.current_step
           } : {};
           break;
         default:
@@ -523,8 +586,12 @@ Return ONLY the sentence.
       'VALIDATION_ERROR': "I didn't quite catch that. Could you try saying it differently?",
       'MISSING_PHONE': "I need your phone number to complete your registration. What's your phone number?",
       'MISSING_EMAIL': "I need your email address to complete your registration. What's your email address?",
+      'MISSING_FIRST_NAME': "I need your first name to complete your registration. What's your first name?",
+      'MISSING_LAST_NAME': "I need your last name to complete your registration. What's your last name?",
       'INVALID_PHONE': "I didn't get a valid phone number. Could you try again? For example, 'my phone is three one three, five five five, one two three four'.",
       'INVALID_EMAIL': "I need a valid email address. Could you try again? For example, 'my email is john at gmail dot com'.",
+      'INVALID_DATE_OF_BIRTH': "I need a valid date of birth. Could you try again? For example, 'January 15th, 1985' or 'March 3rd, 1990'.",
+      'DUPLICATE_PATIENT': "It looks like you might already be in our system. Would you like me to try searching for your record instead?",
       'INVALID_DATE': "I didn't understand that date. Could you try 'next Tuesday' or 'December 15th'?",
       'SYSTEM_ERROR': "I'm having a technical hiccup. You can try again, or I can connect you with our office staff.",
       'TIMEOUT_ERROR': "That's taking longer than expected. Please try again, or I can connect you with our office.",
@@ -1068,10 +1135,17 @@ async function logToolExecution(
 }
 
 export async function POST(req: NextRequest) {
+  let payload: VapiPayload | undefined;
+  
   try {
     console.log("--- [ToolCallRoute] START NEW REQUEST ---");
     
-    const payload: VapiPayload = await req.json();
+    payload = await req.json() as VapiPayload;
+    
+    // Ensure payload is properly typed and not undefined
+    if (!payload || !payload.message || !payload.message.call) {
+      throw new Error("Invalid VAPI payload structure");
+    }
     
     // Get VAPI call ID early for debug logging
     const vapiCallId = payload.message.call.id;
@@ -1138,7 +1212,7 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error("Assistant ID extraction or practice lookup failed:", error);
       
-      // Create detailed error for debugging
+      // ENHANCED ERROR HANDLING: Create detailed error for debugging with VAPI compliance
       const debugInfo = {
         error: error instanceof Error ? error.message : "Unknown error",
         callId: vapiCallId,
@@ -1146,21 +1220,43 @@ export async function POST(req: NextRequest) {
         availableFields: {
           call: Object.keys(message.call || {}),
           assistant: Object.keys(message.assistant || {})
+        },
+        timestamp: new Date().toISOString(),
+        userAgent: req.headers.get('user-agent'),
+        vapi_payload_structure: {
+          hasToolCallList: !!(payload.message.toolCallList),
+          hasToolCalls: !!(payload.message.toolCalls),
+          toolCallsCount: (payload.message.toolCallList || payload.message.toolCalls || []).length
         }
       };
       
       console.error("Debug info:", JSON.stringify(debugInfo, null, 2));
       
-      // Return error results for all tool calls
-      const errorResults = toolCalls.map((toolCall: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
-        toolCallId: extractToolCallId(toolCall),
-        result: JSON.stringify({
-          success: false,
-          error_code: "ASSISTANT_ID_OR_PRACTICE_ERROR", 
-          message_to_patient: "I'm having trouble connecting to your practice's system. Please try again or contact the office directly.",
-          debug_info: debugInfo
-        })
-      }));
+      // VAPI-COMPLIANT: Return error results for all tool calls with proper structure
+      const errorResults = toolCalls.map((toolCall: VapiIncomingToolCall) => {
+        const toolCallId = extractToolCallId(toolCall);
+        const resultObject = {
+          tool_output_data: {
+            success: false,
+            error_code: "ASSISTANT_ID_OR_PRACTICE_ERROR", 
+            details: "Assistant ID extraction or practice lookup failed",
+            debug_info: debugInfo
+          },
+          current_conversation_state_snapshot: "{}" // Empty state for errors
+        };
+        
+        return {
+          toolCallId,
+          result: JSON.stringify(resultObject)
+        };
+      });
+      
+      // Debug Logging: Critical error
+      addLogEntry({
+        event: "CRITICAL_ERROR_ASSISTANT_PRACTICE_LOOKUP",
+        source: "ToolCallRoute:POST",
+        details: debugInfo
+      }, vapiCallId);
       
       return NextResponse.json({ results: errorResults });
     }
@@ -1497,7 +1593,6 @@ export async function POST(req: NextRequest) {
           toolCallId,
           // Even for errors, we send back the state. The 'result' field can convey the error.
           result: resultStringForVapi, // Contains error info in tool_output_data and the state
-          // error: toolResult.error_code || toolResult.details, // VAPI docs don't show a top-level error field here, error info is in result
           message: {
             type: "request-failed",
             content: toolResult.message_to_patient,
@@ -1544,9 +1639,65 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ results });
      
   } catch (error) {
-    console.error("Error in centralized tool handler:", error);
+    console.error("CRITICAL ERROR in centralized tool handler:", error);
+    
+    // ENHANCED ERROR HANDLING: Comprehensive error capture and reporting
+    const criticalErrorInfo = {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString(),
+      userAgent: req.headers.get('user-agent'),
+      contentType: req.headers.get('content-type'),
+      method: req.method,
+      url: req.url,
+      hasBody: !!payload,
+      payloadType: typeof payload,
+      vapiCallId: payload?.message?.call?.id || 'unknown'
+    };
+    
+    // Debug Logging: Critical system error
+    if (payload?.message?.call?.id) {
+      addLogEntry({
+        event: "CRITICAL_SYSTEM_ERROR",
+        source: "ToolCallRoute:POST",
+        details: criticalErrorInfo
+      }, payload.message.call.id);
+    }
+    
+    console.error("Critical error details:", JSON.stringify(criticalErrorInfo, null, 2));
+    
+    // VAPI-COMPLIANT: Return proper error structure even for system failures
+    // If we have a payload, try to respond properly to VAPI
+    if (payload?.message?.toolCallList || payload?.message?.toolCalls) {
+      const toolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
+      const errorResults = toolCalls.map((toolCall: VapiIncomingToolCall) => {
+        const toolCallId = extractToolCallId(toolCall);
+        const resultObject = {
+          tool_output_data: {
+            success: false,
+            error_code: "SYSTEM_ERROR",
+            details: "Internal system error occurred",
+            timestamp: criticalErrorInfo.timestamp
+          },
+          current_conversation_state_snapshot: "{}" // Empty state for system errors
+        };
+        
+        return {
+          toolCallId,
+          result: JSON.stringify(resultObject)
+        };
+      });
+      
+      return NextResponse.json({ results: errorResults });
+    }
+    
+    // Fallback for non-VAPI requests or malformed payloads
     return NextResponse.json(
-      { error: "Internal server error" },
+      { 
+        error: "Internal server error",
+        timestamp: criticalErrorInfo.timestamp,
+        reference: criticalErrorInfo.vapiCallId 
+      },
       { status: 500 }
     );
   }
