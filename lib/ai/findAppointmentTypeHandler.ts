@@ -97,44 +97,20 @@ export async function processFindAppointmentType(
     details: { args, practiceId: practiceInfo.id, initialState: state.getStateSnapshot() }
   }, vapiCallId);
 
-  let userRequestForApptType = args.userRawRequest; // This is what VAPI's LLM thinks is the request for the appt type
+  // For this isolated test, directly use args.userRawRequest.
+  const userRequestForApptType = args.userRawRequest.trim();
+  addLogEntry({ event: "DIRECT_SERVICE_INQUIRY_FOR_APPT_TYPE_MATCH", source: "findAppointmentTypeHandler", details: { requestToMatch: userRequestForApptType } }, vapiCallId);
 
-  // If the current stage indicates we just asked for patient status,
-  // the userRawRequest might be the answer to that.
-  // We should use the original reasonForVisit or initialUserUtterances for matching the appointment type.
-  if (state.currentStage === "awaiting_patient_status_clarification" || state.currentStage === "intent_analyzed:BOOKING_UNKNOWN_PATIENT_STATUS") {
-      const patientStatusAnswer = args.userRawRequest.toLowerCase();
-      if (patientStatusAnswer.includes("new") || patientStatusAnswer.includes("first time") || patientStatusAnswer.includes("first thing")) {
-          state.isNewPatientCandidate = true;
-          state.determinedIntent = "BOOKING_NEW_PATIENT"; // Upgrade intent
-          addLogEntry({ event: "PATIENT_STATUS_CLARIFIED_NEW_IN_FIND_APPT", source: "findAppointmentTypeHandler", details: { answer: args.userRawRequest } }, vapiCallId);
-      } else if (patientStatusAnswer.includes("existing") || patientStatusAnswer.includes("been there before") || patientStatusAnswer.includes("returning")) {
-          state.isNewPatientCandidate = false;
-          state.determinedIntent = "BOOKING_EXISTING_PATIENT"; // Upgrade intent
-          addLogEntry({ event: "PATIENT_STATUS_CLARIFIED_EXISTING_IN_FIND_APPT", source: "findAppointmentTypeHandler", details: { answer: args.userRawRequest } }, vapiCallId);
-      }
-
-      // IMPORTANT: Use the original reason/request for matching the appointment type, not the "new/existing" answer.
-      if (state.reasonForVisit) {
-          userRequestForApptType = state.reasonForVisit;
-      } else if (state.initialUserUtterances && state.initialUserUtterances.length > 0) {
-          userRequestForApptType = state.initialUserUtterances[0]; // Fallback to initial full request
-      }
-      addLogEntry({ event: "USING_STORED_REQUEST_FOR_APPT_TYPE_MATCH", source: "findAppointmentTypeHandler", details: { requestUsed: userRequestForApptType } }, vapiCallId);
-  
-      if (!userRequestForApptType || userRequestForApptType.trim() === "") {
-          addLogEntry({ event: "CRITICAL_MISSING_SERVICE_REQUEST_CONTEXT", source: "findAppointmentTypeHandler", details: { currentState: state.getStateSnapshot() } }, vapiCallId);
-          // This indicates a flaw in earlier state setting or LLM behavior.
-          state.setCurrentStage("error_missing_service_context_for_appt_type");
-          return { 
-              success: false,
-              outputData: { 
-                  matchFound: false,
-                  messageForAssistant: "I seem to have lost track of what service you were looking for. Could you please tell me again what type of appointment you need?"
-              }, 
-              error: "MISSING_SERVICE_REQUEST_CONTEXT" 
-          };
-      }
+  if (!userRequestForApptType || userRequestForApptType.trim() === "") {
+      state.setCurrentStage("error_empty_service_request_for_appt_type");
+      return { 
+          success: false, 
+          outputData: { 
+              matchFound: false,
+              messageForAssistant: "I didn't quite catch what service you're looking for. Could you please tell me again?"
+          }, 
+          error: "EMPTY_SERVICE_REQUEST" 
+      };
   }
 
   // 1. Fetch appointment types for the practice from DB

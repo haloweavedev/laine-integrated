@@ -87,38 +87,22 @@ export async function generateMessageAfterFindAppointmentType(
     details: { findResult, currentState: state.getStateSnapshot() }
   }, vapiCallId);
 
-  if (findResult.matchFound && findResult.matchedAppointmentName && findResult.matchedAppointmentDuration) {
-    message = `Okay, a ${findResult.matchedAppointmentName} is usually about ${findResult.matchedAppointmentDuration} minutes. `;
+  if (findResult.matchFound && findResult.matchedAppointmentName) {
+    message = `Yes, we offer ${findResult.matchedAppointmentName}`;
+    if (findResult.matchedAppointmentDuration) {
+        message += `, which is usually about ${findResult.matchedAppointmentDuration} minutes. `;
+    } else {
+        message += ". ";
+    }
 
-    // Now, determine the next question based on patient status from ConversationState
-    if (state.isNewPatientCandidate === true || state.determinedIntent === "BOOKING_NEW_PATIENT") {
-      message += `To get this scheduled for you, could you please tell me your first and last name?`;
-      state.setCurrentStage("awaiting_new_patient_name_after_appt_type");
-    } else if (state.isNewPatientCandidate === false || state.determinedIntent === "BOOKING_EXISTING_PATIENT") {
-      message += `To book this, I'll need to look up your record. Could you provide your full name and date of birth?`;
-      state.setCurrentStage("awaiting_existing_patient_lookup_details_after_appt_type");
-    } else { // Patient status is unknown
-      message += `To proceed with booking this, are you a new or an existing patient with us?`;
-      state.setCurrentStage("awaiting_patient_status_clarification_after_appt_type");
-    }
-  } else if (findResult.matchFound && findResult.matchedAppointmentName) {
-    // Duration might be missing, handle gracefully
-    message = `Okay, I found ${findResult.matchedAppointmentName}. `;
-     if (state.isNewPatientCandidate === true || state.determinedIntent === "BOOKING_NEW_PATIENT") {
-      message += `To get this scheduled for you, could you please tell me your first and last name?`;
-      state.setCurrentStage("awaiting_new_patient_name_after_appt_type");
-    } else if (state.isNewPatientCandidate === false || state.determinedIntent === "BOOKING_EXISTING_PATIENT") {
-      message += `To book this, I'll need to look up your record. Could you provide your full name and date of birth?`;
-      state.setCurrentStage("awaiting_existing_patient_lookup_details_after_appt_type");
-    } else { 
-      message += `To proceed with booking this, are you a new or an existing patient with us?`;
-      state.setCurrentStage("awaiting_patient_status_clarification_after_appt_type");
-    }
-  }
-  else {
-    // Use the messageForAssistant if provided by the handler (e.g., for "no match found")
-    message = findResult.messageForAssistant || "I'm sorry, I couldn't quite determine the service. Could you try explaining what you need in a different way?";
-    // state.setCurrentStage is likely already set by the handler in case of no match
+    // Since get_intent is bypassed for this test, patient status is unknown.
+    message += `To help you with this, are you a new or an existing patient with us?`;
+    state.setCurrentStage("awaiting_patient_status_clarification_after_direct_appt_find"); 
+    // New stage to differentiate from the get_intent path
+  } else {
+    // Existing logic for no match or handler-provided error message
+    message = findResult.messageForAssistant || "I'm sorry, I couldn't find that specific service. Could you try phrasing it differently, or I can list some common services we offer?";
+    state.setCurrentStage("appt_type_not_found_direct_inquiry");
   }
   
   addLogEntry({
