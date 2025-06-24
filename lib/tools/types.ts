@@ -76,7 +76,7 @@ export interface ToolDefinition<T extends z.ZodType<any, any>> {
   name: string;
   description: string;
   schema: T;
-  run: (params: { 
+  run?: (params: { 
     args: z.infer<T>; 
     context: ToolExecutionContext 
   }) => Promise<ToolResult>;

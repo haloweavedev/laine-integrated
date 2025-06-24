@@ -1,28 +1,17 @@
 import { ToolDefinition, VapiToolSchema, VapiToolFunction } from "./types";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-// Import all tools
+// Import Phase 0 tools
 import getIntentTool from "./getIntent";
-import findPatientTool from "./findPatient";
-import findAppointmentTypeTool from "./findAppointmentType";
-import checkAvailableSlotsTool from "./checkAvailableSlots";
-import bookAppointmentTool from "./bookAppointment";
+import findAppointmentTypeTool from "./findAppointmentType"; 
 import createNewPatientTool from "./createNewPatient";
-import getPracticeDetailsTool from "./getPracticeDetails";
-import checkInsuranceParticipationTool from "./checkInsuranceParticipation";
-import getServiceCostEstimateTool from "./getServiceCostEstimate";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const tools: ToolDefinition<any>[] = [
   getIntentTool,
-  findPatientTool,
   findAppointmentTypeTool,
-  checkAvailableSlotsTool,
-  bookAppointmentTool,
   createNewPatientTool,
-  getPracticeDetailsTool,
-  checkInsuranceParticipationTool,
-  getServiceCostEstimateTool
+  // Other tools will be added in later phases
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,12 +55,6 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
 }
 
 // Export individual tool schemas for validation
-export { getIntentSchema } from "./getIntent";
-export { findPatientSchema } from "./findPatient";
-export { findAppointmentTypeSchema } from "./findAppointmentType";
-export { checkAvailableSlotsSchema } from "./checkAvailableSlots";
-export { bookAppointmentSchema } from "./bookAppointment";
-export { createNewPatientSchema } from "./createNewPatient";
-export { getPracticeDetailsSchema } from "./getPracticeDetails";
-export { checkInsuranceParticipationSchema } from "./checkInsuranceParticipation";
-export { getServiceCostEstimateSchema } from "./getServiceCostEstimate"; 
+export { getIntentArgsSchema } from "./getIntent";
+export { findAppointmentTypeArgsSchema } from "./findAppointmentType";
+export { createNewPatientArgsSchema } from "./createNewPatient"; 

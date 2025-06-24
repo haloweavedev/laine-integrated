@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToolByName } from "@/lib/tools";
 import { prisma } from "@/lib/prisma";
-import { ToolExecutionContext, ToolDefinition } from "@/lib/tools/types";
-import { getErrorCode, getPatientMessage } from "@/lib/utils/error-messages";
-import { generateCallSummaryForNote } from "@/lib/ai/summarization";
-import { generateText, CoreMessage } from 'ai';
-import { openai } from '@ai-sdk/openai';
 import { ConversationState } from "@/lib/conversationState";
 import { addLogEntry } from "@/lib/debugLogStore";
+import { processGetIntent } from "@/lib/ai/intentHandler";
+import { processFindAppointmentType } from "@/lib/ai/findAppointmentTypeHandler";
+import { processPatientOnboarding } from "@/lib/ai/patientOnboardingHandler";
+import { generateMessageAfterIntent, generateMessageAfterFindAppointmentType, generateMessageForPatientOnboarding } from "@/lib/ai/messageGenerator";
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -124,7 +122,6 @@ async function findPracticeByAssistantId(assistantIdOrName: string) {
       if (config) {
         practice = config.practice;
         console.log(`✅ Found practice by pattern matching:`, practice.id);
-        console.log(`   Pattern used: Looking for Royal Oak or xyz subdomain`);
       }
       
       // If still not found but this looks like a Laine assistant, try fallback to first practice
@@ -137,7 +134,6 @@ async function findPracticeByAssistantId(assistantIdOrName: string) {
         if (fallbackConfig) {
           practice = fallbackConfig.practice;
           console.log(`✅ Using fallback practice:`, practice.id);
-          console.log(`   Note: This should be temporary - assistant name should be fixed`);
         }
       }
     }
@@ -157,7 +153,6 @@ async function findPracticeByAssistantId(assistantIdOrName: string) {
 }
 
 // Separate function to fetch practice with scheduling data
-// PERFORMANCE OPTIMIZATION: Optimized query with selective field fetching
 async function fetchPracticeWithSchedulingData(practiceId: string) {
   try {
     const practice = await prisma.practice.findUnique({ 
@@ -193,15 +188,13 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
                 nexhealthProviderId: true
               }
             },
-            // ADD THIS: Include operatory assignments
             assignedOperatories: {
               select: {
                 savedOperatory: {
                   select: {
-                    id: true, // Laine CUID of SavedOperatory
+                    id: true,
                     name: true,
-                    nexhealthOperatoryId: true,
-                    isActive: true // ensure we only use active operatories
+                    nexhealthOperatoryId: true
                   }
                 }
               }
@@ -209,7 +202,6 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
           }
         },
         savedOperatories: {
-          where: { isActive: true },
           select: {
             id: true,
             name: true,
@@ -220,922 +212,87 @@ async function fetchPracticeWithSchedulingData(practiceId: string) {
     });
     
     if (!practice) {
-      console.error(`❌ Practice not found: ${practiceId}`);
-      return null;
+      throw new Error(`Practice not found: ${practiceId}`);
     }
-    
-    console.log("✅ Loaded practice with scheduling data:", {
-      id: practice.id,
-      name: practice.name,
-      appointmentTypes: practice.appointmentTypes.length,
-      savedProviders: practice.savedProviders.length,
-      savedOperatories: practice.savedOperatories.length
-    });
     
     return practice;
   } catch (error) {
-    console.error("❌ Error fetching practice with scheduling data:", error);
-    return null;
+    console.error("Error fetching practice with scheduling data:", error);
+    throw error;
   }
 }
 
-// Enhanced tool name extraction function
-// VAPI-COMPLIANT: Extract tool name according to VAPI documentation structure
 function extractToolName(toolCall: VapiIncomingToolCall): string | null {
-  // Log the tool call structure for debugging
-  console.log("=== Tool Call Structure Debug ===");
-  console.log("Tool call keys:", Object.keys(toolCall));
-  console.log("Tool call object:", JSON.stringify(toolCall, null, 2));
+  // VAPI-COMPLIANT: Extract tool name following VAPI documentation precedence
+  console.log(`[extractToolName] Processing tool call:`, JSON.stringify(toolCall, null, 2));
   
-  // VAPI-COMPLIANT: Primary method - Check function.name (documented standard)
-  if (toolCall.function && typeof toolCall.function === 'object' && toolCall.function.name) {
-    const toolName = toolCall.function.name.trim();
-    if (toolName) {
-      console.log("✅ Found tool name in function.name (VAPI standard):", toolName);
-      return toolName;
-    }
+  // Primary: function.name (most common per VAPI docs)
+  if (toolCall.function?.name) {
+    console.log(`[extractToolName] Found tool name in function.name: ${toolCall.function.name}`);
+    return toolCall.function.name;
   }
   
-  // Fallback method: Check direct name property (alternative format)
-  if (toolCall.name && typeof toolCall.name === 'string') {
-    const toolName = toolCall.name.trim();
-    if (toolName) {
-      console.log("✅ Found tool name in name (fallback):", toolName);
-      return toolName;
-    }
+  // Secondary: direct name property
+  if (toolCall.name) {
+    console.log(`[extractToolName] Found tool name in name: ${toolCall.name}`);
+    return toolCall.name;
   }
   
-  // Edge case: Check if function is a string (non-standard but handle gracefully)
-  if (typeof toolCall.function === 'string') {
-    const toolName = (toolCall.function as string).trim();
-    if (toolName) {
-      console.log("✅ Found tool name as string in function (edge case):", toolName);
-      return toolName;
-    }
-  }
-  
-  console.error("❌ Unable to extract tool name from tool call");
-  console.error("Available fields:", {
-    hasFunction: !!toolCall.function,
-    functionType: typeof toolCall.function,
-    functionKeys: toolCall.function ? Object.keys(toolCall.function) : null,
-    hasName: !!toolCall.name,
-    nameType: typeof toolCall.name,
-    id: toolCall.id
-  });
-  
+  console.warn(`[extractToolName] No tool name found in tool call structure:`, toolCall);
   return null;
 }
 
-// VAPI-COMPLIANT: Extract tool call ID according to VAPI documentation
 function extractToolCallId(toolCall: VapiIncomingToolCall): string {
-  // VAPI-COMPLIANT: Primary method - Check id property (documented as required)
-  if (toolCall.id && typeof toolCall.id === 'string') {
-    const toolCallId = toolCall.id.trim();
-    if (toolCallId) {
-      console.log("✅ Found tool call ID in id (VAPI standard):", toolCallId);
-      return toolCallId;
-    }
+  // VAPI-COMPLIANT: Extract tool call ID following VAPI documentation
+  const toolCallId = toolCall.id || toolCall.toolCallId || 'unknown';
+  
+  if (toolCallId === 'unknown') {
+    console.warn(`[extractToolCallId] No valid tool call ID found in:`, toolCall);
   }
   
-  // Fallback method: Check toolCallId property (alternative naming)
-  const alternativeId = (toolCall as any).toolCallId; // eslint-disable-line @typescript-eslint/no-explicit-any
-  if (alternativeId && typeof alternativeId === 'string') {
-    const toolCallId = alternativeId.trim();
-    if (toolCallId) {
-      console.log("✅ Found tool call ID in toolCallId (fallback):", toolCallId);
-      return toolCallId;
-    }
-  }
-  
-  // VAPI compliance issue: Generate deterministic fallback ID for tracking
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substr(2, 9);
-  const fallbackId = `vapi_missing_id_${timestamp}_${random}`;
-  
-  console.error("❌ VAPI COMPLIANCE ISSUE: No tool call ID found in payload");
-  console.error("This violates VAPI documentation - toolCallList[].id is required");
-  console.warn("⚠️ Using fallback ID for error recovery:", fallbackId);
-  
-  return fallbackId;
+  return toolCallId;
 }
 
-// VAPI-COMPLIANT: Extract tool call arguments according to VAPI documentation
 function extractToolCallArguments(toolCall: VapiIncomingToolCall): Record<string, unknown> {
-  console.log("=== Tool Call Arguments Extraction ===");
-  console.log("Tool call structure:", Object.keys(toolCall));
+  console.log(`[extractToolCallArguments] Processing arguments for tool call:`, JSON.stringify(toolCall, null, 2));
   
-  // VAPI-COMPLIANT: Primary method - Check function.arguments (documented standard)
-  if (toolCall.function?.arguments) {
-    if (typeof toolCall.function.arguments === 'string') {
-      try {
-        const parsed = JSON.parse(toolCall.function.arguments);
-        if (typeof parsed === 'object' && parsed !== null) {
-          console.log("✅ Parsed function.arguments from JSON string (VAPI standard):", parsed);
-          return parsed as Record<string, unknown>;
-        }
-      } catch (error) {
-        console.error("❌ Failed to parse function.arguments as JSON string:", error);
-        console.error("Raw arguments string:", toolCall.function.arguments);
-      }
-    } else if (typeof toolCall.function.arguments === 'object' && toolCall.function.arguments !== null) {
-      console.log("✅ Using function.arguments object directly (VAPI standard):", toolCall.function.arguments);
-      return toolCall.function.arguments as Record<string, unknown>;
-    }
+  // VAPI-COMPLIANT: Extract arguments following VAPI documentation precedence
+  let argumentsData: string | Record<string, unknown> | undefined;
+  
+  // Primary: function.arguments (most common per VAPI docs)
+  if (toolCall.function?.arguments !== undefined) {
+    argumentsData = toolCall.function.arguments;
+    console.log(`[extractToolCallArguments] Using function.arguments:`, argumentsData);
+  }
+  // Secondary: direct arguments property
+  else if (toolCall.arguments !== undefined) {
+    argumentsData = toolCall.arguments;
+    console.log(`[extractToolCallArguments] Using direct arguments:`, argumentsData);
   }
   
-  // Fallback method: Check direct arguments property
-  if (toolCall.arguments) {
-    if (typeof toolCall.arguments === 'string') {
-      try {
-        const parsed = JSON.parse(toolCall.arguments);
-        if (typeof parsed === 'object' && parsed !== null) {
-          console.log("✅ Parsed arguments from JSON string (fallback):", parsed);
-          return parsed as Record<string, unknown>;
-        }
-      } catch (error) {
-        console.error("❌ Failed to parse arguments as JSON string:", error);
-        console.error("Raw arguments string:", toolCall.arguments);
-      }
-    } else if (typeof toolCall.arguments === 'object' && toolCall.arguments !== null) {
-      console.log("✅ Using arguments object directly (fallback):", toolCall.arguments);
-      return toolCall.arguments as Record<string, unknown>;
+  // Parse if string, return as-is if object
+  if (typeof argumentsData === 'string') {
+    try {
+      const parsed = JSON.parse(argumentsData);
+      console.log(`[extractToolCallArguments] Successfully parsed JSON string arguments:`, parsed);
+      return parsed;
+    } catch (parseError) {
+      console.error(`[extractToolCallArguments] Failed to parse arguments string:`, parseError);
+      console.log(`[extractToolCallArguments] Raw arguments string:`, argumentsData);
+      return {};
     }
+  } else if (typeof argumentsData === 'object' && argumentsData !== null) {
+    console.log(`[extractToolCallArguments] Using object arguments directly:`, argumentsData);
+    return argumentsData as Record<string, unknown>;
   }
   
-  console.error("❌ Unable to extract valid arguments from tool call");
-  console.error("Available argument sources:", {
-    hasDirectArguments: !!toolCall.arguments,
-    directArgumentsType: typeof toolCall.arguments,
-    hasFunctionArguments: !!toolCall.function?.arguments,
-    functionArgumentsType: typeof toolCall.function?.arguments,
-    toolCallId: toolCall.id
-  });
-  
+  console.warn(`[extractToolCallArguments] No valid arguments found, returning empty object`);
   return {};
-}
-
-/**
- * Generate dynamic message using LLM based on tool execution outcome
- * OPTIMIZED for performance and minimal latency
- */
-async function generateDynamicMessage(
-  toolName: string,
-  toolArgs: unknown,
-  toolResult: { 
-    success: boolean; 
-    data?: Record<string, unknown>; 
-    error_code?: string; 
-    _internal_prereq_failure_info?: { missingArg: string, askUserMessage: string };
-    flow_correction_guidance?: string;
-  }
-): Promise<string> {
-  try {
-    // PERFORMANCE OPTIMIZATION: Streamlined system prompt for speed with comprehensive error recovery
-    const systemPromptContent = `
-You are Laine, a friendly AI dental assistant. Based on the tool execution result, craft ONE concise, natural sentence.
-
-GUIDELINES:
-- Be empathetic and conversational
-- Acknowledge what was checked/done
-- State the result clearly and directly
-- If successful and more steps needed, ask the next question
-- If failed, politely explain and suggest actionable next steps
-- Sound human, avoid robotic language or procedural descriptions
-- Always offer alternatives when possible
-- AVOID using generic fillers like "Hold on", "Just a sec", "Give me a moment" - use brief "Acknowledgment + Action" statements instead
-
-ERROR RECOVERY BY CODE:
-- PATIENT_NOT_FOUND: "I couldn't find your record. Could you verify your name and date of birth, or should I register you as a new patient?"
-- APPOINTMENT_TYPE_NOT_FOUND: "I'm not sure what type of appointment you need. Could you describe it, or would you like me to list our services?"
-- NO_AVAILABILITY: "I don't see any openings for that time. Would you like me to check another date?"
-- NEXHEALTH_API_ERROR: "I'm having trouble with our scheduling system right now. Could we try again in a moment?"
-- SCHEDULING_ERROR: "I had an issue checking that. Let me try again, or would you prefer to speak with our office?"
-- VALIDATION_ERROR: "I didn't quite catch that. Could you try saying it differently?"
-- MISSING_PHONE/EMAIL: "I need your [phone/email] to complete your registration. What's your [phone/email]?"
-- INVALID_PHONE/EMAIL: "I didn't get a valid [phone/email]. Could you try again? For example, 'my phone is...' or 'my email is...'"
-- INVALID_DATE: "I didn't understand that date. Could you try 'next Tuesday' or 'December 15th'?"
-- SYSTEM_ERROR/TIMEOUT_ERROR: "I'm having a technical hiccup. You can try again, or I can connect you with our office staff."
-- FLOW_INTERCEPTION: Use provided guidance naturally
-
-FLOW GUIDANCE PATTERNS:
-- IDENTIFY_PATIENT_FIRST: "To book your appointment, I need to identify you first. Could you please provide your full name and date of birth?"
-- ASK_FOR_APPOINTMENT_TYPE_FIRST: "What type of appointment are you looking for today?"
-- ASK_FOR_DATE_FIRST: "What date would you like for your appointment?"
-- CHECK_AVAILABILITY_FIRST: "Let me check our availability for you first."
-- CONFIRM_SLOT_FIRST: "Which of those available times works best for you?"
-- PROCEED_WITH_NEW_PATIENT_REGISTRATION: "Since you're a new patient, let me get you registered first. What's your first name?"
-- DETERMINE_PATIENT_STATUS_FIRST: "Are you a new or existing patient with us?"
-- MATCH_APPOINTMENT_TYPE_FROM_REASON: "Let me find the right appointment type for your [reason]..."
-
-TOOL-SPECIFIC PATTERNS:
-- get_intent SUCCESS (intent captured):
-  - If intent is NEW_PATIENT_BOOKING: "Perfect! Since you're a new patient, I'll help get you scheduled for a [reasonForVisit OR 'visit']. To get started, could you tell me your first and last name?"
-  - If intent is EXISTING_PATIENT_BOOKING: "Great! I can help schedule your [reasonForVisit OR 'appointment']. To look you up, could you provide your full name and date of birth?"
-  - If intent is BOOKING_RELATED (BOOK_APPOINTMENT, ROUTINE_BOOKING, URGENT_BOOKING, ELECTIVE_BOOKING) with reasonForVisit and patientStatus is 'new': "Okay, I can help you schedule a [reasonForVisit]. Since you're a new patient, could you tell me your first and last name?"
-  - If intent is BOOKING_RELATED (BOOK_APPOINTMENT, ROUTINE_BOOKING, URGENT_BOOKING, ELECTIVE_BOOKING) with reasonForVisit and patientStatus is 'existing': "I can help you schedule a [reasonForVisit]. To look you up, could you provide your full name and date of birth?"
-  - If intent is BOOKING_RELATED (BOOK_APPOINTMENT, ROUTINE_BOOKING, URGENT_BOOKING, ELECTIVE_BOOKING) with reasonForVisit and patientStatus is 'unknown': "Okay, I can help you schedule a [reasonForVisit]. To get started, are you a new or existing patient with us?"
-  - If intent is BOOKING_RELATED and reasonForVisit is NOT known and patientStatus is 'new': "I can help with scheduling. Since you're a new patient, could you tell me your first and last name?"
-  - If intent is BOOKING_RELATED and reasonForVisit is NOT known and patientStatus is 'existing': "I can help with scheduling. To look you up, could you provide your full name and date of birth?"
-  - If intent is BOOKING_RELATED and reasonForVisit is NOT known and patientStatus is 'unknown': "I can help with scheduling. To get started, are you a new or existing patient with us?"
-  - If intent is CHECK_AVAILABILITY: "Let me check our availability for you. What type of appointment are you looking for?"
-  - If intent is INQUIRY_PRACTICE_DETAILS: "Sure, I can help with that. What specifically about the practice would you like to know?"
-  - If intent is INQUIRY_FINANCIAL: "I can help you with that information. What specific financial or insurance question do you have?"
-  - If intent is RESCHEDULE_APPOINTMENT or CANCEL_APPOINTMENT: "I can help you with that. Can you provide me with your name and date of birth to look up your appointment?"
-  - If intent is GENERAL_INQUIRY or UNCLEAR: "How can I help you today?"
-- find_appointment_type SUCCESS: "Okay, a [type] is about [duration] minutes. What date works for you?"
-- check_available_slots SUCCESS with times: "For [type] on [date], I have [times] available. Which works best for you?"
-- check_available_slots SUCCESS no times: "I don't see any openings for [type] on [date]. Would you like me to check another date?"
-- find_patient_in_ehr SUCCESS: "Found you, [name]! Let's continue with your appointment."
-- book_appointment SUCCESS: "Confirmed! Your [type] with [provider] is set for [date] at [time]. Need directions?"
-- create_new_patient SUCCESS with appointment type: "Perfect, [name]! You're all set up in our system. Now, about scheduling that [type] for you, what date would work best?"
-- create_new_patient SUCCESS with reason: "Excellent, [name]! You're registered. You mentioned [reason] - let me find the right appointment type for that."
-- create_new_patient SUCCESS general: "Great, [name]! You're registered. What type of appointment can I help you schedule today?"
-- create_new_patient action_needed collect_full_name: "To get you registered, I'll need your first and last name. What's your full name?"
-- create_new_patient action_needed confirm_firstName_spelling: "Thanks, [firstName]. How do you spell that for me?"
-- create_new_patient action_needed confirm_lastName_spelling: "Got it. And the spelling for [lastName]?"
-- create_new_patient action_needed collect_dob: "Perfect. What's your date of birth, including the year?"
-- create_new_patient action_needed collect_phone: "Thanks. What's the best phone number to reach you?"
-- create_new_patient action_needed collect_email: "Almost done! What's your email address?"
-
-Return ONLY the sentence.
-    `.trim();
-
-    // PERFORMANCE OPTIMIZATION: Minimize data passed to LLM - only essential fields
-    let compactData = {};
-    if (toolResult.data) {
-      // Extract only the most essential fields per tool to reduce payload size
-      switch (toolName) {
-        case 'get_intent':
-          // For get_intent, extract intent, reason, and patient status to generate the first guiding question
-          compactData = {
-            intent: toolResult.data?.intent,
-            reasonForVisit: toolResult.data?.reasonForVisit,
-            intent_analysis_complete: toolResult.data?.intent_analysis_complete,
-            patientStatus: toolResult.data?.patientStatus
-          };
-          break;
-        case 'find_appointment_type':
-          compactData = toolResult.data.matched ? {
-            matched: true,
-            name: toolResult.data.appointment_type_name,
-            duration: toolResult.data.duration_minutes
-          } : {
-            matched: false,
-            options: Array.isArray(toolResult.data.available_types_list_for_prompt) 
-              ? toolResult.data.available_types_list_for_prompt.slice(0, 3) 
-              : [] // Limit to 3 options
-          };
-          break;
-        case 'check_available_slots':
-          compactData = {
-            available: toolResult.data.has_availability,
-            type: toolResult.data.appointment_type_name,
-            date: toolResult.data.requested_date_friendly,
-            times: toolResult.data.has_availability && toolResult.data.offered_time_list_string_for_message_suggestion 
-              ? toolResult.data.offered_time_list_string_for_message_suggestion
-              : (toolResult.data.has_availability && Array.isArray(toolResult.data.available_slots) && toolResult.data.available_slots.length > 0
-                ? toolResult.data.available_slots.slice(0, 3).map((slot: Record<string, unknown>) => slot.display_time).join(', ')
-                : '')
-          };
-          break;
-        case 'find_patient_in_ehr':
-          compactData = {
-            found: toolResult.data.patient_exists,
-            name: toolResult.data.confirmed_patient_name || toolResult.data.searched_name
-          };
-          break;
-        case 'book_appointment':
-          compactData = {
-            booked: toolResult.data?.booked,
-            type: toolResult.data?.appointment_type_name,
-            provider: toolResult.data?.provider_name,
-            date: toolResult.data?.date_friendly,
-            time: toolResult.data?.time
-          };
-          break;
-        case 'create_new_patient':
-          compactData = toolResult.data ? {
-            action_needed: toolResult.data.action_needed,
-            firstName: toolResult.data.firstName,
-            lastName: toolResult.data.lastName,
-            patient_name: toolResult.data.patient_name,
-            first_name: toolResult.data.first_name,
-            created: toolResult.data.created,
-            hasAppointmentType: !!(toolResult.data.determinedAppointmentTypeName || toolResult.data.appointmentTypeName),
-            appointmentTypeName: toolResult.data.determinedAppointmentTypeName || toolResult.data.appointmentTypeName,
-            reasonForVisit: toolResult.data.reasonForVisit,
-            intent: toolResult.data.intent,
-            current_step: toolResult.data.current_step
-          } : {};
-          break;
-        default:
-          // For other tools, include minimal essential data
-          compactData = toolResult.data ? {
-            success: toolResult.success,
-            key_result: Object.values(toolResult.data)[0] // Just the first value
-          } : {};
-      }
-    }
-
-    // Build minimal execution outcome
-    const executionOutcome: Record<string, unknown> = {
-      success: toolResult.success,
-      data: compactData,
-      error_code: toolResult.error_code
-    };
-
-    // Add prerequisite/flow guidance if present
-    if (toolResult._internal_prereq_failure_info) {
-      executionOutcome.ask_user = toolResult._internal_prereq_failure_info.askUserMessage;
-    }
-    if (toolResult.flow_correction_guidance) {
-      executionOutcome.flow_guide = toolResult.flow_correction_guidance;
-    }
-
-    const llmMessages: CoreMessage[] = [
-      { role: 'system', content: systemPromptContent },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          tool: toolName,
-          result: executionOutcome
-        })
-      }
-    ];
-
-    // PERFORMANCE OPTIMIZATION: Use gpt-4o-mini with optimal settings for speed
-    const { text: generatedMessage } = await generateText({
-      model: openai('gpt-4o-mini'), // Fastest suitable model
-      messages: llmMessages,
-      temperature: 0.3, // Lower for more consistent, faster responses
-      maxTokens: 60 // Reduced from 80 for faster generation
-    });
-
-    return generatedMessage.trim();
-  } catch (generationError) {
-    console.error(`Error generating dynamic message for tool ${toolName}:`, generationError);
-    
-    // ENHANCED ERROR RECOVERY: Comprehensive fallback messages with actionable guidance
-    const errorFallbacks: Record<string, string> = {
-      'PATIENT_NOT_FOUND': "I couldn't find your record. Could you verify your name and date of birth, or should I register you as a new patient?",
-      'APPOINTMENT_TYPE_NOT_FOUND': "I'm not sure what type of appointment you need. Could you describe it, or would you like me to list our services?",
-      'NO_AVAILABILITY': "I don't see any openings for that time. Would you like me to check another date?",
-      'NEXHEALTH_API_ERROR': "I'm having trouble with our scheduling system right now. Could we try again in a moment?",
-      'SCHEDULING_ERROR': "I had an issue checking that. Let me try again, or would you prefer to speak with our office?",
-      'VALIDATION_ERROR': "I didn't quite catch that. Could you try saying it differently?",
-      'MISSING_PHONE': "I need your phone number to complete your registration. What's your phone number?",
-      'MISSING_EMAIL': "I need your email address to complete your registration. What's your email address?",
-      'MISSING_FIRST_NAME': "I need your first name to complete your registration. What's your first name?",
-      'MISSING_LAST_NAME': "I need your last name to complete your registration. What's your last name?",
-      'INVALID_PHONE': "I didn't get a valid phone number. Could you try again? For example, 'my phone is three one three, five five five, one two three four'.",
-      'INVALID_EMAIL': "I need a valid email address. Could you try again? For example, 'my email is john at gmail dot com'.",
-      'INVALID_DATE_OF_BIRTH': "I need a valid date of birth. Could you try again? For example, 'January 15th, 1985' or 'March 3rd, 1990'.",
-      'DUPLICATE_PATIENT': "It looks like you might already be in our system. Would you like me to try searching for your record instead?",
-      'INVALID_DATE': "I didn't understand that date. Could you try 'next Tuesday' or 'December 15th'?",
-      'SYSTEM_ERROR': "I'm having a technical hiccup. You can try again, or I can connect you with our office staff.",
-      'TIMEOUT_ERROR': "That's taking longer than expected. Please try again, or I can connect you with our office.",
-      'PRACTICE_NOT_CONFIGURED': "Our scheduling system isn't fully set up yet. Please contact our office to schedule your appointment."
-    };
-
-    const toolFallbacks: Record<string, string> = {
-      'get_intent': '', // Silent tool, no fallback message
-      'find_appointment_type': 'What type of appointment are you looking for?',
-      'check_available_slots': 'Let me check our availability for you.',
-      'find_patient_in_ehr': 'Could you please provide your name and date of birth?',
-      'book_appointment': 'Let me help you schedule that appointment.',
-      'create_new_patient': 'I\'ll help you get registered in our system.'
-    };
-    
-    if (toolResult.success) {
-      return toolFallbacks[toolName] || "I've processed that for you.";
-    } else {
-      // Use specific error message if available
-      if (toolResult.error_code && errorFallbacks[toolResult.error_code]) {
-        return errorFallbacks[toolResult.error_code];
-      }
-      // Fall back to tool-specific message
-      return toolFallbacks[toolName] || "Let me try that again for you.";
-    }
-  }
-}
-
-/**
- * Analyzes the attempted tool and current conversation state to determine if a flow correction is needed
- * Also suggests auxiliary tools that might be contextually appropriate
- */
-function getNextLogicalStep(
-  toolNameAttempted: string, 
-  conversationState: ConversationState
-): { requiredNextToolName?: string; guidanceMessageKey?: string; suggestedAuxiliaryTool?: string } | null {
-  
-  // If intent is not set and the tool being attempted is not get_intent, suggest calling get_intent first
-  // This helps ensure we capture user intent early in the conversation
-  if (!conversationState.intent && toolNameAttempted !== 'get_intent') {
-    // However, allow certain informational tools to proceed without intent
-    const informationalTools = ['get_practice_details', 'check_insurance_participation', 'get_service_cost_estimate'];
-    if (!informationalTools.includes(toolNameAttempted)) {
-      console.log(`[${toolNameAttempted}] No intent captured yet, consider calling get_intent first`);
-      // Don't force get_intent for now, but this could be enabled for stricter flow control
-      // return {
-      //   requiredNextToolName: 'get_intent',
-      //   guidanceMessageKey: 'CAPTURE_INTENT_FIRST'
-      // };
-    }
-  }
-  
-  // Enhanced patient status handling for onboarding flow
-  if (conversationState.intent && conversationState.intent.includes('BOOK') && conversationState.patientStatus === 'unknown') {
-    // User wants to book but we don't know if they're new or existing
-    return {
-      guidanceMessageKey: 'DETERMINE_PATIENT_STATUS_FIRST'
-    };
-  }
-  
-  // If trying to find patient but user already confirmed they are new, skip to new patient creation
-  if (toolNameAttempted === 'find_patient_in_ehr' && conversationState.patientStatus === 'new') {
-    console.log(`[${toolNameAttempted}] Skipping find_patient_in_ehr - user confirmed new patient status`);
-    return { 
-      requiredNextToolName: 'create_new_patient',
-      guidanceMessageKey: 'PROCEED_WITH_NEW_PATIENT_REGISTRATION' 
-    };
-  }
-  
-  // If trying to create new patient for existing patient status
-  if (toolNameAttempted === 'create_new_patient' && conversationState.patientStatus === 'existing' && conversationState.identifiedPatientId) {
-    console.log(`[${toolNameAttempted}] Skipping create_new_patient - patient already exists`);
-    return {
-      guidanceMessageKey: 'PATIENT_ALREADY_EXISTS'
-    };
-  }
-  
-  // If trying to find appointment type but it's already determined, skip to next logical step
-  if (toolNameAttempted === 'find_appointment_type' && conversationState.determinedAppointmentTypeId) {
-    console.log(`[${toolNameAttempted}] Appointment type already determined, proceeding to next step`);
-    // If patient is identified and date is not set, ask for date
-    if (conversationState.identifiedPatientId && !conversationState.requestedDate) {
-      return {
-        guidanceMessageKey: 'ASK_FOR_DATE_FIRST'
-      };
-    }
-    // If patient and date are set, check availability
-    if (conversationState.identifiedPatientId && conversationState.requestedDate) {
-      return {
-        requiredNextToolName: 'check_available_slots',
-        guidanceMessageKey: 'CHECK_AVAILABILITY_FIRST'
-      };
-    }
-    // Otherwise, proceed with current flow
-    return null;
-  }
-
-  // If trying to check slots but appointment type not determined
-  if (toolNameAttempted === 'check_available_slots' && !conversationState.determinedAppointmentTypeId) {
-    // Check if reasonForVisit is available but appointment type not yet determined
-    if (conversationState.reasonForVisit) {
-      return { 
-        requiredNextToolName: 'find_appointment_type', 
-        guidanceMessageKey: 'MATCH_APPOINTMENT_TYPE_FROM_REASON' 
-      };
-    }
-    return { 
-      requiredNextToolName: 'find_appointment_type', 
-      guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
-    };
-  }
-  
-  // If trying to book appointment, check prerequisites in order of importance
-  if (toolNameAttempted === 'book_appointment') {
-    // First, ensure patient is identified
-    if (!conversationState.identifiedPatientId) {
-      return { 
-        guidanceMessageKey: 'IDENTIFY_PATIENT_FIRST' 
-      };
-    }
-    
-    // Second, ensure appointment type is determined
-    if (!conversationState.determinedAppointmentTypeId) {
-      return { 
-        requiredNextToolName: 'find_appointment_type',
-        guidanceMessageKey: 'ASK_FOR_APPOINTMENT_TYPE_FIRST' 
-      };
-    }
-    
-    // Third, ensure requested date is set
-    if (!conversationState.requestedDate) {
-      return { 
-        guidanceMessageKey: 'ASK_FOR_DATE_FIRST' 
-      };
-    }
-    
-    // Finally, ensure a specific time slot has been selected
-    if (!conversationState.selectedTimeSlot) {
-      // Only trigger slot confirmation if slots were previously checked for the current date
-      if (conversationState.availableSlotsForDate && conversationState.availableSlotsForDate.length > 0) {
-        return { 
-          guidanceMessageKey: 'CONFIRM_SLOT_FIRST' 
-        };
-      } else {
-        // If no slots have been checked yet, guide to check slots first
-        return { 
-          requiredNextToolName: 'check_available_slots',
-          guidanceMessageKey: 'CHECK_AVAILABILITY_FIRST' 
-        };
-      }
-    }
-  }
-  
-  // If trying to create new patient but should check existing patients first
-  if (toolNameAttempted === 'create_new_patient' && !conversationState.identifiedPatientId) {
-    // This could be acceptable in some flows, but let's allow it for now
-    // return { guidanceMessageKey: 'CHECK_EXISTING_PATIENT_FIRST' };
-  }
-  
-  // If the attempted tool is appropriate for the current state, return null
-  return null;
-}
-
-
-
-async function executeToolSafely(
-  // Use more flexible typing to avoid constraint issues
-  tool: ToolDefinition<any>, // eslint-disable-line @typescript-eslint/no-explicit-any
-  toolCall: any, // eslint-disable-line @typescript-eslint/no-explicit-any 
-  context: ToolExecutionContext,
-  callLogContextData?: { nexhealthPatientId?: string | null } | null
-) {
-  try {
-    const parsedArgs = extractToolCallArguments(toolCall);
-    const startTime = Date.now();
-    
-    console.log(`Executing tool: ${tool.name} for practice ${context.practice.id} with args:`, parsedArgs);
-    console.log(`[executeToolSafely] For Tool: ${tool.name} - ConversationState BEFORE run:`, JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
-    
-    // Debug Logging: State before tool execution
-    addLogEntry({
-      event: "TOOL_STATE_BEFORE_RUN",
-      source: `executeToolSafely:${tool.name}`,
-      details: {
-        toolName: tool.name,
-        arguments: parsedArgs,
-        conversationStateBefore: context.conversationState.getStateSnapshot()
-      }
-    }, context.vapiCallId);
-    
-    // FLOW ENFORCEMENT: Check if the tool call is appropriate for the current conversation state
-    const flowCheck = getNextLogicalStep(tool.name, context.conversationState);
-    if (flowCheck) {
-      console.log(`[${tool.name}] Flow interception: Tool called out of sequence.`, flowCheck);
-      
-      const flowInterceptionResult = {
-        success: false,
-        error_code: "FLOW_INTERCEPTION",
-        details: `Tool '${tool.name}' called out of sequence. Guiding conversation flow.`,
-        flow_correction_guidance: flowCheck.guidanceMessageKey,
-        data: {
-          attempted_tool: tool.name,
-          required_next_tool: flowCheck.requiredNextToolName,
-          guidance_key: flowCheck.guidanceMessageKey
-        }
-      };
-
-      // Generate a natural guidance message
-      const guidanceMessage = await generateDynamicMessage(
-        tool.name,
-        parsedArgs,
-        flowInterceptionResult
-      );
-      
-      const resultWithGuidance = {
-        success: false,
-        error_code: "FLOW_INTERCEPTION", 
-        message_to_patient: guidanceMessage,
-        details: flowInterceptionResult.details,
-        data: flowInterceptionResult.data
-      };
-
-      // Log this flow interception
-      await logToolExecution(
-        context,
-        tool.name,
-        parsedArgs,
-        resultWithGuidance,
-        false,
-        `Flow interception: ${tool.name} called out of sequence`
-      );
-
-      return resultWithGuidance;
-    }
-    
-    // Argument pre-population for book_appointment from ConversationState
-    if (tool.name === 'book_appointment') {
-      // Pre-populate arguments from ConversationState if not provided by LLM
-      if (!parsedArgs.patientId && context.conversationState.identifiedPatientId) {
-        console.log(`[${tool.name}] Pre-populating patientId from ConversationState: ${context.conversationState.identifiedPatientId}`);
-        parsedArgs.patientId = context.conversationState.identifiedPatientId;
-      }
-      
-      if (!parsedArgs.appointmentTypeId && context.conversationState.determinedAppointmentTypeId) {
-        console.log(`[${tool.name}] Pre-populating appointmentTypeId from ConversationState: ${context.conversationState.determinedAppointmentTypeId}`);
-        parsedArgs.appointmentTypeId = context.conversationState.determinedAppointmentTypeId;
-      }
-      
-      if (!parsedArgs.requestedDate && context.conversationState.requestedDate) {
-        console.log(`[${tool.name}] Pre-populating requestedDate from ConversationState: ${context.conversationState.requestedDate}`);
-        parsedArgs.requestedDate = context.conversationState.requestedDate;
-      }
-      
-      if (!parsedArgs.durationMinutes && context.conversationState.determinedDurationMinutes) {
-        console.log(`[${tool.name}] Pre-populating durationMinutes from ConversationState: ${context.conversationState.determinedDurationMinutes}`);
-        parsedArgs.durationMinutes = context.conversationState.determinedDurationMinutes;
-      }
-      
-      if (!parsedArgs.selectedTime && context.conversationState.selectedTimeSlot?.display_time) {
-        console.log(`[${tool.name}] Pre-populating selectedTime from ConversationState: ${context.conversationState.selectedTimeSlot.display_time}`);
-        parsedArgs.selectedTime = context.conversationState.selectedTimeSlot.display_time;
-      }
-      
-      // If user provided selectedTime but ConversationState.selectedTimeSlot is not set, try to match and update it
-      if (parsedArgs.selectedTime && !context.conversationState.selectedTimeSlot && context.conversationState.availableSlotsForDate) {
-        console.log(`[${tool.name}] Attempting to match selectedTime "${parsedArgs.selectedTime}" with available slots`);
-        const selectedTimeStr = String(parsedArgs.selectedTime).trim();
-        const matchedSlot = (context.conversationState.availableSlotsForDate as Record<string, unknown>[]).find((slot: Record<string, unknown>) => 
-          slot.display_time && String(slot.display_time).toLowerCase() === selectedTimeStr.toLowerCase()
-        );
-        
-        if (matchedSlot) {
-          console.log(`[${tool.name}] Matched slot found, updating ConversationState.selectedTimeSlot:`, matchedSlot);
-          context.conversationState.updateSelectedTimeSlot(matchedSlot);
-          // Update parsedArgs.selectedTime with the exact display_time from the matched slot for consistency
-          parsedArgs.selectedTime = String(matchedSlot.display_time);
-        } else {
-          console.log(`[${tool.name}] No matching slot found for selectedTime "${selectedTimeStr}" in available slots`);
-        }
-             }
-      // This handles cases where user changes their mind or LLM provides different formatting
-      if (parsedArgs.selectedTime && context.conversationState.selectedTimeSlot && context.conversationState.availableSlotsForDate) {
-        const selectedTimeStr = String(parsedArgs.selectedTime).trim();
-        const currentSelectedDisplay = String(context.conversationState.selectedTimeSlot.display_time || '');
-        
-        // If the selected time from LLM doesn't match what's stored, try to find a better match
-        if (selectedTimeStr.toLowerCase() !== currentSelectedDisplay.toLowerCase()) {
-          console.log(`[${tool.name}] Time mismatch detected. LLM selected: "${selectedTimeStr}", ConversationState has: "${currentSelectedDisplay}"`);
-          
-          const matchedSlot = (context.conversationState.availableSlotsForDate as Record<string, unknown>[]).find((slot: Record<string, unknown>) => 
-            slot.display_time && String(slot.display_time).toLowerCase() === selectedTimeStr.toLowerCase()
-          );
-          
-          if (matchedSlot) {
-            console.log(`[${tool.name}] Found better matching slot, updating ConversationState.selectedTimeSlot:`, matchedSlot);
-            context.conversationState.updateSelectedTimeSlot(matchedSlot);
-            parsedArgs.selectedTime = String(matchedSlot.display_time);
-          } else {
-            console.log(`[${tool.name}] No better match found, keeping existing ConversationState.selectedTimeSlot`);
-            // Keep the existing selection and update parsedArgs to match
-            parsedArgs.selectedTime = currentSelectedDisplay;
-          }
-        }
-      }
-      
-      // ENHANCED: Also try to match selectedTime even if ConversationState.selectedTimeSlot IS set but different
-      // This handles cases where user changes their mind or LLM provides different formatting
-      if (parsedArgs.selectedTime && context.conversationState.selectedTimeSlot && context.conversationState.availableSlotsForDate) {
-        const selectedTimeStr = String(parsedArgs.selectedTime).trim();
-        const currentSelectedDisplay = String(context.conversationState.selectedTimeSlot.display_time || '');
-        
-        // If the selected time from LLM doesn't match what's stored, try to find a better match
-        if (selectedTimeStr.toLowerCase() !== currentSelectedDisplay.toLowerCase()) {
-          console.log(`[${tool.name}] Time mismatch detected. LLM selected: "${selectedTimeStr}", ConversationState has: "${currentSelectedDisplay}"`);
-          
-          const matchedSlot = (context.conversationState.availableSlotsForDate as Record<string, unknown>[]).find((slot: Record<string, unknown>) => 
-            slot.display_time && String(slot.display_time).toLowerCase() === selectedTimeStr.toLowerCase()
-          );
-          
-          if (matchedSlot) {
-            console.log(`[${tool.name}] Found better matching slot, updating ConversationState.selectedTimeSlot:`, matchedSlot);
-            context.conversationState.updateSelectedTimeSlot(matchedSlot);
-            parsedArgs.selectedTime = String(matchedSlot.display_time);
-          } else {
-            console.log(`[${tool.name}] No better match found, keeping existing ConversationState.selectedTimeSlot`);
-            // Keep the existing selection and update parsedArgs to match
-            parsedArgs.selectedTime = currentSelectedDisplay;
-          }
-        }
-      }
-      
-      // Generate call summary for appointment note if not already available
-      if (!context.conversationState.callSummaryForNote) {
-        try {
-          // For now, we'll use a placeholder since transcript extraction from VAPI may require additional setup
-          // In a production environment, this would extract the transcript from the VAPI call
-          const transcript: string = ""; // TODO: Extract transcript from VAPI call when available
-          if (transcript.trim() !== "") {
-            console.log(`[${tool.name}] Generating call summary from transcript...`);
-            const summary = await generateCallSummaryForNote(transcript);
-            context.conversationState.setCallSummary(summary);
-            console.log(`[${tool.name}] Call summary generated: ${summary}`);
-          } else {
-            console.log(`[${tool.name}] No transcript available, using default summary`);
-            context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
-          }
-        } catch (error) {
-          console.error(`[${tool.name}] Error generating call summary:`, error);
-          context.conversationState.setCallSummary("Appointment scheduled via Laine AI");
-        }
-      }
-    }
-    
-    // Check prerequisites before executing tool
-    if (tool.prerequisites && tool.prerequisites.length > 0) {
-      for (const prereq of tool.prerequisites) {
-        // Check if the prerequisite argument is present in parsedArgs AND is not obviously empty/null.
-        const argValueFromLlm = parsedArgs[prereq.argName];
-        let actualArgValue = argValueFromLlm; // Value from LLM's current arguments
-
-        // ENHANCED: First check ConversationState for the prerequisite
-        if (actualArgValue === undefined || actualArgValue === null || (typeof actualArgValue === 'string' && actualArgValue.trim() === '')) {
-          // Check ConversationState for common prerequisites
-          if (prereq.argName === 'appointmentTypeId' && context.conversationState.determinedAppointmentTypeId) {
-            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in ConversationState: ${context.conversationState.determinedAppointmentTypeId}`);
-            actualArgValue = context.conversationState.determinedAppointmentTypeId;
-            parsedArgs[prereq.argName] = actualArgValue;
-          } else if (prereq.argName === 'patientId' && context.conversationState.identifiedPatientId) {
-            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in ConversationState: ${context.conversationState.identifiedPatientId}`);
-            actualArgValue = context.conversationState.identifiedPatientId;
-            parsedArgs[prereq.argName] = actualArgValue;
-          } else if (prereq.argName === 'requestedDate' && context.conversationState.requestedDate) {
-            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in LLM args, but found in ConversationState: ${context.conversationState.requestedDate}`);
-            actualArgValue = context.conversationState.requestedDate;
-            parsedArgs[prereq.argName] = actualArgValue;
-          }
-          // Fallback to callLogContextData if still not found
-          else if (prereq.argName === 'patientId' && callLogContextData?.nexhealthPatientId) {
-            console.log(`[${tool.name}] Prerequisite '${prereq.argName}' not in ConversationState, but found in CallLog context: ${callLogContextData.nexhealthPatientId}`);
-            actualArgValue = callLogContextData.nexhealthPatientId;
-            parsedArgs[prereq.argName] = actualArgValue;
-          }
-        }
-
-        const isArgStillMissingOrEmpty = actualArgValue === undefined || actualArgValue === null || (typeof actualArgValue === 'string' && actualArgValue.trim() === '');
-
-        if (isArgStillMissingOrEmpty) {
-          console.log(`[${tool.name}] Prerequisite missing: ${prereq.argName}. Prompting user.`);
-
-          const prerequisiteFailureResult = {
-            success: false as const, // Mark as not successful for the tool's main goal
-            error_code: "PREREQUISITE_MISSING" as string,
-            details: `Missing prerequisite: ${prereq.argName}. User needs to be asked: "${prereq.askUserMessage}"`,
-            // The actual message_to_patient will be generated by generateDynamicMessage
-            _internal_prereq_failure_info: {
-              missingArg: prereq.argName,
-              askUserMessage: prereq.askUserMessage
-            }
-          };
-
-          // Call the dynamic message generator with this specific failure info
-          const finalMessage = await generateDynamicMessage(
-            tool.name,
-            parsedArgs, // Arguments as received from LLM
-            prerequisiteFailureResult, // Cast or adjust type
-          );
-          
-          // Construct the full result to return
-          const resultWithDynamicMessage = {
-              success: false,
-              error_code: "PREREQUISITE_MISSING",
-              message_to_patient: finalMessage, // The LLM generated message
-              details: `Missing prerequisite: ${prereq.argName}. User prompted.`,
-              data: {
-                  missing_prerequisite: prereq.argName,
-                  prompt_for_user: prereq.askUserMessage
-              }
-          };
-
-          // Log this pre-emptive failure
-          await logToolExecution(
-            context,
-            tool.name,
-            parsedArgs,
-            resultWithDynamicMessage, // Log the result that includes the user prompt
-            false, // Not a successful tool execution
-            `Prerequisite check failed: ${prereq.argName} was missing.`
-          );
-
-          return resultWithDynamicMessage; // Return early, do not proceed to Zod validation or tool.run()
-        }
-      }
-    }
-    
-    // Pre-validation removed - create_new_patient now handles staged collection internally
-    
-    // Validate arguments with tool schema
-    const validatedArgs = tool.schema.parse(parsedArgs);
-    
-    const toolResult = await tool.run({
-      args: validatedArgs,
-      context
-    });
-    
-    // Debug Logging: Tool execution result
-    addLogEntry({
-      event: "TOOL_EXECUTION_RESULT",
-      source: `executeToolSafely:${tool.name}`,
-      details: {
-        toolName: tool.name,
-        success: toolResult.success,
-        result: toolResult,
-        conversationStateAfter: context.conversationState.getStateSnapshot()
-      }
-    }, context.vapiCallId);
-    
-    // Log ConversationState after tool execution
-    console.log(`[executeToolSafely] For Tool: ${tool.name} - ConversationState AFTER run:`, JSON.stringify(context.conversationState.getStateSnapshot(), null, 2));
-    
-    // Generate dynamic message for successful execution
-    toolResult.message_to_patient = await generateDynamicMessage(
-      tool.name,
-      validatedArgs,
-      toolResult
-    );
-    
-    const executionTime = Date.now() - startTime;
-    
-    // Log successful execution
-    await logToolExecution(
-      context,
-      tool.name,
-      validatedArgs,
-      toolResult,
-      true,
-      undefined,
-      executionTime
-    );
-    
-    return toolResult;
-  } catch (error) {
-    console.error(`Error executing tool ${tool.name}:`, error);
-    
-    const errorResult = {
-      success: false,
-      error_code: getErrorCode(error, tool.name),
-      message_to_patient: getPatientMessage(getErrorCode(error, tool.name)),
-      details: error instanceof Error ? error.message : "Unknown error"
-    };
-    
-    // Generate dynamic message for general execution error
-    errorResult.message_to_patient = await generateDynamicMessage(
-      tool.name,
-      toolCall.arguments || toolCall.function?.arguments || {},
-      errorResult
-    );
-    
-    // Log failed execution
-    await logToolExecution(
-      context,
-      tool.name,
-      toolCall.arguments || toolCall.function?.arguments || {},
-      errorResult,
-      false,
-      error instanceof Error ? error.message : "Unknown error"
-    );
-    
-    return errorResult;
-  }
-}
-
-// validateCreateNewPatientArgs and related helper functions removed - 
-// create_new_patient tool now handles staged collection internally
-
-async function logToolExecution(
-  context: ToolExecutionContext,
-  toolName: string,
-  arguments_: unknown,
-  result: unknown,
-  success: boolean,
-  error?: string,
-  executionTimeMs?: number
-) {
-  try {
-    await prisma.toolLog.create({
-      data: {
-        practiceId: context.practice.id,
-        vapiCallId: context.vapiCallId,
-        toolName,
-        toolCallId: context.toolCallId,
-        arguments: JSON.stringify(arguments_),
-        result: JSON.stringify(result),
-        success,
-        error,
-        executionTimeMs: executionTimeMs || 0
-      }
-    });
-  } catch (logError) {
-    console.error("Error logging tool execution:", logError);
-  }
 }
 
 export async function POST(req: NextRequest) {
   let payload: VapiPayload | undefined;
+  let vapiCallId = 'unknown';
   
   try {
     console.log("--- [ToolCallRoute] START NEW REQUEST ---");
@@ -1148,7 +305,7 @@ export async function POST(req: NextRequest) {
     }
     
     // Get VAPI call ID early for debug logging
-    const vapiCallId = payload.message.call.id;
+    vapiCallId = payload.message.call.id;
     
     // Debug Logging: Start of request
     addLogEntry({
@@ -1160,44 +317,16 @@ export async function POST(req: NextRequest) {
         firstToolName: payload.message.toolCallList?.[0]?.function?.name || payload.message.toolCallList?.[0]?.name
       }
     }, vapiCallId);
-    
-    // SUBPHASE 1: Add detailed logging of the raw VAPI payload
-    console.log("[ToolCallRoute] RAW VAPI Payload:", JSON.stringify(payload, null, 2));
-    
-    // VAPI-COMPLIANT: Check if conversationState exists in any tool call arguments
-    const toolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
-    let foundConversationState = null;
-    
-    for (let i = 0; i < toolCalls.length; i++) {
-      const toolCall = toolCalls[i];
-      const args = extractToolCallArguments(toolCall);
-      
-      // Look for the conversationState string in the conversationState argument
-      if (args.conversationState && typeof args.conversationState === 'string') {
-        console.log(`[ToolCallRoute] Found conversationState string in tool call ${i}:`, args.conversationState);
-        try {
-          // Parse the JSON string to get the actual state object
-          const parsedState = JSON.parse(args.conversationState as string);
-          console.log(`[ToolCallRoute] Successfully parsed conversationState:`, JSON.stringify(parsedState, null, 2));
-          foundConversationState = parsedState;
-          break;
-        } catch (parseError) {
-          console.error(`[ToolCallRoute] Error parsing conversationState string from tool call ${i}:`, parseError);
-          console.log(`[ToolCallRoute] Raw conversationState string was:`, args.conversationState);
-        }
-      } else if (args.conversationState) {
-        // Fallback: if it's already an object (shouldn't happen with new format but keeping for safety)
-        console.log(`[ToolCallRoute] Found conversationState object in tool call ${i}:`, JSON.stringify(args.conversationState, null, 2));
-        foundConversationState = args.conversationState;
-        break;
-      } else {
-        console.log(`[ToolCallRoute] No conversationState found in tool call ${i} arguments`);
-      }
-    }
 
-    // TODO: Implement request verification when VAPI provides signing
+    // Debug Logging: Raw VAPI payload
+    addLogEntry({
+      event: "RAW_VAPI_PAYLOAD",
+      source: "ToolCallRoute:POST",
+      details: { payloadString: JSON.stringify(payload, null, 2) }
+    }, vapiCallId);
     
     const { message } = payload;
+    const toolCallList = message.toolCallList || message.toolCalls || [];
     
     let assistantId: string;
     let practice: any; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -1212,35 +341,13 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error("Assistant ID extraction or practice lookup failed:", error);
       
-      // ENHANCED ERROR HANDLING: Create detailed error for debugging with VAPI compliance
-      const debugInfo = {
-        error: error instanceof Error ? error.message : "Unknown error",
-        callId: vapiCallId,
-        assistantName: (message.assistant as any)?.name, // eslint-disable-line @typescript-eslint/no-explicit-any
-        availableFields: {
-          call: Object.keys(message.call || {}),
-          assistant: Object.keys(message.assistant || {})
-        },
-        timestamp: new Date().toISOString(),
-        userAgent: req.headers.get('user-agent'),
-        vapi_payload_structure: {
-          hasToolCallList: !!(payload.message.toolCallList),
-          hasToolCalls: !!(payload.message.toolCalls),
-          toolCallsCount: (payload.message.toolCallList || payload.message.toolCalls || []).length
-        }
-      };
-      
-      console.error("Debug info:", JSON.stringify(debugInfo, null, 2));
-      
-      // VAPI-COMPLIANT: Return error results for all tool calls with proper structure
-      const errorResults = toolCalls.map((toolCall: VapiIncomingToolCall) => {
+      const errorResults = toolCallList.map((toolCall: VapiIncomingToolCall) => {
         const toolCallId = extractToolCallId(toolCall);
         const resultObject = {
           tool_output_data: {
             success: false,
             error_code: "ASSISTANT_ID_OR_PRACTICE_ERROR", 
-            details: "Assistant ID extraction or practice lookup failed",
-            debug_info: debugInfo
+            details: "Assistant ID extraction or practice lookup failed"
           },
           current_conversation_state_snapshot: "{}" // Empty state for errors
         };
@@ -1251,389 +358,286 @@ export async function POST(req: NextRequest) {
         };
       });
       
-      // Debug Logging: Critical error
       addLogEntry({
         event: "CRITICAL_ERROR_ASSISTANT_PRACTICE_LOOKUP",
         source: "ToolCallRoute:POST",
-        details: debugInfo
+        details: { error: error instanceof Error ? error.message : "Unknown error" }
       }, vapiCallId);
       
       return NextResponse.json({ results: errorResults });
     }
     
-    // Initialize ConversationState - prioritize embedded state from VAPI LLM
-    const conversationState = new ConversationState(practice.id, vapiCallId, assistantId);
+    // Initialize ConversationState
+    const state = new ConversationState(vapiCallId, practice.id, assistantId);
     
     // Debug Logging: Conversation state initialization
     addLogEntry({
       event: "CONVERSATION_STATE_INIT",
       source: "ToolCallRoute:POST",
-      details: conversationState.getStateSnapshot()
+      details: { initialState: state.getStateSnapshot() }
     }, vapiCallId);
-    
-    // If we found conversation state from the LLM's previous tool call, restore it
-    if (foundConversationState) {
-      console.log("[ToolCallRoute] Restoring ConversationState from VAPI LLM:", JSON.stringify(foundConversationState, null, 2));
-      conversationState.restoreFromSnapshot(foundConversationState);
-      
-      // Debug Logging: State restored from VAPI
-      addLogEntry({
-        event: "CONVERSATION_STATE_RESTORED",
-        source: "ToolCallRoute:POST",
-        details: {
-          restoredFrom: foundConversationState,
-          finalState: conversationState.getStateSnapshot()
-        }
-      }, vapiCallId);
-    }
-    
-    console.log("[ToolCallRoute] Final ConversationState:", JSON.stringify(conversationState.getStateSnapshot(), null, 2));
-    
-    // Update call log status and fetch existing context data
-    let callLogContextData = null;
-    try {
-      const updatedCallLog = await prisma.callLog.upsert({
-        where: { vapiCallId },
-        create: {
-          vapiCallId,
-          practiceId: practice.id,
-          callStatus: "TOOL_IN_PROGRESS",
-          callTimestampStart: new Date()
-        },
-        update: {
-          callStatus: "TOOL_IN_PROGRESS",
-          updatedAt: new Date()
-        },
-        select: { 
-          nexhealthPatientId: true,
-          lastAppointmentTypeId: true,
-          lastAppointmentTypeName: true,
-          lastAppointmentDuration: true
-        } // Fetch context data for prerequisites and state loading
-      });
-      
-      callLogContextData = updatedCallLog;
-      console.log(`[ToolCallHandler] Fetched CallLog context:`, callLogContextData);
-      
-      // Load existing state from CallLog
-      if (callLogContextData?.lastAppointmentTypeId && callLogContextData?.lastAppointmentTypeName && callLogContextData?.lastAppointmentDuration) {
-        conversationState.updateAppointmentType(
-          callLogContextData.lastAppointmentTypeId,
-          callLogContextData.lastAppointmentTypeName,
-          callLogContextData.lastAppointmentDuration
-        );
-        console.log(`[ToolCallHandler] Loaded appointment type from CallLog: ${callLogContextData.lastAppointmentTypeName}`);
-      }
-      if (callLogContextData?.nexhealthPatientId) {
-        conversationState.updatePatient(callLogContextData.nexhealthPatientId);
-        console.log(`[ToolCallHandler] Loaded patient ID from CallLog: ${callLogContextData.nexhealthPatientId}`);
-      }
-    } catch (dbError) {
-      console.error("Error updating CallLog:", dbError);
-      // Try to fetch existing call log context data separately
-      try {
-        const existingCallLog = await prisma.callLog.findUnique({
-          where: { vapiCallId: vapiCallId },
-          select: { 
-            nexhealthPatientId: true,
-            lastAppointmentTypeId: true,
-            lastAppointmentTypeName: true,
-            lastAppointmentDuration: true
-          }
-        });
-        if (existingCallLog) {
-          callLogContextData = existingCallLog;
-          console.log(`[ToolCallHandler] Fetched existing CallLog context:`, callLogContextData);
-          
-          // Load existing state from existing CallLog
-          if (existingCallLog.lastAppointmentTypeId && existingCallLog.lastAppointmentTypeName && existingCallLog.lastAppointmentDuration) {
-            conversationState.updateAppointmentType(
-              existingCallLog.lastAppointmentTypeId,
-              existingCallLog.lastAppointmentTypeName,
-              existingCallLog.lastAppointmentDuration
-            );
-          }
-          if (existingCallLog.nexhealthPatientId) {
-            conversationState.updatePatient(existingCallLog.nexhealthPatientId);
-          }
-        }
-      } catch (fallbackError) {
-        console.error(`[ToolCallHandler] Error fetching CallLog for context:`, fallbackError);
-      }
-    }
     
     // Process all tool calls
     const results = [];
     
-    console.log(`Processing ${(message.toolCallList || []).length} tool call(s)`);
+    console.log(`Processing ${toolCallList.length} tool call(s)`);
     
-    for (let i = 0; i < (message.toolCallList || []).length; i++) {
-      const toolCall = (message.toolCallList || [])[i];
-      
-      console.log(`=== Processing Tool Call ${i + 1}/${(message.toolCallList || []).length} ===`);
-     
-      // Enhanced tool name extraction
+    for (const toolCall of toolCallList) {
       const toolName = extractToolName(toolCall);
       const toolCallId = extractToolCallId(toolCall);
-      
-      console.log(`Tool: ${toolName}, ID: ${toolCallId}`);
-      
-      // Debug Logging: Tool call start
-      if (toolName) {
-        addLogEntry({
-          event: "TOOL_CALL_START",
-          source: `ToolCallRoute:${toolName}`,
-          details: {
-            toolName,
-            toolCallId,
-            toolCallIndex: i,
-            arguments: extractToolCallArguments(toolCall)
-          }
-        }, vapiCallId);
+      const extractedArgs = extractToolCallArguments(toolCall);
+
+      // Restore ConversationState from VAPI if provided
+      if (extractedArgs.conversationState && typeof extractedArgs.conversationState === 'string') {
+        try {
+          const parsedStateSnapshot = JSON.parse(extractedArgs.conversationState as string);
+          state.restoreFromSnapshot(parsedStateSnapshot);
+          
+          addLogEntry({
+            event: "CONVERSATION_STATE_RESTORE_ATTEMPT",
+            source: "ToolCallRoute:POST",
+            details: {
+              snapshotStringReceived: extractedArgs.conversationState,
+              parsedSnapshot: parsedStateSnapshot,
+              stateAfterRestore: state.getStateSnapshot()
+            }
+          }, vapiCallId);
+        } catch (parseError) {
+          console.error(`[ToolCallRoute] Error parsing conversationState string:`, parseError);
+          addLogEntry({
+            event: "CONVERSATION_STATE_RESTORE_ERROR",
+            source: "ToolCallRoute:POST",
+            details: { error: parseError instanceof Error ? parseError.message : "Unknown error" }
+          }, vapiCallId);
+        }
       }
-     
+
       if (!toolName) {
-        console.error(`❌ Unable to extract tool name from tool call ${i + 1}`);
-        results.push({
-          toolCallId,
-          result: JSON.stringify({
+        console.error(`❌ Unable to extract tool name from tool call`);
+        const resultObject = {
+          tool_output_data: {
             success: false,
             error_code: "INVALID_TOOL_CALL",
-            message_to_patient: getPatientMessage("VALIDATION_ERROR"),
-            debug_info: {
-              toolCallIndex: i,
-              availableFields: Object.keys(toolCall),
-              toolCallStructure: toolCall
-            }
-          })
-        });
-        continue;
-      }
-      
-      const tool = getToolByName(toolName);
-      
-      if (!tool) {
-        console.error(`❌ Unknown tool: ${toolName}`);
+            details: "Unable to extract tool name"
+          },
+          current_conversation_state_snapshot: JSON.stringify(state.getStateSnapshot())
+        };
+        
         results.push({
           toolCallId,
-          result: JSON.stringify({
-            success: false,
-            error_code: "SYSTEM_ERROR",
-            message_to_patient: getPatientMessage("SYSTEM_ERROR"),
-            debug_info: {
-              requestedTool: toolName,
-              toolCallIndex: i
-            }
-          })
+          result: JSON.stringify(resultObject)
         });
         continue;
       }
-      
-      console.log(`✅ Found tool: ${tool.name}`);
-      
-      let callSummaryForNote: string | undefined = undefined; // Initialize here
 
-      if (tool.name === "book_appointment") {
-        // Debug: Log the call artifact structure to understand the payload
-        console.log("[ToolCallHandler] Call artifact structure:", JSON.stringify(payload.message.call.artifact || payload.message.call, null, 2));
-        
-        let extractedTranscript = payload.message.call.artifact?.transcript;
+      // Debug Logging: Tool call processing start
+      addLogEntry({
+        event: "TOOL_CALL_PROCESSING_START",
+        source: `ToolCallRoute:Dispatch:${toolName}`,
+        details: { toolCallId, toolName, extractedArgs }
+      }, vapiCallId);
 
-        if (!extractedTranscript || typeof extractedTranscript !== 'string' || extractedTranscript.trim() === "") {
-          console.warn("[ToolCallHandler] `artifact.transcript` is empty or missing. Checking alternative paths and constructing from messages.");
-          
-          // Try alternative paths for transcript
-          const alternativePaths = [
-            payload.message.call.transcript,
-            payload.message.call.artifact?.messages,
-            payload.message.call.artifact?.messagesOpenAIFormatted,
-            payload.message.artifact?.transcript,
-            payload.message.artifact?.messages,
-            payload.message.artifact?.messagesOpenAIFormatted
-          ];
-          
-          // Check for direct transcript in alternative locations
-          for (const path of alternativePaths.slice(0, 1)) { // First check direct transcript paths
-            if (path && typeof path === 'string' && path.trim() !== '') {
-              extractedTranscript = path;
-              console.log(`[ToolCallHandler] Found transcript in alternative path. Length: ${extractedTranscript.length}`);
-              break;
-            }
-          }
-          
-          // If still no transcript, try to construct from messages
-          if (!extractedTranscript || extractedTranscript.trim() === "") {
-            const messagesArrays = [
-              payload.message.call.artifact?.messages,
-              payload.message.call.artifact?.messagesOpenAIFormatted,
-              payload.message.artifact?.messages,
-              payload.message.artifact?.messagesOpenAIFormatted
-            ];
-            
-            for (const messages of messagesArrays) {
-              if (Array.isArray(messages) && messages.length > 0) {
-                console.log(`[ToolCallHandler] Constructing transcript from messages array with ${messages.length} items.`);
-                console.log("[ToolCallHandler] Messages structure sample:", JSON.stringify(messages.slice(0, 3), null, 2));
-                
-                extractedTranscript = messages
-                  .filter(msg => {
-                    // Handle different message structures
-                    const hasMessage = (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'bot') && 
-                                     (typeof msg.message === 'string' || typeof msg.content === 'string');
-                    return hasMessage;
-                  })
-                  .map(msg => {
-                    const role = msg.role === 'bot' ? 'assistant' : msg.role; // Normalize 'bot' to 'assistant'
-                    const content = msg.message || msg.content || '';
-                    return `${role}: ${content}`;
-                  })
-                  .join('\n');
-                
-                if (extractedTranscript.trim()) {
-                  console.log(`[ToolCallHandler] Successfully constructed transcript from messages. Length: ${extractedTranscript.length}`);
-                  break;
-                } else {
-                  console.warn("[ToolCallHandler] Constructed transcript from messages is empty, trying next messages array.");
-                }
-              }
-            }
-          }
-        } else {
-          console.log(`[ToolCallHandler] Using provided artifact.transcript. Length: ${extractedTranscript.length}`);
-        }
+      // Debug Logging: State before AI handler
+      addLogEntry({
+        event: "STATE_BEFORE_AI_HANDLER",
+        source: `ToolCallRoute:Dispatch:${toolName}`,
+        details: { toolName, stateSnapshot: state.getStateSnapshot() }
+      }, vapiCallId);
 
-        if (extractedTranscript && typeof extractedTranscript === 'string' && extractedTranscript.trim() !== "") {
+      console.log(`[ToolCallRoute] Identified tool: ${toolName}. Args:`, extractedArgs);
+      console.log(`[ToolCallRoute] ConversationState before AI handler:`, state.getStateSnapshot());
+
+      // AI Handler Dispatch Logic
+      let toolHandlerResult: { success: boolean; outputData: Record<string, unknown>; error?: string }; // Define a more generic type for now
+
+      // Define a simplified practice context to pass to handlers
+      const practiceInfoForHandler = {
+          id: practice.id, // Assuming 'practice' object is available and has an 'id'
+          name: practice.name || "the dental office" // And a 'name'
+      };
+
+      if (toolName === "get_intent") {
           try {
-            console.log(`[ToolCallHandler] Generating summary for book_appointment. Transcript used (first 500 chars): \n"""\n${extractedTranscript.substring(0, 500)}${extractedTranscript.length > 500 ? '...' : ''}\n"""`);
-            callSummaryForNote = await generateCallSummaryForNote(extractedTranscript);
-            console.log("[ToolCallHandler] Generated summary for note:", callSummaryForNote);
-          } catch (summaryError) {
-            console.error("[ToolCallHandler] Failed to generate call summary for note:", summaryError);
-            callSummaryForNote = "AI summary generation failed for appointment note.";
+              const { getIntentArgsSchema } = await import("@/lib/tools/getIntent"); // Dynamically import or ensure it's at top
+              const validatedArgs = getIntentArgsSchema.parse(extractedArgs);
+              
+              const intentProcessingResult = await processGetIntent(validatedArgs, state, practiceInfoForHandler, vapiCallId);
+              
+              let messageForLlm = "An issue occurred while processing your request."; // Default error message
+              if (intentProcessingResult.success) {
+                  messageForLlm = await generateMessageAfterIntent(intentProcessingResult.outputData, state, vapiCallId);
+              } else {
+                  // Handle failure from processGetIntent if necessary, or use a generic error message
+                  console.error("processGetIntent failed:", intentProcessingResult.error);
+              }
+
+              toolHandlerResult = {
+                  success: intentProcessingResult.success,
+                  outputData: {
+                      ...intentProcessingResult.outputData,
+                      messageForAssistant: messageForLlm, // This is the key for VAPI's LLM to speak
+                  },
+                  error: intentProcessingResult.error
+              };
+
+          } catch (validationError) {
+              console.error(`[ToolCallRoute] Validation error for ${toolName}:`, validationError);
+              addLogEntry({
+                  event: "VALIDATION_ERROR",
+                  source: `ToolCallRoute:Dispatch:${toolName}`,
+                  details: { error: validationError instanceof Error ? validationError.message : "Validation failed" }
+              }, vapiCallId);
+              toolHandlerResult = {
+                  success: false,
+                  outputData: { 
+                      messageForAssistant: "I had a little trouble understanding that. Could you try again?",
+                      error_details: validationError instanceof Error ? validationError.message : "Validation failed"
+                  },
+                  error: "VALIDATION_ERROR"
+              };
           }
-        } else {
-          console.warn("[ToolCallHandler] No transcript available (neither direct nor constructed) for book_appointment summary.");
-          callSummaryForNote = "No transcript available for summary note.";
-        }
-      }
-      
-      // Create execution context
-      const context: ToolExecutionContext = {
-        practice,
-        vapiCallId,
-        toolCallId,
-        assistantId: assistantId || "unknown",
-        callSummaryForNote, // Pass the summary
-        conversationState, // Pass the conversation state
-      };
-      
-      const toolResult = await executeToolSafely(tool, toolCall, context, callLogContextData);
-      
-      // Update CallLog with findAppointmentType results
-      if (tool.name === 'find_appointment_type' && toolResult.success && 'data' in toolResult && toolResult.data?.matched) {
+      } else if (toolName === "find_appointment_type") {
         try {
-          await prisma.callLog.update({
-            where: { vapiCallId: context.vapiCallId },
-            data: {
-              // IMPORTANT: Store the Laine CUID for internal tracking
-              lastAppointmentTypeId: context.conversationState.determinedAppointmentTypeId,
-              lastAppointmentTypeName: context.conversationState.determinedAppointmentTypeName,
-              lastAppointmentDuration: context.conversationState.determinedDurationMinutes,
-              updatedAt: new Date()
+            const { findAppointmentTypeArgsSchema } = await import("@/lib/tools/findAppointmentType");
+            const validatedArgs = findAppointmentTypeArgsSchema.parse(extractedArgs);
+
+            const findTypeProcessingResult = await processFindAppointmentType(validatedArgs, state, practiceInfoForHandler, vapiCallId);
+
+            let messageForLlm = "I'm having a bit of trouble identifying that service. Could you try again?"; // Default error
+            if (findTypeProcessingResult.success) {
+                 // If the handler itself provided a message (e.g. for no match), use it. Otherwise, generate.
+                if (findTypeProcessingResult.outputData.messageForAssistant) {
+                    messageForLlm = findTypeProcessingResult.outputData.messageForAssistant;
+                } else {
+                    messageForLlm = await generateMessageAfterFindAppointmentType(findTypeProcessingResult.outputData, state, vapiCallId);
+                }
+            } else {
+                 // Handle failure from processFindAppointmentType
+                console.error("processFindAppointmentType failed:", findTypeProcessingResult.error);
+                // Use a generic error message or one based on findTypeProcessingResult.error
+                if (findTypeProcessingResult.error === "NO_APPOINTMENT_TYPES_CONFIGURED") {
+                    messageForLlm = "It seems we don't have specific appointment types set up for online booking at the moment. Please call the office directly for assistance.";
+                } else if (findTypeProcessingResult.error === "NO_PROVIDER_FOR_APPOINTMENT_TYPE") {
+                    messageForLlm = `While I found the ${findTypeProcessingResult.outputData.matchedAppointmentName || 'service'}, it seems there are no providers available for it through online booking. You may need to call the office.`;
+                }
             }
-          });
-          console.log(`[ToolCallHandler] Updated CallLog for ${context.vapiCallId} with appointment type: ${context.conversationState.determinedAppointmentTypeName}`);
-        } catch (dbError) {
-          console.error(`[ToolCallHandler] Error updating CallLog with appointment type for ${context.vapiCallId}:`, dbError);
+            
+            toolHandlerResult = {
+                success: findTypeProcessingResult.success,
+                outputData: {
+                    ...findTypeProcessingResult.outputData,
+                    messageForAssistant: messageForLlm,
+                },
+                error: findTypeProcessingResult.error
+            };
+
+        } catch (validationError) {
+            console.error(`[ToolCallRoute] Validation error for ${toolName}:`, validationError);
+            addLogEntry({
+                event: "VALIDATION_ERROR",
+                source: `ToolCallRoute:Dispatch:${toolName}`,
+                details: { error: validationError instanceof Error ? validationError.message : "Validation failed" }
+            }, vapiCallId);
+            toolHandlerResult = {
+                success: false,
+                outputData: { 
+                    messageForAssistant: "I had a little trouble with that request. Could you please rephrase?",
+                    error_details: validationError instanceof Error ? validationError.message : "Validation failed"
+                },
+                error: "VALIDATION_ERROR"
+            };
         }
+      } else if (toolName === "create_new_patient") {
+        try {
+            const { createNewPatientArgsSchema } = await import("@/lib/tools/createNewPatient");
+            const validatedArgs = createNewPatientArgsSchema.parse(extractedArgs);
+
+            // Ensure practiceInfoForHandler has NexHealth details for this handler
+            const practiceInfoForOnboarding = {
+                id: practice.id,
+                name: practice.name || "the dental office",
+                nexhealthSubdomain: practice.nexhealthSubdomain, // CRITICAL
+                nexhealthLocationId: practice.nexhealthLocationId, // CRITICAL
+            };
+
+            if (!practiceInfoForOnboarding.nexhealthSubdomain || !practiceInfoForOnboarding.nexhealthLocationId) {
+                throw new Error("Practice NexHealth configuration (subdomain or locationId) is missing.");
+            }
+
+            const onboardingProcessingResult = await processPatientOnboarding(validatedArgs, state, practiceInfoForOnboarding, vapiCallId);
+            
+            // Message generation is now handled by generateMessageForPatientOnboarding based on the stage
+            const messageForLlm = await generateMessageForPatientOnboarding(onboardingProcessingResult.outputData, state, vapiCallId);
+            
+            toolHandlerResult = {
+                success: onboardingProcessingResult.success, // Reflects success of the current step
+                outputData: {
+                    ...onboardingProcessingResult.outputData,
+                    messageForAssistant: messageForLlm,
+                },
+                error: onboardingProcessingResult.error
+            };
+
+        } catch (error) // Catches validation errors or missing NexHealth config
+        {
+            console.error(`[ToolCallRoute] Error processing/validating ${toolName}:`, error);
+            const errorMsg = error instanceof Error ? error.message : "Processing error";
+            addLogEntry({ event: "HANDLER_ERROR_OR_VALIDATION", source: `ToolCallRoute:${toolName}`, details: { error: errorMsg } }, vapiCallId);
+            toolHandlerResult = {
+                success: false,
+                outputData: { 
+                    messageForAssistant: "I encountered an issue with that information. Let's try that step again.",
+                    error_details: errorMsg,
+                    stage: state.currentStage, // Keep current stage to retry
+                    isComplete: false,
+                },
+                error: "PROCESSING_ERROR"
+            };
+        }
+      } else {
+          // Current placeholder for other tools from Phase 0
+          console.log(`[ToolCallRoute] Tool ${toolName} not yet fully implemented with AI handler. Using Phase 0 simulation.`);
+          toolHandlerResult = {
+              success: true,
+              outputData: {
+                  messageForAssistant: `Phase 1: ${toolName} processing placeholder. Next step would follow.`,
+                  toolNameExecuted: toolName,
+                  argsReceived: extractedArgs,
+              }
+          };
+          state.setCurrentStage(`${toolName}_processed_phase1_placeholder`);
       }
-      
-      let vapiToolResponseItem: {
-        toolCallId: string;
-        result: string;
-        message: {
-          type: string;
-          content: string;
-        };
-      };
 
-      const currentConversationStateSnapshot = context.conversationState.getStateSnapshot();
-      
-      console.log(`[ToolCallRoute] Embedding ConversationState in VAPI result for ${tool.name}:`, JSON.stringify(currentConversationStateSnapshot, null, 2));
+      console.log(`[ToolCallRoute] ConversationState after AI handler:`, state.getStateSnapshot());
 
-      // VAPI-COMPLIANT: Embed conversationState within the result field as required by VAPI
-      const updatedStateSnapshotObject = context.conversationState.getStateSnapshot();
-      const conversationStateStringForEmbedding = JSON.stringify(updatedStateSnapshotObject);
+      // Debug Logging: AI handler result
+      addLogEntry({
+        event: "AI_HANDLER_RESULT",
+        source: `ToolCallRoute:Dispatch:${toolName}`,
+        details: { toolName, handlerResult: toolHandlerResult, stateAfter: state.getStateSnapshot() }
+      }, vapiCallId);
 
-      // Prepare the object that will be stringified for the 'result' field
+      // VAPI Response Formatting (Keep this logic)
+      const currentConversationStateSnapshotObject = state.getStateSnapshot();
+      const conversationStateStringForEmbedding = JSON.stringify(currentConversationStateSnapshotObject);
+
       const resultObjectForVapi = {
-        tool_output_data: toolResult.success ? (('data' in toolResult ? toolResult.data : {}) || {}) : { error: toolResult.error_code, details: toolResult.details },
-        // Embed our stringified conversationState here
-        // We'll name the key 'current_conversation_state_snapshot' to be clear
+        tool_output_data: toolHandlerResult.outputData,
         current_conversation_state_snapshot: conversationStateStringForEmbedding
       };
-
       const resultStringForVapi = JSON.stringify(resultObjectForVapi);
-      
-      console.log(`[ToolCallRoute] Preparing VAPI result string for tool ${tool.name}:`, resultStringForVapi);
-      console.log(`[ToolCallRoute] (Embedded conversationState string length: ${conversationStateStringForEmbedding.length})`);
 
-      if (toolResult.success) {
-        vapiToolResponseItem = {
-          toolCallId,
-          result: resultStringForVapi, // This is now a string containing tool_output_data and current_conversation_state_snapshot
-          message: {
-            type: "request-complete",
-            content: toolResult.message_to_patient,
-          }
-          // NO top-level conversationState field here anymore
-        };
-      } else {
-        vapiToolResponseItem = {
-          toolCallId,
-          // Even for errors, we send back the state. The 'result' field can convey the error.
-          result: resultStringForVapi, // Contains error info in tool_output_data and the state
-          message: {
-            type: "request-failed",
-            content: toolResult.message_to_patient,
-          }
-          // NO top-level conversationState field here anymore
-        };
-      }
-
-      results.push(vapiToolResponseItem);
-      
-      // Debug Logging: VAPI response prepared
-      addLogEntry({
-        event: "VAPI_RESPONSE_PREPARED",
-        source: `ToolCallRoute:${toolName}`,
-        details: {
-          toolCallId,
-          toolName,
-          success: toolResult.success,
-          messageType: vapiToolResponseItem.message.type,
-          messageContent: vapiToolResponseItem.message.content,
-          resultStringLength: resultStringForVapi.length,
-          embeddedStateStringLength: conversationStateStringForEmbedding.length
-        }
-      }, vapiCallId);
-      
-      console.log(`✅ Tool ${toolName} completed. Success: ${toolResult.success}`);
+      results.push({
+        toolCallId,
+        result: resultStringForVapi,
+      });
     }
-    
-    console.log("Sending results to VAPI:", JSON.stringify({ results }));
-    
-    // Debug Logging: Final response to VAPI
+
+    // Debug Logging: Final VAPI response
     addLogEntry({
-      event: "VAPI_RESPONSE_SENT",
+      event: "VAPI_RESPONSE_PREPARED",
       source: "ToolCallRoute:POST",
-      details: {
-        resultsCount: results.length,
-        allToolsProcessed: results.map(r => ({ 
-          toolCallId: r.toolCallId, 
-          messageType: 'message' in r ? r.message.type : 'unknown'
-        }))
-      }
+      details: { resultsArray: results }
     }, vapiCallId);
     
     return NextResponse.json({ results });
@@ -1641,33 +645,23 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("CRITICAL ERROR in centralized tool handler:", error);
     
-    // ENHANCED ERROR HANDLING: Comprehensive error capture and reporting
     const criticalErrorInfo = {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
       timestamp: new Date().toISOString(),
-      userAgent: req.headers.get('user-agent'),
-      contentType: req.headers.get('content-type'),
-      method: req.method,
-      url: req.url,
-      hasBody: !!payload,
-      payloadType: typeof payload,
-      vapiCallId: payload?.message?.call?.id || 'unknown'
+      vapiCallId: payload?.message?.call?.id || vapiCallId
     };
     
     // Debug Logging: Critical system error
-    if (payload?.message?.call?.id) {
-      addLogEntry({
-        event: "CRITICAL_SYSTEM_ERROR",
-        source: "ToolCallRoute:POST",
-        details: criticalErrorInfo
-      }, payload.message.call.id);
-    }
+    addLogEntry({
+      event: "CRITICAL_SYSTEM_ERROR",
+      source: "ToolCallRoute:POST",
+      details: criticalErrorInfo
+    }, vapiCallId);
     
     console.error("Critical error details:", JSON.stringify(criticalErrorInfo, null, 2));
     
     // VAPI-COMPLIANT: Return proper error structure even for system failures
-    // If we have a payload, try to respond properly to VAPI
     if (payload?.message?.toolCallList || payload?.message?.toolCalls) {
       const toolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
       const errorResults = toolCalls.map((toolCall: VapiIncomingToolCall) => {
@@ -1676,8 +670,7 @@ export async function POST(req: NextRequest) {
           tool_output_data: {
             success: false,
             error_code: "SYSTEM_ERROR",
-            details: "Internal system error occurred",
-            timestamp: criticalErrorInfo.timestamp
+            details: "Internal system error occurred"
           },
           current_conversation_state_snapshot: "{}" // Empty state for system errors
         };
