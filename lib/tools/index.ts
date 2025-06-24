@@ -5,12 +5,14 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import getIntentTool from "./getIntent";
 import findAppointmentTypeTool from "./findAppointmentType"; 
 import createNewPatientTool from "./createNewPatient";
+import checkAvailableSlotsTool, { checkAvailableSlotsArgsSchema } from "./checkAvailableSlots";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const tools: ToolDefinition<any>[] = [
   getIntentTool,
   findAppointmentTypeTool,
   createNewPatientTool,
+  checkAvailableSlotsTool,
   // Other tools will be added in later phases
 ];
 
@@ -58,3 +60,4 @@ export function buildVapiTools(appBaseUrl: string): VapiToolSchema[] {
 export { getIntentArgsSchema } from "./getIntent";
 export { findAppointmentTypeArgsSchema } from "./findAppointmentType";
 export { createNewPatientArgsSchema } from "./createNewPatient"; 
+export { checkAvailableSlotsArgsSchema }; 

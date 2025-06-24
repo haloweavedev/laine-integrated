@@ -2,6 +2,7 @@ import { ConversationState } from "@/lib/conversationState";
 import { IntentHandlerResult } from "./intentHandler"; // Assuming this type is exported or defined accessibly
 import { FindAppointmentTypeResult } from "./findAppointmentTypeHandler"; // Add this import
 import { PatientOnboardingResult } from "./patientOnboardingHandler"; // Assuming type is exported
+import { SlotCheckerResult } from "./slotCheckerHandler";
 import { addLogEntry } from "@/lib/debugLogStore";
 // We will use simple conditional logic for Phase 1. LLM-based generation can be a future enhancement if needed.
 
@@ -88,17 +89,15 @@ export async function generateMessageAfterFindAppointmentType(
   }, vapiCallId);
 
   if (findResult.matchFound && findResult.matchedAppointmentName) {
-    message = `Yes, we offer ${findResult.matchedAppointmentName}`;
+    message = `Okay, a ${findResult.matchedAppointmentName}`;
     if (findResult.matchedAppointmentDuration) {
-        message += `, which is usually about ${findResult.matchedAppointmentDuration} minutes. `;
+        message += ` is usually about ${findResult.matchedAppointmentDuration} minutes. `;
     } else {
         message += ". ";
     }
-
-    // Since get_intent is bypassed for this test, patient status is unknown.
-    message += `To help you with this, are you a new or an existing patient with us?`;
-    state.setCurrentStage("awaiting_patient_status_clarification_after_direct_appt_find"); 
-    // New stage to differentiate from the get_intent path
+    // Transition to asking for date
+    message += `To check availability for this, what date were you thinking of? You can say something like "tomorrow", "next Tuesday", or a specific date like "July 15th".`;
+    state.setCurrentStage("awaiting_date_for_slot_check");
   } else {
     // Existing logic for no match or handler-provided error message
     message = findResult.messageForAssistant || "I'm sorry, I couldn't find that specific service. Could you try phrasing it differently, or I can list some common services we offer?";
@@ -111,6 +110,40 @@ export async function generateMessageAfterFindAppointmentType(
     details: { generatedMessage: message, finalState: state.getStateSnapshot() }
   }, vapiCallId);
 
+  return message;
+}
+
+export async function generateMessageAfterSlotCheck(
+  slotCheckResult: SlotCheckerResult["outputData"],
+  state: ConversationState,
+  vapiCallId: string
+): Promise<string> {
+  let message = "";
+  const { requestedDateFormatted, slotsFound, presentedSlots, availableSlotsCount } = slotCheckResult;
+
+  addLogEntry({
+    event: "MESSAGE_GENERATION_START",
+    source: "messageGenerator.generateMessageAfterSlotCheck",
+    details: { slotCheckResult, currentState: state.getStateSnapshot() }
+  }, vapiCallId);
+
+  if (slotsFound && presentedSlots && presentedSlots.length > 0) {
+    message = `Okay, for ${requestedDateFormatted}, I have the following times available: ${presentedSlots.join(", ")}.`;
+    if (availableSlotsCount && availableSlotsCount > presentedSlots.length) {
+      message += ` I also have other times.`;
+    }
+    message += ` Do any of these work for you? Or would you like to hear more options for this date, or try a different date?`;
+    state.setCurrentStage("awaiting_slot_selection_or_new_date");
+  } else {
+    message = `I'm sorry, I don't see any available slots for ${requestedDateFormatted}. Would you like to try a different date?`;
+    state.setCurrentStage("awaiting_new_date_after_no_slots");
+  }
+  
+  addLogEntry({
+    event: "MESSAGE_GENERATION_COMPLETE",
+    source: "messageGenerator.generateMessageAfterSlotCheck",
+    details: { generatedMessage: message, finalState: state.getStateSnapshot() }
+  }, vapiCallId);
   return message;
 }
 

@@ -5,7 +5,8 @@ import { addLogEntry } from "@/lib/debugLogStore";
 import { processGetIntent } from "@/lib/ai/intentHandler";
 import { processFindAppointmentType } from "@/lib/ai/findAppointmentTypeHandler";
 import { processPatientOnboarding } from "@/lib/ai/patientOnboardingHandler";
-import { generateMessageAfterIntent, generateMessageAfterFindAppointmentType, generateMessageForPatientOnboarding } from "@/lib/ai/messageGenerator";
+import { processCheckAvailableSlots } from "@/lib/ai/slotCheckerHandler";
+import { generateMessageAfterIntent, generateMessageAfterFindAppointmentType, generateMessageForPatientOnboarding, generateMessageAfterSlotCheck } from "@/lib/ai/messageGenerator";
 
 // Type for VAPI payload (flexible to handle various structures)
 interface VapiPayload {
@@ -503,6 +504,58 @@ export async function POST(req: NextRequest) {
                     error_details: validationError instanceof Error ? validationError.message : "Validation failed"
                 },
                 error: "VALIDATION_ERROR"
+            };
+        }
+      } else if (toolName === "check_available_slots") {
+        try {
+            const { checkAvailableSlotsArgsSchema } = await import("@/lib/tools/checkAvailableSlots");
+            const validatedArgs = checkAvailableSlotsArgsSchema.parse(extractedArgs);
+
+            if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+                throw new Error("Practice NexHealth configuration for slot checking is missing.");
+            }
+
+            const practiceInfoForSlotChecking = {
+                id: practice.id,
+                nexhealthSubdomain: practice.nexhealthSubdomain,
+                nexhealthLocationId: practice.nexhealthLocationId,
+                // practiceLocalTimeZone: practice.timezone || 'America/New_York', // If you have this
+            };
+
+            const slotCheckingResult = await processCheckAvailableSlots(validatedArgs, state, practiceInfoForSlotChecking, vapiCallId);
+            
+            const messageForLlm = await generateMessageAfterSlotCheck(slotCheckingResult.outputData, state, vapiCallId);
+            
+            toolHandlerResult = {
+                success: slotCheckingResult.success,
+                outputData: {
+                    ...slotCheckingResult.outputData,
+                    messageForAssistant: messageForLlm,
+                },
+                error: slotCheckingResult.error
+            };
+
+        } catch (error) { // Catches validation errors or missing NexHealth config
+            console.error(`[ToolCallRoute] Error processing/validating ${toolName}:`, error);
+            const errorMsg = error instanceof Error ? error.message : "Processing error";
+            addLogEntry({ event: "HANDLER_ERROR_OR_VALIDATION", source: `ToolCallRoute:${toolName}`, details: { error: errorMsg } }, vapiCallId);
+            
+            let userFacingErrorMsg = "I had trouble checking slots for that date. Could you try another date or ensure the format is clear, like 'July 15th'?";
+            if (errorMsg.includes("Invalid date format")) {
+                userFacingErrorMsg = "I didn't quite understand that date. Could you try saying it like 'next Tuesday' or 'July 15th'?";
+            } else if (errorMsg.includes("Missing appointment/provider details")) {
+                 userFacingErrorMsg = "I seem to be missing some details about the appointment type. Could we try identifying the service again?";
+            }
+
+            toolHandlerResult = {
+                success: false,
+                outputData: { 
+                    messageForAssistant: userFacingErrorMsg,
+                    error_details: errorMsg,
+                    slotsFound: false, // Ensure this is set for consistency
+                    requestedDateFormatted: (extractedArgs as { requestedDate?: string }).requestedDate || "the date you mentioned",
+                },
+                error: "SLOT_CHECKING_ERROR"
             };
         }
       } else if (toolName === "create_new_patient") {

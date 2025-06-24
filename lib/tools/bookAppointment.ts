@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ToolDefinition, ToolResult, conversationStateSchema } from "./types";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { DateTime } from "luxon";
+import { format, parseISO } from 'date-fns';
 
 export const bookAppointmentSchema = z.object({
   selectedTime: z.string()
@@ -135,11 +136,15 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
         }
 
         // Find matching slot based on display_time
-        const matchedSlot = (conversationState.availableSlotsForDate as Record<string, unknown>[])?.find(slot => 
-          slot.display_time === args.selectedTime
+        const targetProviderId = conversationState.targetNexhealthProviderId;
+        const practiceProvider = practice.savedProviders?.find(p => p.provider.nexhealthProviderId === targetProviderId);
+        const providerNameForSlot = practiceProvider ? `${practiceProvider.provider.firstName} ${practiceProvider.provider.lastName}` : "Unknown Provider";
+
+        const matchedSlotFromState = conversationState.availableSlotsForDate?.find(slot => 
+          format(parseISO(slot.time), "h:mm a") === args.selectedTime
         );
 
-        if (!matchedSlot) {
+        if (!matchedSlotFromState) {
           return {
             success: false,
             error_code: "SLOT_NOT_RECOGNIZED_OR_EXPIRED",
@@ -147,11 +152,17 @@ const bookAppointmentTool: ToolDefinition<typeof bookAppointmentSchema> = {
             details: `Selected time "${args.selectedTime}" not found in available slots`
           };
         }
+        
+        const matchedSlot = {
+          ...matchedSlotFromState,
+          display_time: format(parseISO(matchedSlotFromState.time), "h:mm a"),
+          provider_info: { name: providerNameForSlot }
+        };
 
         // Update conversationState with the matched slot
         conversationState.updateSelectedTimeSlot(matchedSlot);
-        selectedTimeDisplay = matchedSlot.display_time as string;
-        selectedTimeRaw = matchedSlot.time as string;
+        selectedTimeDisplay = matchedSlot.display_time;
+        selectedTimeRaw = matchedSlot.time;
       } else if (selectedTimeSlotObject) {
         // Use existing selectedTimeSlot from conversationState
         selectedTimeDisplay = selectedTimeSlotObject.display_time as string;

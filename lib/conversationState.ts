@@ -13,6 +13,12 @@ export interface NewPatientData {
   email?: string;
 }
 
+export interface NexHealthSlot {
+  time: string;
+  end_time: string;
+  operatory_id: number;
+}
+
 export class ConversationState {
   public readonly vapiCallId: string;
   public readonly practiceId: string;
@@ -30,6 +36,12 @@ export class ConversationState {
   public matchedAppointmentName: string | null;
   public matchedAppointmentDuration: number | null;
   public targetNexhealthProviderId: string | null; // For createNewPatient, derived from appointment type
+
+  // For checkAvailableSlots
+  public requestedDate: string | null; // YYYY-MM-DD format
+  public requestedTimePreference: 'morning' | 'afternoon' | 'evening' | null;
+  public availableSlotsForDate: NexHealthSlot[] | null; // Raw slot objects from NexHealth after filtering
+  public presentedSlots: string[] | null; // String representations of slots presented to user
 
   // For createNewPatient
   public newPatientData: NewPatientData;
@@ -52,6 +64,12 @@ export class ConversationState {
     this.matchedAppointmentName = null;
     this.matchedAppointmentDuration = null;
     this.targetNexhealthProviderId = null;
+
+    // For checkAvailableSlots
+    this.requestedDate = null;
+    this.requestedTimePreference = null;
+    this.availableSlotsForDate = null;
+    this.presentedSlots = null;
 
     this.newPatientData = {};
     this.newPatientDataConfirmed = false;
@@ -78,13 +96,15 @@ export class ConversationState {
       matchedAppointmentName: this.matchedAppointmentName,
       matchedAppointmentDuration: this.matchedAppointmentDuration,
       targetNexhealthProviderId: this.targetNexhealthProviderId,
+      requestedDate: this.requestedDate,
+      requestedTimePreference: this.requestedTimePreference,
+      availableSlotsForDate: this.availableSlotsForDate,
+      presentedSlots: this.presentedSlots,
       newPatientData: this.newPatientData,
       newPatientDataConfirmed: this.newPatientDataConfirmed,
       nexhealthPatientId: this.nexhealthPatientId,
       // Legacy properties for tool compatibility
-      requestedDate: this.requestedDate,
       selectedTimeSlot: this.selectedTimeSlot,
-      availableSlotsForDate: this.availableSlotsForDate,
       callSummaryForNote: this.callSummaryForNote,
       bookingDetailsPresentedForConfirmation: this.bookingDetailsPresentedForConfirmation,
       bookedAppointmentDetails: this.bookedAppointmentDetails,
@@ -114,14 +134,17 @@ export class ConversationState {
     this.matchedAppointmentDuration = typeof snapshot.matchedAppointmentDuration === 'number' ? snapshot.matchedAppointmentDuration : null;
     this.targetNexhealthProviderId = typeof snapshot.targetNexhealthProviderId === 'string' ? snapshot.targetNexhealthProviderId : null;
 
+    this.requestedDate = typeof snapshot.requestedDate === 'string' ? snapshot.requestedDate : null;
+    this.requestedTimePreference = snapshot.requestedTimePreference || null;
+    this.availableSlotsForDate = Array.isArray(snapshot.availableSlotsForDate) ? snapshot.availableSlotsForDate : null;
+    this.presentedSlots = Array.isArray(snapshot.presentedSlots) ? snapshot.presentedSlots : null;
+
     this.newPatientData = typeof snapshot.newPatientData === 'object' && snapshot.newPatientData !== null ? snapshot.newPatientData : {};
     this.newPatientDataConfirmed = typeof snapshot.newPatientDataConfirmed === 'boolean' ? snapshot.newPatientDataConfirmed : false;
     this.nexhealthPatientId = typeof snapshot.nexhealthPatientId === 'string' ? snapshot.nexhealthPatientId : null;
     
     // Restore legacy properties for tool compatibility
-    this.requestedDate = typeof snapshot.requestedDate === 'string' ? snapshot.requestedDate : null;
     this.selectedTimeSlot = typeof snapshot.selectedTimeSlot === 'object' && snapshot.selectedTimeSlot !== null ? snapshot.selectedTimeSlot : null;
-    this.availableSlotsForDate = Array.isArray(snapshot.availableSlotsForDate) ? snapshot.availableSlotsForDate : null;
     this.callSummaryForNote = typeof snapshot.callSummaryForNote === 'string' ? snapshot.callSummaryForNote : undefined;
     this.bookingDetailsPresentedForConfirmation = typeof snapshot.bookingDetailsPresentedForConfirmation === 'boolean' ? snapshot.bookingDetailsPresentedForConfirmation : false;
     this.bookedAppointmentDetails = typeof snapshot.bookedAppointmentDetails === 'object' && snapshot.bookedAppointmentDetails !== null ? snapshot.bookedAppointmentDetails : null;
@@ -205,6 +228,26 @@ export class ConversationState {
     console.log(`[ConversationState] Updated targetNexhealthProviderId: ${this.targetNexhealthProviderId}`);
   }
 
+  public setRequestedDate(date: string | null): void {
+    this.requestedDate = date;
+    console.log(`[ConversationState] Updated requestedDate: ${this.requestedDate}`);
+  }
+
+  public setRequestedTimePreference(preference: 'morning' | 'afternoon' | 'evening' | null): void {
+    this.requestedTimePreference = preference;
+    console.log(`[ConversationState] Updated requestedTimePreference: ${this.requestedTimePreference}`);
+  }
+
+  public setAvailableSlotsForDate(slots: NexHealthSlot[] | null): void {
+    this.availableSlotsForDate = slots;
+    console.log(`[ConversationState] Updated availableSlotsForDate:`, slots ? `${slots.length} slots` : 'null');
+  }
+
+  public setPresentedSlots(slots: string[] | null): void {
+    this.presentedSlots = slots;
+    console.log(`[ConversationState] Updated presentedSlots:`, slots);
+  }
+
   // Compatibility methods for existing tools (temporary, will be removed in later phases)
   public updateIntent(intent: string): void {
     this.determinedIntent = intent;
@@ -245,9 +288,7 @@ export class ConversationState {
   }
 
   // Additional legacy properties that tools expect (temporary compatibility)
-  public requestedDate: string | null = null;
   public selectedTimeSlot: Record<string, unknown> | null = null;
-  public availableSlotsForDate: unknown[] | null = null;
   public callSummaryForNote: string | undefined = undefined;
   public bookingDetailsPresentedForConfirmation: boolean = false;
   public bookedAppointmentDetails: Record<string, unknown> | null = null;
@@ -263,36 +304,33 @@ export class ConversationState {
 
   public updatePatientStatus(status: 'new' | 'existing'): void {
     this.patientStatus = status;
-    console.log(`[ConversationState] Updated patient status: ${status}`);
+    console.log(`[ConversationState] Updated patientStatus: ${this.patientStatus}`);
   }
 
   public updateRequestedDate(date: string): void {
     this.requestedDate = date;
-    console.log(`[ConversationState] Updated requested date: ${date}`);
+    console.log(`[ConversationState] Updated requestedDate: ${this.requestedDate}`);
   }
 
   public updateSelectedTimeSlot(slot: Record<string, unknown> | null): void {
     this.selectedTimeSlot = slot;
-    console.log(`[ConversationState] Updated selected time slot:`, slot);
+    console.log(`[ConversationState] Updated selectedTimeSlot:`, this.selectedTimeSlot);
   }
 
   public updateAvailableSlotsForDate(slots: unknown[]): void {
-    this.availableSlotsForDate = slots;
-    console.log(`[ConversationState] Updated available slots:`, slots?.length || 0, 'slots');
+    this.availableSlotsForDate = slots as NexHealthSlot[];
+    console.log(`[ConversationState] Updated availableSlotsForDate:`, this.availableSlotsForDate);
   }
 
   public updateNewPatientDetail(field: string, value: string | null, isConfirmed: boolean = false): void {
-    if (!this.newPatientInfo) this.newPatientInfo = {};
-    if (!this.newPatientInfoConfirmation) this.newPatientInfoConfirmation = {};
-    
-    this.newPatientInfo[field] = value;
-    this.newPatientInfoConfirmation[`${field}Confirmed`] = isConfirmed;
-    console.log(`[ConversationState] Updated newPatientInfo.${field}:`, value, 'confirmed:', isConfirmed);
+    (this.newPatientInfo as any)[field] = value; // eslint-disable-line @typescript-eslint/no-explicit-any
+    (this.newPatientInfoConfirmation as any)[field] = isConfirmed; // eslint-disable-line @typescript-eslint/no-explicit-any
+    console.log(`[ConversationState] Updated newPatientDetail:`, { field, value, isConfirmed });
   }
 
   public updateBookingDetailsPresentedForConfirmation(status: boolean): void {
     this.bookingDetailsPresentedForConfirmation = status;
-    console.log(`[ConversationState] Updated booking details confirmation status:`, status);
+    console.log(`[ConversationState] Updated bookingDetailsPresentedForConfirmation: ${this.bookingDetailsPresentedForConfirmation}`);
   }
 
   public updateBookedAppointmentDetails(details: Record<string, unknown> | null): void {
