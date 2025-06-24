@@ -121,6 +121,20 @@ export async function processFindAppointmentType(
           userRequestForApptType = state.initialUserUtterances[0]; // Fallback to initial full request
       }
       addLogEntry({ event: "USING_STORED_REQUEST_FOR_APPT_TYPE_MATCH", source: "findAppointmentTypeHandler", details: { requestUsed: userRequestForApptType } }, vapiCallId);
+  
+      if (!userRequestForApptType || userRequestForApptType.trim() === "") {
+          addLogEntry({ event: "CRITICAL_MISSING_SERVICE_REQUEST_CONTEXT", source: "findAppointmentTypeHandler", details: { currentState: state.getStateSnapshot() } }, vapiCallId);
+          // This indicates a flaw in earlier state setting or LLM behavior.
+          state.setCurrentStage("error_missing_service_context_for_appt_type");
+          return { 
+              success: false,
+              outputData: { 
+                  matchFound: false,
+                  messageForAssistant: "I seem to have lost track of what service you were looking for. Could you please tell me again what type of appointment you need?"
+              }, 
+              error: "MISSING_SERVICE_REQUEST_CONTEXT" 
+          };
+      }
   }
 
   // 1. Fetch appointment types for the practice from DB
@@ -164,55 +178,86 @@ export async function processFindAppointmentType(
     return { success: true, outputData: { matchFound: false, messageForAssistant: `I couldn't find a specific service for "${userRequestForApptType}". Could you describe it a bit differently, or would you like to hear some common services we offer?` }, error: "NO_MATCH_FOUND" };
   }
 
-  const matchedDbEntry = dbTypesForMatcher.find(t => t.id === llmMatchResult.laineAppointmentTypeId);
-  if (!matchedDbEntry) {
-    state.setCurrentStage("appointment_type_match_error_internal");
-    addLogEntry({ event: "AI_HANDLER_ERROR", source: "findAppointmentTypeHandler.processFindAppointmentType", details: { error: "LLM matched an ID not in our DB list.", matchedId: llmMatchResult.laineAppointmentTypeId } }, vapiCallId);
-    return { success: false, outputData: { matchFound: false }, error: "INTERNAL_MATCH_ERROR" };
+  // 3. Fetch full details for the matched Laine AppointmentType
+  const matchedLaineApptId = llmMatchResult.laineAppointmentTypeId;
+  const fullMatchedApptType = await prisma.appointmentType.findUnique({
+      where: { id: matchedLaineApptId },
+  });
+
+  if (!fullMatchedApptType) {
+      addLogEntry({ event: "AI_HANDLER_ERROR", source: "findAppointmentTypeHandler", details: { error: "LLM matched Laine ID not found in DB.", matchedId: matchedLaineApptId } }, vapiCallId);
+      state.setCurrentStage("appointment_type_internal_error");
+      return { success: false, outputData: { matchFound: false, messageForAssistant: "I had trouble looking up the details for that service. Could you try again?" }, error: "INTERNAL_DB_MATCH_ERROR" };
   }
 
-  // 3. Find associated NexHealth Provider ID(s)
-  // Logic similar to scripts/debug-appointment-type-providers.js
+  if (!fullMatchedApptType.nexhealthAppointmentTypeId) {
+      addLogEntry({ event: "AI_HANDLER_ERROR", source: "findAppointmentTypeHandler", details: { error: "Matched Laine AppointmentType is missing NexHealth ID.", laineApptId: matchedLaineApptId, apptName: fullMatchedApptType.name } }, vapiCallId);
+      state.setCurrentStage("appointment_type_config_error_nexhealth_id");
+      return { success: false, outputData: { matchFound: true, matchedAppointmentName: fullMatchedApptType.name, messageForAssistant: `The service "${fullMatchedApptType.name}" isn't fully configured for online booking. Please contact the office.` }, error: "MISSING_NEXHEALTH_APPT_ID_CONFIG" };
+  }
+
+  // 4. Find associated active NexHealth Provider ID(s)
+  // Step 1: Find which SavedProvider entities are linked to this Laine Appointment Type
   const providerAcceptances = await prisma.providerAcceptedAppointmentType.findMany({
+    where: { appointmentTypeId: fullMatchedApptType.id },
+    select: { savedProviderId: true }
+  });
+
+  if (providerAcceptances.length === 0) {
+    // This case is handled by the next check returning no provider IDs.
+  }
+
+  const savedProviderIds = providerAcceptances.map(pa => pa.savedProviderId);
+
+  // Step 2: From those SavedProviders, find the ones that are active and have a valid NexHealth Provider ID.
+  const activeProviders = await prisma.savedProvider.findMany({
     where: {
-      appointmentTypeId: matchedDbEntry.id, // Use Laine CUID
-      savedProvider: {
-        isActive: true, // Only active providers
+        id: { in: savedProviderIds },
+        isActive: true,
         provider: {
-            nexhealthProviderId: { not: "" } // Ensure provider has a NexHealth ID
+            nexhealthProviderId: {
+                not: ''
+            }
         }
-      }
     },
-    include: {
-      savedProvider: {
-        include: {
-          provider: {
-            select: { nexhealthProviderId: true }
-          }
+    select: {
+        provider: {
+            select: {
+                nexhealthProviderId: true
+            }
         }
-      }
     }
   });
 
-  const activeNexhealthProviderIds = providerAcceptances
-    .map(pa => pa.savedProvider.provider.nexhealthProviderId)
-    .filter(id => id != null) as string[];
+
+  const activeNexhealthProviderIds = activeProviders
+      .map(p => p.provider.nexhealthProviderId)
+      .filter(id => id) as string[];
+
 
   if (activeNexhealthProviderIds.length === 0) {
-    state.setCurrentStage("appointment_type_no_provider");
-    addLogEntry({ event: "AI_HANDLER_ERROR", source: "findAppointmentTypeHandler.processFindAppointmentType", details: { error: "No active providers configured for matched appointment type.", matchedType: matchedDbEntry.name } }, vapiCallId);
-    return { success: false, outputData: { matchFound: true, matchedAppointmentName: matchedDbEntry.name }, error: "NO_PROVIDER_FOR_APPOINTMENT_TYPE" };
+      state.setCurrentStage("appointment_type_no_provider_found");
+      addLogEntry({ event: "AI_HANDLER_ERROR", source: "findAppointmentTypeHandler", details: { error: "No active providers with NexHealth IDs found for matched appointment type.", matchedLaineApptId: fullMatchedApptType.id, apptName: fullMatchedApptType.name } }, vapiCallId);
+      return { 
+          success: false, // Or true if we want to inform the user but not treat as hard error for the tool
+          outputData: { 
+              matchFound: true, 
+              matchedAppointmentName: fullMatchedApptType.name,
+              matchedAppointmentDuration: fullMatchedApptType.duration,
+              messageForAssistant: `I found the service "${fullMatchedApptType.name}", but it seems we can't book it online right now as no specific provider is available. Please contact the office for assistance.`
+          }, 
+          error: "NO_PROVIDER_FOR_APPOINTMENT_TYPE" 
+      };
   }
-  
-  const targetNexhealthProviderId = activeNexhealthProviderIds[0]; // Select the first active one for now
+  const targetNexhealthProviderId = activeNexhealthProviderIds[0]; // Take the first one
 
-  // 4. Update ConversationState
-  state.matchedLaineAppointmentTypeId = matchedDbEntry.id;
-  state.matchedNexhealthAppointmentTypeId = matchedDbEntry.nexhealthAppointmentTypeId;
-  state.matchedAppointmentName = matchedDbEntry.name;
-  state.matchedAppointmentDuration = matchedDbEntry.duration;
-  state.targetNexhealthProviderId = targetNexhealthProviderId;
-  state.setCurrentStage("appointment_type_identified");
+  // 5. Update ConversationState
+  state.matchedLaineAppointmentTypeId = fullMatchedApptType.id;
+  state.matchedNexhealthAppointmentTypeId = fullMatchedApptType.nexhealthAppointmentTypeId;
+  state.matchedAppointmentName = fullMatchedApptType.name;
+  state.matchedAppointmentDuration = fullMatchedApptType.duration;
+  state.targetNexhealthProviderId = targetNexhealthProviderId; // CRITICAL
+  state.setCurrentStage("appointment_type_identified_with_provider");
 
   addLogEntry({
     event: "AI_HANDLER_STATE_UPDATED",

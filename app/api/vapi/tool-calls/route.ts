@@ -291,124 +291,82 @@ function extractToolCallArguments(toolCall: VapiIncomingToolCall): Record<string
 }
 
 export async function POST(req: NextRequest) {
+  let vapiCallId = 'unknown-call-id';
   let payload: VapiPayload | undefined;
-  let vapiCallId = 'unknown';
-  
-  try {
-    console.log("--- [ToolCallRoute] START NEW REQUEST ---");
-    
-    payload = await req.json() as VapiPayload;
-    
-    // Ensure payload is properly typed and not undefined
-    if (!payload || !payload.message || !payload.message.call) {
-      throw new Error("Invalid VAPI payload structure");
-    }
-    
-    // Get VAPI call ID early for debug logging
-    vapiCallId = payload.message.call.id;
-    
-    // Debug Logging: Start of request
-    addLogEntry({
-      event: "VAPI_REQUEST_RECEIVED",
-      source: "ToolCallRoute:POST",
-      details: {
-        type: payload.message.type,
-        toolCallsCount: payload.message.toolCallList?.length || 0,
-        firstToolName: payload.message.toolCallList?.[0]?.function?.name || payload.message.toolCallList?.[0]?.name
-      }
-    }, vapiCallId);
 
-    // Debug Logging: Raw VAPI payload
+  try {
+    payload = await req.json() as VapiPayload;
+    vapiCallId = payload.message?.call?.id || 'unknown-call-id';
+
     addLogEntry({
       event: "RAW_VAPI_PAYLOAD",
       source: "ToolCallRoute:POST",
       details: { payloadString: JSON.stringify(payload, null, 2) }
     }, vapiCallId);
-    
-    const { message } = payload;
-    const toolCallList = message.toolCallList || message.toolCalls || [];
-    
-    let assistantId: string;
-    let practice: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    
-    try {
-      assistantId = extractAssistantId(payload);
-      practice = await findPracticeByAssistantId(assistantId);
-      
-      if (!practice) {
-        throw new Error(`No practice found for assistant ID/name: ${assistantId}`);
-      }
-    } catch (error) {
-      console.error("Assistant ID extraction or practice lookup failed:", error);
-      
-      const errorResults = toolCallList.map((toolCall: VapiIncomingToolCall) => {
-        const toolCallId = extractToolCallId(toolCall);
-        const resultObject = {
-          tool_output_data: {
-            success: false,
-            error_code: "ASSISTANT_ID_OR_PRACTICE_ERROR", 
-            details: "Assistant ID extraction or practice lookup failed"
-          },
-          current_conversation_state_snapshot: "{}" // Empty state for errors
-        };
-        
-        return {
-          toolCallId,
-          result: JSON.stringify(resultObject)
-        };
-      });
-      
-      addLogEntry({
-        event: "CRITICAL_ERROR_ASSISTANT_PRACTICE_LOOKUP",
+
+    const incomingToolCalls = payload.message.toolCallList || payload.message.toolCalls || [];
+    addLogEntry({
+        event: "INCOMING_VAPI_TOOL_CALLS_BATCH",
         source: "ToolCallRoute:POST",
-        details: { error: error instanceof Error ? error.message : "Unknown error" }
-      }, vapiCallId);
-      
-      return NextResponse.json({ results: errorResults });
+        details: {
+            count: incomingToolCalls.length,
+            calls: incomingToolCalls.map(tc => ({
+                id: extractToolCallId(tc),
+                name: extractToolName(tc),
+                argsString: JSON.stringify(extractToolCallArguments(tc))
+            }))
+        }
+    }, vapiCallId);
+
+    // VAPI-COMPLIANT: Use assistant identification for multi-tenancy support
+    const assistantId = extractAssistantId(payload);
+    const practice = await findPracticeByAssistantId(assistantId);
+    
+    if (!practice) {
+      throw new Error(`No practice found for assistant ID/name: ${assistantId}`);
     }
     
     // Initialize ConversationState
     const state = new ConversationState(vapiCallId, practice.id, assistantId);
     
-    // Debug Logging: Conversation state initialization
-    addLogEntry({
-      event: "CONVERSATION_STATE_INIT",
-      source: "ToolCallRoute:POST",
-      details: { initialState: state.getStateSnapshot() }
-    }, vapiCallId);
-    
     // Process all tool calls
     const results = [];
     
-    console.log(`Processing ${toolCallList.length} tool call(s)`);
+    console.log(`Processing ${incomingToolCalls.length} tool call(s)`);
     
-    for (const toolCall of toolCallList) {
+    for (const toolCall of incomingToolCalls) {
       const toolName = extractToolName(toolCall);
       const toolCallId = extractToolCallId(toolCall);
       const extractedArgs = extractToolCallArguments(toolCall);
 
-      // Restore ConversationState from VAPI if provided
+      // Restore state if available
       if (extractedArgs.conversationState && typeof extractedArgs.conversationState === 'string') {
         try {
           const parsedStateSnapshot = JSON.parse(extractedArgs.conversationState as string);
           state.restoreFromSnapshot(parsedStateSnapshot);
-          
           addLogEntry({
             event: "CONVERSATION_STATE_RESTORE_ATTEMPT",
-            source: "ToolCallRoute:POST",
+            source: "ToolCallRoute:Loop",
             details: {
-              snapshotStringReceived: extractedArgs.conversationState,
+              toolName,
+              toolCallId,
+              receivedStateString: extractedArgs.conversationState,
               parsedSnapshot: parsedStateSnapshot,
-              stateAfterRestore: state.getStateSnapshot()
+              stateAfterRestore: state.getStateSnapshot(),
             }
           }, vapiCallId);
         } catch (parseError) {
-          console.error(`[ToolCallRoute] Error parsing conversationState string:`, parseError);
           addLogEntry({
             event: "CONVERSATION_STATE_RESTORE_ERROR",
-            source: "ToolCallRoute:POST",
-            details: { error: parseError instanceof Error ? parseError.message : "Unknown error" }
+            source: "ToolCallRoute:Loop",
+            details: {
+              toolName,
+              toolCallId,
+              error: parseError instanceof Error ? parseError.message : "JSON parse failed",
+              receivedStateString: extractedArgs.conversationState
+            }
           }, vapiCallId);
+          // Continue with default state if parsing fails
         }
       }
 
@@ -556,8 +514,8 @@ export async function POST(req: NextRequest) {
             const practiceInfoForOnboarding = {
                 id: practice.id,
                 name: practice.name || "the dental office",
-                nexhealthSubdomain: practice.nexhealthSubdomain, // CRITICAL
-                nexhealthLocationId: practice.nexhealthLocationId, // CRITICAL
+                nexhealthLocationId: practice.nexhealthLocationId || '',
+                nexhealthSubdomain: practice.nexhealthSubdomain || ''
             };
 
             if (!practiceInfoForOnboarding.nexhealthSubdomain || !practiceInfoForOnboarding.nexhealthLocationId) {

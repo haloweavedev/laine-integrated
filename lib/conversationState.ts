@@ -180,6 +180,31 @@ export class ConversationState {
     console.log(`[ConversationState] Updated nexhealthPatientId: ${this.nexhealthPatientId}`);
   }
 
+  public setMatchedLaineAppointmentTypeId(id: string | null): void {
+    this.matchedLaineAppointmentTypeId = id;
+    console.log(`[ConversationState] Updated matchedLaineAppointmentTypeId: ${this.matchedLaineAppointmentTypeId}`);
+  }
+
+  public setMatchedNexhealthAppointmentTypeId(id: string | null): void {
+    this.matchedNexhealthAppointmentTypeId = id;
+    console.log(`[ConversationState] Updated matchedNexhealthAppointmentTypeId: ${this.matchedNexhealthAppointmentTypeId}`);
+  }
+
+  public setMatchedAppointmentName(name: string | null): void {
+    this.matchedAppointmentName = name;
+    console.log(`[ConversationState] Updated matchedAppointmentName: ${this.matchedAppointmentName}`);
+  }
+
+  public setMatchedAppointmentDuration(duration: number | null): void {
+    this.matchedAppointmentDuration = duration;
+    console.log(`[ConversationState] Updated matchedAppointmentDuration: ${this.matchedAppointmentDuration}`);
+  }
+
+  public setTargetNexhealthProviderId(id: string | null): void {
+    this.targetNexhealthProviderId = id;
+    console.log(`[ConversationState] Updated targetNexhealthProviderId: ${this.targetNexhealthProviderId}`);
+  }
+
   // Compatibility methods for existing tools (temporary, will be removed in later phases)
   public updateIntent(intent: string): void {
     this.determinedIntent = intent;
