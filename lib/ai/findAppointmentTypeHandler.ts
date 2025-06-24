@@ -97,7 +97,31 @@ export async function processFindAppointmentType(
     details: { args, practiceId: practiceInfo.id, initialState: state.getStateSnapshot() }
   }, vapiCallId);
 
-  const userRequest = args.userRawRequest;
+  let userRequestForApptType = args.userRawRequest; // This is what VAPI's LLM thinks is the request for the appt type
+
+  // If the current stage indicates we just asked for patient status,
+  // the userRawRequest might be the answer to that.
+  // We should use the original reasonForVisit or initialUserUtterances for matching the appointment type.
+  if (state.currentStage === "awaiting_patient_status_clarification" || state.currentStage === "intent_analyzed:BOOKING_UNKNOWN_PATIENT_STATUS") {
+      const patientStatusAnswer = args.userRawRequest.toLowerCase();
+      if (patientStatusAnswer.includes("new") || patientStatusAnswer.includes("first time") || patientStatusAnswer.includes("first thing")) {
+          state.isNewPatientCandidate = true;
+          state.determinedIntent = "BOOKING_NEW_PATIENT"; // Upgrade intent
+          addLogEntry({ event: "PATIENT_STATUS_CLARIFIED_NEW_IN_FIND_APPT", source: "findAppointmentTypeHandler", details: { answer: args.userRawRequest } }, vapiCallId);
+      } else if (patientStatusAnswer.includes("existing") || patientStatusAnswer.includes("been there before") || patientStatusAnswer.includes("returning")) {
+          state.isNewPatientCandidate = false;
+          state.determinedIntent = "BOOKING_EXISTING_PATIENT"; // Upgrade intent
+          addLogEntry({ event: "PATIENT_STATUS_CLARIFIED_EXISTING_IN_FIND_APPT", source: "findAppointmentTypeHandler", details: { answer: args.userRawRequest } }, vapiCallId);
+      }
+
+      // IMPORTANT: Use the original reason/request for matching the appointment type, not the "new/existing" answer.
+      if (state.reasonForVisit) {
+          userRequestForApptType = state.reasonForVisit;
+      } else if (state.initialUserUtterances && state.initialUserUtterances.length > 0) {
+          userRequestForApptType = state.initialUserUtterances[0]; // Fallback to initial full request
+      }
+      addLogEntry({ event: "USING_STORED_REQUEST_FOR_APPT_TYPE_MATCH", source: "findAppointmentTypeHandler", details: { requestUsed: userRequestForApptType } }, vapiCallId);
+  }
 
   // 1. Fetch appointment types for the practice from DB
   const practiceAppointmentTypes = await prisma.appointmentType.findMany({
@@ -132,12 +156,12 @@ export async function processFindAppointmentType(
   }
 
   // 2. Perform LLM Matching
-  const llmMatchResult = await performLLMMatch(userRequest, dbTypesForMatcher, vapiCallId);
+  const llmMatchResult = await performLLMMatch(userRequestForApptType, dbTypesForMatcher, vapiCallId);
 
   if (!llmMatchResult.matched || !llmMatchResult.laineAppointmentTypeId) {
     state.setCurrentStage("appointment_type_match_failed");
     addLogEntry({ event: "AI_HANDLER_INFO", source: "findAppointmentTypeHandler.processFindAppointmentType", details: { info: "LLM did not find a confident match.", llmReasoning: llmMatchResult.reasoning } }, vapiCallId);
-    return { success: true, outputData: { matchFound: false, messageForAssistant: `I couldn't find a specific service for "${userRequest}". Could you describe it a bit differently, or would you like to hear some common services we offer?` }, error: "NO_MATCH_FOUND" };
+    return { success: true, outputData: { matchFound: false, messageForAssistant: `I couldn't find a specific service for "${userRequestForApptType}". Could you describe it a bit differently, or would you like to hear some common services we offer?` }, error: "NO_MATCH_FOUND" };
   }
 
   const matchedDbEntry = dbTypesForMatcher.find(t => t.id === llmMatchResult.laineAppointmentTypeId);

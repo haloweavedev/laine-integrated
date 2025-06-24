@@ -8,6 +8,13 @@ interface LogData {
   logs: DebugLogEntry[];
 }
 
+interface TranscriptMessage {
+  role: 'user' | 'bot' | 'system' | 'assistant';
+  content?: string;
+  message?: string; // Fallback for some formats
+  duration?: number;
+}
+
 export default function ToolCallLogPage() {
   const [logData, setLogData] = useState<LogData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -237,6 +244,48 @@ export default function ToolCallLogPage() {
                     </p>
                   )}
                   
+                  {entry.event === 'RAW_VAPI_PAYLOAD' && entry.details?.payloadString && (
+                    (() => {
+                      try {
+                        const payload = JSON.parse(entry.details.payloadString);
+                        const messages = payload?.message?.artifact?.messagesOpenAIFormatted || payload?.message?.artifact?.messages;
+                        if (Array.isArray(messages) && messages.length > 0) {
+                          return (
+                            <div style={{ marginTop: '10px', borderTop: '1px dashed #ccc', paddingTop: '10px' }}>
+                              <strong style={{ fontFamily: 'Arial, sans-serif', color: '#007bff' }}>Conversation Transcript (from RAW_VAPI_PAYLOAD):</strong>
+                              <pre style={{
+                                backgroundColor: '#e9f5ff',
+                                padding: '10px',
+                                borderRadius: '4px',
+                                border: '1px solid #bee5eb',
+                                fontSize: '12px',
+                                lineHeight: '1.5',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word'
+                              }}>
+                                {messages.map((msg: TranscriptMessage, msgIdx: number) => (
+                                  <React.Fragment key={msgIdx}>
+                                    {msgIdx > 0 && <hr style={{border:0, borderTop:'1px dotted #ddd', margin:'5px 0'}}/>}
+                                    <div style={{ marginBottom: '5px' }}>
+                                      <span style={{ fontWeight: 'bold', color: msg.role === 'user' ? 'green' : 'purple' }}>
+                                        {msg.role === 'bot' ? 'Laine' : msg.role}:
+                                      </span>{' '}
+                                      {msg.content || msg.message}
+                                      {msg.duration && <span style={{fontSize: '0.8em', color: '#777'}}> ({ (msg.duration / 1000).toFixed(1)}s)</span>}
+                                    </div>
+                                  </React.Fragment>
+                                ))}
+                              </pre>
+                            </div>
+                          );
+                        }
+                      } catch (e) {
+                        console.warn("Could not parse payloadString for transcript", e);
+                      }
+                      return null;
+                    })()
+                  )}
+
                   <div>
                     <strong style={{ fontFamily: 'Arial, sans-serif' }}>Details:</strong>
                     <pre style={{ 

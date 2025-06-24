@@ -45,9 +45,11 @@ export async function processGetIntent(
   // --- Simple Keyword-Based Intent & Reason Parsing ---
   // This is a starting point. Can be enhanced with more sophisticated NLP/LLM later.
 
-  // Check for new patient indicators
+  // Check for new/existing patient indicators first
   if (utterance.includes("new patient") || utterance.includes("first time") || utterance.includes("never been")) {
     isNewPatientCandidate = true;
+  } else if (utterance.includes("existing patient") || utterance.includes("been there before") || utterance.includes("returning patient")) {
+    isNewPatientCandidate = false; // Explicitly existing
   }
 
   // Check for booking-related keywords
@@ -55,12 +57,10 @@ export async function processGetIntent(
   if (bookingKeywords.some(kw => utterance.includes(kw))) {
     if (isNewPatientCandidate === true) {
       determinedIntent = "BOOKING_NEW_PATIENT";
-    } else if (utterance.includes("existing patient") || utterance.includes("been there before")) {
+    } else if (isNewPatientCandidate === false) {
       determinedIntent = "BOOKING_EXISTING_PATIENT";
-      isNewPatientCandidate = false; // Explicitly existing
     } else {
       determinedIntent = "BOOKING_UNKNOWN_PATIENT_STATUS";
-      // isNewPatientCandidate remains null or its current value if not explicitly stated
     }
   } else if (utterance.includes("reschedule") || utterance.includes("change my appointment")) {
     determinedIntent = "RESCHEDULE_APPOINTMENT";
