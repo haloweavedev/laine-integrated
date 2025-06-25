@@ -207,6 +207,10 @@ model CallLog {
   slotsOfferedToPatient     Json?   // JSON array of {time: string, operatoryId: number} for offered slots
   lastToolConversationState Json?   // Store the full JSON state passed to/from tools
 
+  // Enhanced conversation tracking fields
+  patientStatus                 String? // Status of the patient (new, existing, unknown)
+  originalPatientRequestForType String? // The original patient request that led to appointment type identification
+
   // Enhanced fields as per refactoring plan
   assistantId         String? // VAPI assistant ID
   endedReason         String? // From end-of-call-report

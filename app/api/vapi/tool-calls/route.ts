@@ -4,6 +4,7 @@ import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage } fr
 import { normalizeDateWithAI, generateSlotResponseMessage } from "@/lib/ai/slotHelper";
 import { getNexhealthAvailableSlots } from "@/lib/nexhealth";
 import { DateTime } from "luxon";
+import { toZonedTime, format } from 'date-fns-tz';
 import type { 
   ServerMessageToolCallsPayload, 
   VapiToolResult,
@@ -226,7 +227,7 @@ export async function POST(request: NextRequest) {
 
               console.log(`[Tool Handler] Successfully found appointment type: ${matchedAppointment.name}. Sending to VAPI.`);
 
-              // Update CallLog with successful appointment type identification (now it definitely exists)
+              // Update CallLog with successful appointment type identification using new schema fields
               try {
                 console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId} with appointment type: ${matchedAppointment.name}`);
                 await prisma.callLog.update({
@@ -237,11 +238,15 @@ export async function POST(request: NextRequest) {
                     lastAppointmentDuration: matchedAppointment.duration,
                     detectedIntent: patientRequest,
                     callStatus: "APPOINTMENT_TYPE_IDENTIFIED",
+                    patientStatus: patientStatus || 'unknown',
+                    originalPatientRequestForType: patientRequest,
+                    lastToolConversationState: JSON.stringify(conversationState),
                     updatedAt: new Date(),
                   }
                 });
+                console.log(`[DB Log] Successfully updated CallLog with appointment type and enhanced fields`);
               } catch (error) {
-                console.error(`[DB Log] Error updating CallLog:`, error);
+                console.error(`[DB Log] Error updating CallLog with appointment type:`, error);
                 // Don't let CallLog errors stop the tool response
               }
             } else {
@@ -260,7 +265,7 @@ export async function POST(request: NextRequest) {
             };
             console.log(`[Tool Handler] No appointment type match found for query: "${patientRequest}".`);
 
-            // Update CallLog for no match case (now it definitely exists)
+            // Update CallLog for no match case using new schema fields
             try {
               console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId}, no appointment type match.`);
               await prisma.callLog.update({
@@ -268,11 +273,14 @@ export async function POST(request: NextRequest) {
                 data: {
                   detectedIntent: patientRequest,
                   callStatus: "APPOINTMENT_TYPE_NOT_FOUND",
+                  patientStatus: patientStatus || 'unknown',
+                  originalPatientRequestForType: patientRequest,
                   updatedAt: new Date(),
                 }
               });
+              console.log(`[DB Log] Successfully updated CallLog for no match case with enhanced fields`);
             } catch (error) {
-              console.error(`[DB Log] Error updating CallLog:`, error);
+              console.error(`[DB Log] Error updating CallLog for no match:`, error);
               // Don't let CallLog errors stop the tool response
             }
           }
@@ -361,7 +369,7 @@ export async function POST(request: NextRequest) {
           if (!normalizedDate) {
             toolResponse = {
               toolCallId: toolId!,
-              error: `I couldn't understand the date "${requestedDate}". Could you please specify a clearer date?`
+              result: `I couldn't understand the date "${requestedDate}". Could you please specify a clearer date?`
             };
             break;
           }
@@ -395,7 +403,7 @@ export async function POST(request: NextRequest) {
           }
 
           const providerNexHealthIds = providerData.map(pd => pd.savedProvider.provider.nexhealthProviderId);
-          console.log(`[VAPI Tool Handler] Found ${providerNexHealthIds.length} providers for appointment type: ${providerNexHealthIds}`);
+          console.log(`[VAPI Tool Handler] Found ${providerNexHealthIds.length} providers for appointment type: ${lastAppointmentTypeId}`);
 
           // Call NexHealth API for slots
           const slotsData = await getNexhealthAvailableSlots(
@@ -409,7 +417,7 @@ export async function POST(request: NextRequest) {
 
           console.log(`[Slot Processing] Raw slots received from NexHealth for ${normalizedDate}:`, slotsData.length, 'slot groups');
           
-          // Process and filter slots with detailed logging
+          // Process and filter slots with extremely detailed logging
           const allSlots: Array<{ time: string; operatoryId?: number; providerId: number }> = [];
           
           for (const slotGroup of slotsData) {
@@ -425,64 +433,115 @@ export async function POST(request: NextRequest) {
 
           console.log(`[Slot Processing] Total raw slots: ${allSlots.length}`);
 
-          // Filter slots for lunch break and time preferences with detailed logging
+          // Enhanced slot filtering with extremely detailed logging
           const practiceTimezone = practice.timezone || 'America/Chicago';
+          const appointmentDurationMinutes = lastAppointmentDuration;
           const filteredSlots: Array<{ time: string; operatoryId?: number; providerId: number }> = [];
 
-          for (const slot of allSlots) {
-            const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
-            const slotLocalTime = slotDateTime.toFormat('h:mm a');
-            const slotHour = slotDateTime.hour;
-            const slotMinute = slotDateTime.minute;
-            
-            console.log(`[Slot Filter] Evaluating slot ${slot.time} (${slotLocalTime} local time)`);
-            
-            // Check for lunch break (1:00 PM - 2:00 PM)
-            const slotStartTime = slotHour * 60 + slotMinute; // Convert to minutes since midnight
-            const slotEndTime = slotStartTime + lastAppointmentDuration;
-            const lunchStart = 13 * 60; // 1:00 PM in minutes
-            const lunchEnd = 14 * 60; // 2:00 PM in minutes
-            
-            // Convert end time back to human readable for logging
-            const endHour = Math.floor(slotEndTime / 60);
-            const endMinute = slotEndTime % 60;
-            const endTimeFormatted = DateTime.fromObject({ 
-              hour: endHour, 
-              minute: endMinute 
-            }).toFormat('h:mm a');
-            
-            // Skip if slot starts during lunch or extends into lunch
-            if ((slotStartTime >= lunchStart && slotStartTime < lunchEnd) || 
-                (slotEndTime > lunchStart && slotEndTime <= lunchEnd) ||
-                (slotStartTime < lunchStart && slotEndTime > lunchEnd)) {
-              console.log(`[Slot Filter] Slot ${slotLocalTime} discarded: overlaps with 1-2 PM lunch (ends ${endTimeFormatted})`);
+          console.log(`[Slot Filter] ===== BEGINNING DETAILED SLOT FILTERING =====`);
+          console.log(`[Slot Filter] Practice timezone: ${practiceTimezone}`);
+          console.log(`[Slot Filter] Appointment duration: ${appointmentDurationMinutes} minutes`);
+          console.log(`[Slot Filter] Time preference: ${timePreference || 'none'}`);
+          console.log(`[Slot Filter] Lunch break: 1:00 PM - 2:00 PM local time`);
+
+          for (let i = 0; i < allSlots.length; i++) {
+            const slot = allSlots[i];
+            console.log(`[Slot Filter] --- Evaluating Raw Slot ${i + 1}/${allSlots.length} ---`);
+            console.log(`[Slot Filter] Raw NexHealth Time: ${slot.time}`);
+
+            const localStartTime = toZonedTime(new Date(slot.time), practiceTimezone);
+            const calculatedLocalEndTime = new Date(localStartTime.getTime() + appointmentDurationMinutes * 60000);
+
+            console.log(`[Slot Filter] Converted to Practice Local Time (${practiceTimezone}):`);
+            console.log(`[Slot Filter] Local Start: ${format(localStartTime, 'yyyy-MM-dd HH:mm:ss zzz', { timeZone: practiceTimezone })}`);
+            console.log(`[Slot Filter] Calculated Local End (Start + ${appointmentDurationMinutes}min): ${format(calculatedLocalEndTime, 'yyyy-MM-dd HH:mm:ss zzz', { timeZone: practiceTimezone })}`);
+
+            // Lunch break check (13:00 to 14:00 local time)
+            const lunchStartLocalHour = 13;
+            const lunchEndLocalHour = 14;
+            const slotStartLocalHour = localStartTime.getHours();
+            const slotStartLocalMinutes = localStartTime.getMinutes();
+            const slotCalculatedEndLocalHour = calculatedLocalEndTime.getHours();
+            const slotCalculatedEndLocalMinutes = calculatedLocalEndTime.getMinutes();
+
+            console.log(`[Slot Filter] Lunch Break Analysis:`);
+            console.log(`[Slot Filter] Slot starts at: ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} local`);
+            console.log(`[Slot Filter] Slot ends at: ${slotCalculatedEndLocalHour}:${slotCalculatedEndLocalMinutes.toString().padStart(2, '0')} local`);
+            console.log(`[Slot Filter] Lunch break: ${lunchStartLocalHour}:00 - ${lunchEndLocalHour}:00 local`);
+
+            let skipDueToLunch = false;
+            let lunchSkipReason = '';
+
+            // Check if slot STARTS within lunch
+            if (slotStartLocalHour >= lunchStartLocalHour && slotStartLocalHour < lunchEndLocalHour) {
+              skipDueToLunch = true;
+              lunchSkipReason = `Slot starts at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} during lunch break (1 PM - 2 PM local)`;
+            }
+            // Check if slot ENDS within lunch (but doesn't start in it)
+            else if (slotCalculatedEndLocalHour >= lunchStartLocalHour && slotCalculatedEndLocalHour < lunchEndLocalHour) {
+              // If it ends exactly at 1pm (13:00), it's okay. If it ends after 1pm but before 2pm, it's not.
+              if (!(slotCalculatedEndLocalHour === lunchStartLocalHour && slotCalculatedEndLocalMinutes === 0)) {
+                skipDueToLunch = true;
+                lunchSkipReason = `Slot ends at ${slotCalculatedEndLocalHour}:${slotCalculatedEndLocalMinutes.toString().padStart(2, '0')} during lunch break (1 PM - 2 PM local)`;
+              }
+            }
+            // Check if slot SPANS the entire lunch break
+            else if (slotStartLocalHour < lunchStartLocalHour && 
+                     (slotCalculatedEndLocalHour > lunchEndLocalHour || 
+                      (slotCalculatedEndLocalHour === lunchEndLocalHour && slotCalculatedEndLocalMinutes > 0))) {
+              skipDueToLunch = true;
+              lunchSkipReason = `Slot spans entire lunch break (1 PM - 2 PM local). Starts ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')}, Ends ${slotCalculatedEndLocalHour}:${slotCalculatedEndLocalMinutes.toString().padStart(2, '0')}`;
+            }
+
+            if (skipDueToLunch) {
+              console.log(`[Slot Filter] DISCARDED: ${lunchSkipReason}`);
+              console.log(`[Slot Filter] --- End Slot Evaluation (REJECTED) ---`);
               continue;
+            } else {
+              console.log(`[Slot Filter] KEPT: Slot at ${format(localStartTime, 'HH:mm aa', { timeZone: practiceTimezone })} passes lunch break filter`);
             }
 
             // Apply time preference filter if provided
             if (timePreference) {
               const preference = timePreference.toLowerCase();
               let skipForTimePreference = false;
+              let timeSkipReason = '';
               
-              if (preference.includes('morning') && slotHour >= 12) {
-                console.log(`[Slot Filter] Slot ${slotLocalTime} discarded: time preference is morning, but slot is at ${slotHour}:${slotMinute.toString().padStart(2, '0')}`);
+              console.log(`[Slot Filter] Time Preference Analysis:`);
+              console.log(`[Slot Filter] User preference: "${timePreference}"`);
+              console.log(`[Slot Filter] Slot time: ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')}`);
+              
+              if (preference.includes('morning') && slotStartLocalHour >= 12) {
                 skipForTimePreference = true;
+                timeSkipReason = `Time preference is morning, but slot is at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} (afternoon)`;
               }
-              if (preference.includes('afternoon') && slotHour < 12) {
-                console.log(`[Slot Filter] Slot ${slotLocalTime} discarded: time preference is afternoon, but slot is at ${slotHour}:${slotMinute.toString().padStart(2, '0')}`);
+              if (preference.includes('afternoon') && slotStartLocalHour < 12) {
                 skipForTimePreference = true;
+                timeSkipReason = `Time preference is afternoon, but slot is at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} (morning)`;
               }
-              // Add more time preference logic as needed
+              // Handle specific time mentions like "11:00 AM", "11 AM", "after 3 PM", etc.
+              if (preference.includes('11') && preference.includes('am')) {
+                if (slotStartLocalHour !== 11 || slotStartLocalMinutes !== 0) {
+                  skipForTimePreference = true;
+                  timeSkipReason = `Time preference is 11:00 AM, but slot is at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')}`;
+                }
+              }
               
               if (skipForTimePreference) {
+                console.log(`[Slot Filter] DISCARDED: ${timeSkipReason}`);
+                console.log(`[Slot Filter] --- End Slot Evaluation (REJECTED) ---`);
                 continue;
+              } else {
+                console.log(`[Slot Filter] KEPT: Slot passes time preference filter`);
               }
             }
 
-            console.log(`[Slot Filter] Slot ${slotLocalTime} kept: passes all filters`);
+            console.log(`[Slot Filter] FINAL RESULT: Slot at ${format(localStartTime, 'HH:mm aa', { timeZone: practiceTimezone })} ACCEPTED`);
             filteredSlots.push(slot);
+            console.log(`[Slot Filter] --- End Slot Evaluation (ACCEPTED) ---`);
           }
 
+          console.log(`[Slot Filter] ===== SLOT FILTERING COMPLETE =====`);
           console.log(`[Slot Filter] Final filtered slots: ${filteredSlots.length} out of ${allSlots.length} total`);
 
           // Format slots for presentation (limit to 3)
@@ -533,21 +592,30 @@ export async function POST(request: NextRequest) {
 
           console.log(`[VAPI Tool Handler] Successfully checked slots for ${lastAppointmentTypeName} on ${normalizedDate}. Found ${filteredSlots.length} available slots.`);
 
-          // Update CallLog with enhanced slot information (using available fields from schema)
+          // Update CallLog with enhanced slot information using new schema fields
           try {
+            console.log(`[DB Log] Updating CallLog for slot check with enhanced fields...`);
             await prisma.callLog.update({
               where: { vapiCallId: callId },
               data: {
-                // Use existing fields from schema - the new slot tracking fields will be available after migration
                 callStatus: "SLOTS_CHECKED",
+                requestedDateForSlots: requestedDate,
+                normalizedDateForSlots: normalizedDate,
+                timePreferenceForSlots: timePreference,
+                slotsOfferedToPatient: filteredSlots.slice(0, 3).map((slot, index) => ({
+                  time: formattedSlots[index],
+                  operatoryId: slot.operatoryId,
+                  providerId: slot.providerId
+                })),
+                lastToolConversationState: JSON.stringify(updatedConversationState),
                 updatedAt: new Date(),
               }
             });
-            console.log(`[DB Log] Updated CallLog with slot check status for vapiCallId: ${callId}`);
-            console.log(`[DB Log] Note: Enhanced slot tracking fields will be available after running database migration`);
-            console.log(`[DB Log] Slot data would be: requestedDate=${requestedDate}, normalizedDate=${normalizedDate}, timePreference=${timePreference}, slotsOffered=${filteredSlots.length}`);
+            console.log(`[DB Log] Successfully updated CallLog with enhanced slot tracking fields for vapiCallId: ${callId}`);
+            console.log(`[DB Log] Stored: requestedDate=${requestedDate}, normalizedDate=${normalizedDate}, timePreference=${timePreference}, slotsOffered=${filteredSlots.length}`);
           } catch (error) {
             console.error(`[DB Log] Error updating CallLog for slot check:`, error);
+            // Don't let CallLog errors stop the tool response
           }
 
         } catch (error) {

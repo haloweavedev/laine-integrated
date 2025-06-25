@@ -19,30 +19,54 @@ export async function normalizeDateWithAI(
     
     console.log(`[Date Normalization] Parsing "${dateQuery}" in timezone ${practiceTimezone}, today is ${currentDateForLLM} (${currentDayOfWeekForLLM})`);
 
-    const prompt = `You are a date parsing expert. Your task is to convert a user's spoken date query into a strict 'YYYY-MM-DD' format.
+    const systemPromptContent = `You are a date parsing expert. Your task is to convert a user's spoken date query, which may include speech-to-text (STT) transcription artifacts, into a strict 'YYYY-MM-DD' format.
 
 Current context:
 - Today's date is: ${currentDateForLLM} (${currentDayOfWeekForLLM}).
 - The user is interacting with a dental office in the timezone: ${practiceTimezone}.
 
-Instructions:
+General Date Interpretation Instructions:
 1. Interpret relative dates like "today", "tomorrow", "next Monday", "in two weeks" based on the current date provided.
-2. If a month and day are given (e.g., "December 23rd", "July 4th") without a year, assume the *next upcoming occurrence* of that date. For example:
-   - If today is ${currentDateForLLM} and the user says "December 23rd", and December 23rd of the current year (${currentYear}) has already passed or is today, interpret it as December 23rd of the *next* year. Otherwise, interpret it as December 23rd of the current year.
-   - If today is ${currentDateForLLM} and the user says "January 10th", and January 10th of the current year (${currentYear}) has already passed, interpret it as January 10th of the *next* year.
+2. If a month and day are given (e.g., "December 23rd", "July 4th") without a year, assume the *next upcoming occurrence* of that date.
+   - Example: If today is ${currentDateForLLM} and the user says "December 23rd", and December 23rd of the current year (${currentYear}) has already passed or is today, interpret it as December 23rd of the *next* year. Otherwise, interpret it as December 23rd of the current year.
 3. If a full date with year is provided, use that.
-4. If the query is ambiguous or clearly not a date, respond with the exact string "INVALID_DATE".
-5. Your entire response MUST be ONLY the 'YYYY-MM-DD' string or "INVALID_DATE". Do not add any other words or explanations.
 
-User Query: "${dateQuery}"
+Handling Speech-to-Text (STT) Artifacts for Dates:
+STT systems sometimes misinterpret spoken ordinal numbers. You need to correct these common patterns:
+- "twenty first" might be transcribed as "20 first". You should interpret this as the 21st.
+- "twenty second" might be transcribed as "20 second". You should interpret this as the 22nd.
+- "twenty third" might be transcribed as "20 third". You should interpret this as the 23rd.
+- "twenty fourth" might be transcribed as "20 fourth". You should interpret this as the 24th.
+- "twenty fifth" might be transcribed as "20 fifth". You should interpret this as the 25th.
+- "twenty sixth" might be transcribed as "20 sixth". You should interpret this as the 26th.
+- "twenty seventh" might be transcribed as "20 seventh". You should interpret this as the 27th.
+- "twenty eighth" might be transcribed as "20 eighth". You should interpret this as the 28th.
+- "twenty ninth" might be transcribed as "20 ninth". You should interpret this as the 29th.
+- "thirty first" might be transcribed as "30 first". You should interpret this as the 31st.
+- Similar patterns apply for other numbers (e.g., "thirty second" as "30 second" -> 32nd, but this would be invalid for dates).
+
+STT Artifact Examples (Assume today is ${currentDateForLLM}):
+- User Query: "December 20 third" -> This means December 23rd -> Calculate appropriate year based on current date
+- User Query: "Jan 30 first" -> This means January 31st -> Calculate appropriate year based on current date
+- User Query: "next month on the 20 second" -> This means the 22nd of next month -> Calculate appropriate YYYY-MM-DD
+- User Query: "March 20 fifth" -> This means March 25th -> Calculate appropriate year based on current date
+
+Additional STT Patterns to Handle:
+- Numbers written as digits followed by words: "23 rd", "21 st", "22 nd" should be interpreted as 23rd, 21st, 22nd
+- Mixed formats: "Dec 20 third", "January 30 first", etc.
+
+Output Format (CRITICAL):
+- If the query can be confidently resolved to a valid date after considering STT artifacts, your entire response MUST be ONLY the 'YYYY-MM-DD' string.
+- If the query is ambiguous, nonsensical as a date, or clearly not a date after considering STT artifacts, respond with the exact string "INVALID_DATE".
+- Do NOT add any other words, explanations, or formatting.`;
+
+    const userPromptContent = `User Query: "${dateQuery}"
 
 Normalized Date (YYYY-MM-DD or INVALID_DATE):`;
 
     const messages: CoreMessage[] = [
-      {
-        role: "user",
-        content: prompt
-      }
+      { role: 'system', content: systemPromptContent },
+      { role: 'user', content: userPromptContent }
     ];
 
     const { text } = await generateText({
