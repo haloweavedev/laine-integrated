@@ -13,33 +13,30 @@ export async function normalizeDateWithAI(
   try {
     // Get current date in practice timezone for context
     const now = DateTime.now().setZone(practiceTimezone);
-    const todayFormatted = now.toFormat('yyyy-MM-dd');
-    const currentDayOfWeek = now.toFormat('cccc'); // e.g., "Monday"
+    const currentDateForLLM = now.toFormat('yyyy-MM-dd');
+    const currentDayOfWeekForLLM = now.toFormat('cccc'); // e.g., "Monday"
+    const currentYear = now.year;
     
-    console.log(`[Date Normalization] Parsing "${dateQuery}" in timezone ${practiceTimezone}, today is ${todayFormatted} (${currentDayOfWeek})`);
+    console.log(`[Date Normalization] Parsing "${dateQuery}" in timezone ${practiceTimezone}, today is ${currentDateForLLM} (${currentDayOfWeekForLLM})`);
 
-    const prompt = `You are a date parsing expert. Given a user's date query and the current date, convert the query into a 'YYYY-MM-DD' format.
+    const prompt = `You are a date parsing expert. Your task is to convert a user's spoken date query into a strict 'YYYY-MM-DD' format.
 
-Current Context:
-- Today's date: ${todayFormatted} (${currentDayOfWeek})
-- Practice timezone: ${practiceTimezone}
+Current context:
+- Today's date is: ${currentDateForLLM} (${currentDayOfWeekForLLM}).
+- The user is interacting with a dental office in the timezone: ${practiceTimezone}.
 
-User's date query: "${dateQuery}"
+Instructions:
+1. Interpret relative dates like "today", "tomorrow", "next Monday", "in two weeks" based on the current date provided.
+2. If a month and day are given (e.g., "December 23rd", "July 4th") without a year, assume the *next upcoming occurrence* of that date. For example:
+   - If today is ${currentDateForLLM} and the user says "December 23rd", and December 23rd of the current year (${currentYear}) has already passed or is today, interpret it as December 23rd of the *next* year. Otherwise, interpret it as December 23rd of the current year.
+   - If today is ${currentDateForLLM} and the user says "January 10th", and January 10th of the current year (${currentYear}) has already passed, interpret it as January 10th of the *next* year.
+3. If a full date with year is provided, use that.
+4. If the query is ambiguous or clearly not a date, respond with the exact string "INVALID_DATE".
+5. Your entire response MUST be ONLY the 'YYYY-MM-DD' string or "INVALID_DATE". Do not add any other words or explanations.
 
-Rules:
-1. For relative dates like "tomorrow", "next Tuesday", calculate based on today's date
-2. For specific dates like "July 15th", "December 23rd", assume current year if no year given
-3. For dates that have passed this year, assume next year
-4. Return ONLY the date in YYYY-MM-DD format
-5. If the date is invalid or unclear, return exactly "INVALID_DATE"
+User Query: "${dateQuery}"
 
-Examples:
-- "tomorrow" → ${now.plus({ days: 1 }).toFormat('yyyy-MM-dd')}
-- "next Monday" → (calculate next Monday from today)
-- "July 15th" → 2025-07-15 (if July 15, 2024 has passed)
-- "December 23rd" → 2024-12-23 (if it's still 2024 and December 23 hasn't passed)
-
-Response (YYYY-MM-DD only):`;
+Normalized Date (YYYY-MM-DD or INVALID_DATE):`;
 
     const messages: CoreMessage[] = [
       {
