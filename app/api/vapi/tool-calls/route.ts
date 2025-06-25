@@ -10,29 +10,47 @@ import type {
 export async function POST(request: NextRequest) {
   // Variables to track timing and state for ToolLog
   let startTime: number | undefined;
-  let toolCall: ServerMessageToolCallItem | undefined;
+  let toolCallItem: ServerMessageToolCallItem | undefined;
   let callId: string | undefined;
   let practiceId: string | null = null;
   let toolResponse: VapiToolResult | undefined;
+  let toolName: string | undefined;
+  let toolArguments: Record<string, unknown> | string | undefined;
+  let toolId: string | undefined;
 
   try {
     // Parse the JSON request body
     const body: ServerMessageToolCallsPayload = await request.json();
     console.log("[VAPI Tool Handler] Incoming tool call payload:", JSON.stringify(body, null, 2));
 
-    // Extract tool call and call information
-    toolCall = body.message.toolCallList[0];
+    // Extract tool call item from either toolCallList or toolCalls (both can be present in VAPI payload)
+    toolCallItem = body.message.toolCallList?.[0] || body.message.toolCalls?.[0];
     callId = body.message.call.id;
 
-    if (!toolCall) {
-      console.error("[VAPI Tool Handler] No tool call found in payload");
-      return NextResponse.json(
-        { error: "No tool call found in payload" }, 
-        { status: 400 }
-      );
+    if (!toolCallItem) {
+      console.error("[VAPI Tool Handler] No toolCallItem found in payload:", body.message);
+      return NextResponse.json({ results: [{ toolCallId: "unknown", error: "Malformed tool call payload from VAPI." }] }, { status: 200 });
     }
 
-    console.log(`[VAPI Tool Handler] Processing tool: ${toolCall.name} for call: ${callId}`);
+    // Extract tool information from the correct nested structure
+    toolId = toolCallItem.id; // This is VAPI's tool_call_id for the result object
+    toolName = toolCallItem.function.name;
+    toolArguments = toolCallItem.function.arguments;
+
+    // Handle cases where arguments might be a stringified JSON
+    if (typeof toolArguments === 'string') {
+      try {
+        toolArguments = JSON.parse(toolArguments);
+        console.log(`[VAPI Tool Handler] Parsed stringified toolArguments for tool ${toolName}.`);
+      } catch (e) {
+        console.error(`[VAPI Tool Handler] Failed to parse tool arguments string for tool ${toolName}:`, toolArguments, e);
+        // If arguments are critical and unparsable, return an error to VAPI
+        return NextResponse.json({ results: [{ toolCallId: toolId, error: `Failed to parse arguments for tool ${toolName}.` }] }, { status: 200 });
+      }
+    }
+
+    console.log(`[VAPI Tool Handler] Processing tool: ${toolName} (Tool Invocation ID: ${toolId}) for Call Session ID: ${callId}`);
+    console.log(`[VAPI Tool Handler] Arguments:`, toolArguments);
 
     // Start timing for ToolLog
     startTime = Date.now();
@@ -49,17 +67,17 @@ export async function POST(request: NextRequest) {
 
     // Create initial ToolLog entry
     try {
-      console.log(`[DB Log] Attempting to create ToolLog for toolCallId: ${toolCall.id}`);
+      console.log(`[DB Log] Attempting to create ToolLog for toolCallId: ${toolId}`);
       await prisma.toolLog.create({
         data: {
           practiceId: practiceId || "unknown", // Use unknown if practice not found
           vapiCallId: callId,
-          toolName: toolCall.name,
-          toolCallId: toolCall.id,
-          arguments: JSON.stringify(toolCall.arguments),
+          toolName: toolName,
+          toolCallId: toolId,
+          arguments: JSON.stringify(toolArguments),
           success: false, // Default, will be updated later
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: new Date(startTime), // Use consistent start time
+          updatedAt: new Date(startTime),
         }
       });
     } catch (error) {
@@ -68,16 +86,24 @@ export async function POST(request: NextRequest) {
     }
 
     // Process tool calls based on tool name
-    switch (toolCall.name) {
+    switch (toolName) {
       case "findAppointmentType": {
-        const patientRequest = toolCall.arguments.patientRequest as string;
+        const patientRequest = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.patientRequest as string : undefined;
         console.log(`[VAPI Tool Handler] findAppointmentType called with request: "${patientRequest}"`);
         
         try {
           if (!practiceId) {
             toolResponse = {
-              toolCallId: toolCall.id,
+              toolCallId: toolId!,
               error: "Practice configuration not found."
+            };
+            break;
+          }
+
+          if (!patientRequest) {
+            toolResponse = {
+              toolCallId: toolId!,
+              error: "Missing patientRequest parameter."
             };
             break;
           }
@@ -103,7 +129,7 @@ export async function POST(request: NextRequest) {
 
           if (!dbAppointmentTypes || dbAppointmentTypes.length === 0) {
             toolResponse = {
-              toolCallId: toolCall.id,
+              toolCallId: toolId!,
               error: "No suitable appointment types are configured for matching in this practice."
             };
             break;
@@ -136,7 +162,7 @@ export async function POST(request: NextRequest) {
               );
 
               toolResponse = {
-                toolCallId: toolCall.id,
+                toolCallId: toolId!,
                 result: generatedMessage
               };
 
@@ -174,7 +200,7 @@ export async function POST(request: NextRequest) {
             } else {
               // Defensive coding - this shouldn't happen if AI returns valid ID
               toolResponse = {
-                toolCallId: toolCall.id,
+                toolCallId: toolId!,
                 error: "Internal error: Matched ID not found in local list."
               };
               console.error(`[Tool Handler] Error: Matched ID ${matchedApptId} not found in dbAppointmentTypes.`);
@@ -182,7 +208,7 @@ export async function POST(request: NextRequest) {
           } else {
             // No match found
             toolResponse = {
-              toolCallId: toolCall.id,
+              toolCallId: toolId!,
               result: "Hmm, I'm not quite sure I have an exact match for that. Could you tell me a bit more about what you need, or perhaps rephrase your request?"
             };
             console.log(`[Tool Handler] No appointment type match found for query: "${patientRequest}".`);
@@ -215,7 +241,7 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           console.error(`[VAPI Tool Handler] Error fetching appointment types:`, error);
           toolResponse = {
-            toolCallId: toolCall.id,
+            toolCallId: toolId!,
             error: "Database error while fetching appointment types."
           };
         }
@@ -223,10 +249,10 @@ export async function POST(request: NextRequest) {
       }
       
       default: {
-        console.error(`[VAPI Tool Handler] Unknown tool: ${toolCall.name}`);
+        console.error(`[VAPI Tool Handler] Unknown tool: ${toolName}`);
         toolResponse = {
-          toolCallId: toolCall.id,
-          error: `Unknown tool: ${toolCall.name}`
+          toolCallId: toolId!,
+          error: `Unknown tool: ${toolName}`
         };
         break;
       }
@@ -239,9 +265,9 @@ export async function POST(request: NextRequest) {
     console.error("[VAPI Tool Handler] Error processing tool call:", error);
     
     // Set error response if not already set
-    if (!toolResponse && toolCall) {
+    if (!toolResponse && toolCallItem) {
       toolResponse = {
-        toolCallId: toolCall.id,
+        toolCallId: toolId!,
         error: "Internal server error processing tool call"
       };
     }
@@ -255,13 +281,13 @@ export async function POST(request: NextRequest) {
     );
   } finally {
     // Update ToolLog with final outcome
-    if (toolCall && startTime !== undefined && toolResponse) {
+    if (toolCallItem && startTime !== undefined && toolResponse) {
       try {
         const executionTimeMs = Date.now() - startTime;
-        console.log(`[DB Log] Attempting to update ToolLog for toolCallId: ${toolCall.id} with success: ${!toolResponse.error}`);
+        console.log(`[DB Log] Attempting to update ToolLog for toolCallId: ${toolId} with success: ${!toolResponse.error}`);
         
         await prisma.toolLog.updateMany({
-          where: { toolCallId: toolCall.id },
+          where: { toolCallId: toolId! },
           data: {
             result: toolResponse.result ? JSON.stringify(toolResponse.result) : undefined,
             error: toolResponse.error || undefined,

@@ -1,48 +1,75 @@
 'use client'; // This page will need client-side interactivity for fetching and copying
 
 import React, { useState, useEffect, useCallback } from 'react';
-import type { DebugLogEntry } from '@/lib/debugLogStore';
 
-interface LogData {
-  callId: string | null;
-  logs: DebugLogEntry[];
+// New TypeScript interfaces for the refactored debugging dashboard
+interface TranscriptMessageLog {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
 }
 
-interface TranscriptMessage {
-  role: 'user' | 'bot' | 'system' | 'assistant';
-  content?: string;
-  message?: string; // Fallback for some formats
-  duration?: number;
+interface ToolExecutionLogEntry {
+  toolLogId: string;
+  toolCallId: string;
+  toolName: string;
+  timestamp: string;
+  arguments: Record<string, unknown>;
+  aiMatcherInputQuery?: string;
+  aiMatcherOutputId?: string | null;
+  aiResponderOutputMessage?: string;
+  resultSentToVapi?: string | null;
+  errorSentToVapi?: string | null;
+  success: boolean;
+  executionTimeMs?: number;
 }
 
-// New interface for extracted findAppointmentType data
-interface FindAppointmentTypeData {
-  patientRequest?: string;
-  appointmentTypeName?: string;
-  appointmentTypeId?: string;
-  appointmentDuration?: number;
-  toolResult?: string;
-  toolError?: string;
+interface CallLogSummary {
   detectedIntent?: string;
-  hasToolLog: boolean;
-  hasCallLogUpdate: boolean;
+  lastAppointmentTypeId?: string;
+  lastAppointmentTypeName?: string;
+  lastAppointmentDuration?: number;
+  callStatus?: string;
+  nexhealthPatientId?: string;
+  bookedAppointmentNexhealthId?: string;
+  assistantId?: string;
+  endedReason?: string;
+  callDurationSeconds?: number;
+  cost?: number;
+}
+
+interface DetailedCallDebugData {
+  callId: string;
+  practiceId?: string;
+  startTime?: string;
+  endTime?: string;
+  status?: string;
+  transcript: TranscriptMessageLog[];
+  callLogSummary?: CallLogSummary;
+  toolExecutions: ToolExecutionLogEntry[];
 }
 
 export default function ToolCallLogPage() {
-  const [logData, setLogData] = useState<LogData | null>(null);
+  const [logData, setLogData] = useState<DetailedCallDebugData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [refreshIntervalId, setRefreshIntervalId] = useState<NodeJS.Timeout | null>(null);
 
+  // Collapsible section state management
+  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
+  const [isToolsOpen, setIsToolsOpen] = useState(false);
+  const [isCallLogOpen, setIsCallLogOpen] = useState(false);
+
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Updated to fetch from new structured debug API endpoint
       const response = await fetch('/api/debug/latest-tool-call-log');
       if (!response.ok) {
         throw new Error(`Failed to fetch logs: ${response.statusText}`);
       }
-      const data: LogData = await response.json();
+      const data: DetailedCallDebugData = await response.json();
       setLogData(data);
       setError(null);
     } catch (err) {
@@ -70,62 +97,6 @@ export default function ToolCallLogPage() {
     }
   }, [autoRefresh, fetchLogs, refreshIntervalId]);
 
-  // Extract findAppointmentType relevant data from logs
-  const extractFindAppointmentTypeData = (logs: DebugLogEntry[]): FindAppointmentTypeData | null => {
-    const data: FindAppointmentTypeData = {
-      hasToolLog: false,
-      hasCallLogUpdate: false
-    };
-
-    for (const entry of logs) {
-      // Check for ToolLog entries related to findAppointmentType
-      if (entry.event === 'TOOL_LOG_ENTRY' && entry.details?.toolName === 'findAppointmentType') {
-        data.hasToolLog = true;
-        
-        // Extract tool arguments (patientRequest)
-        if (entry.details.arguments) {
-          try {
-            const args = typeof entry.details.arguments === 'string' 
-              ? JSON.parse(entry.details.arguments) 
-              : entry.details.arguments;
-            data.patientRequest = args.patientRequest;
-          } catch (e) {
-            console.warn('Could not parse tool arguments:', e);
-          }
-        }
-
-        // Extract tool result or error
-        data.toolResult = entry.details.result;
-        data.toolError = entry.details.error;
-      }
-
-      // Check for CallLog updates that might contain appointment type information
-      if (entry.event === 'CALL_LOG_UPDATE' && entry.details) {
-        if (entry.details.lastAppointmentTypeName || entry.details.lastAppointmentTypeId || entry.details.lastAppointmentDuration) {
-          data.hasCallLogUpdate = true;
-          data.appointmentTypeName = entry.details.lastAppointmentTypeName;
-          data.appointmentTypeId = entry.details.lastAppointmentTypeId;
-          data.appointmentDuration = entry.details.lastAppointmentDuration;
-          data.detectedIntent = entry.details.detectedIntent;
-        }
-      }
-
-      // Also check if findAppointmentType data is embedded in other event types
-      if (entry.details && typeof entry.details === 'object') {
-        if (entry.details.lastAppointmentTypeName && !data.hasCallLogUpdate) {
-          data.hasCallLogUpdate = true;
-          data.appointmentTypeName = entry.details.lastAppointmentTypeName;
-          data.appointmentTypeId = entry.details.lastAppointmentTypeId;
-          data.appointmentDuration = entry.details.lastAppointmentDuration;
-          data.detectedIntent = entry.details.detectedIntent;
-        }
-      }
-    }
-
-    // Return data only if we found relevant information
-    return data.hasToolLog || data.hasCallLogUpdate ? data : null;
-  };
-
   const copyLogsToClipboard = () => {
     if (logData) {
       const logString = JSON.stringify(logData, null, 2);
@@ -148,150 +119,10 @@ export default function ToolCallLogPage() {
     }
   };
 
-  // Render findAppointmentType debug section
-  const renderFindAppointmentTypeDebug = (data: FindAppointmentTypeData) => (
-    <div style={{
-      backgroundColor: '#f0f8ff',
-      border: '2px solid #007bff',
-      borderRadius: '8px',
-      padding: '20px',
-      marginBottom: '20px'
-    }}>
-      <h3 style={{
-        margin: '0 0 15px 0',
-        color: '#0056b3',
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '18px',
-        borderBottom: '2px solid #007bff',
-        paddingBottom: '8px'
-      }}>
-        🔍 findAppointmentType Tool Debug Summary
-      </h3>
-
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: '1fr 1fr', 
-        gap: '15px', 
-        fontFamily: 'Arial, sans-serif' 
-      }}>
-        <div style={{
-          backgroundColor: '#e7f3ff',
-          padding: '12px',
-          borderRadius: '6px',
-          border: '1px solid #b3d9ff'
-        }}>
-          <h4 style={{ margin: '0 0 8px 0', color: '#0056b3', fontSize: '14px' }}>📥 Input</h4>
-          <div style={{ fontSize: '13px' }}>
-            <strong>Patient Request:</strong><br />
-            <code style={{ 
-              backgroundColor: '#fff', 
-              padding: '4px 6px', 
-              borderRadius: '3px',
-              fontSize: '12px',
-              wordBreak: 'break-word'
-            }}>
-              {data.patientRequest || 'Not available'}
-            </code>
-          </div>
-          {data.detectedIntent && (
-            <div style={{ fontSize: '13px', marginTop: '8px' }}>
-              <strong>Detected Intent:</strong><br />
-              <code style={{ 
-                backgroundColor: '#fff', 
-                padding: '4px 6px', 
-                borderRadius: '3px',
-                fontSize: '12px',
-                wordBreak: 'break-word'
-              }}>
-                {data.detectedIntent}
-              </code>
-            </div>
-          )}
-        </div>
-
-        <div style={{
-          backgroundColor: '#e8f5e8',
-          padding: '12px',
-          borderRadius: '6px',
-          border: '1px solid #a8d5a8'
-        }}>
-          <h4 style={{ margin: '0 0 8px 0', color: '#155724', fontSize: '14px' }}>🎯 Database Match</h4>
-          {data.appointmentTypeName ? (
-            <>
-              <div style={{ fontSize: '13px', marginBottom: '6px' }}>
-                <strong>Appointment Type:</strong><br />
-                <code style={{ 
-                  backgroundColor: '#fff', 
-                  padding: '4px 6px', 
-                  borderRadius: '3px',
-                  fontSize: '12px'
-                }}>
-                  {data.appointmentTypeName}
-                </code>
-              </div>
-              <div style={{ fontSize: '13px', marginBottom: '6px' }}>
-                <strong>ID:</strong> <code style={{ fontSize: '11px' }}>{data.appointmentTypeId || 'N/A'}</code>
-              </div>
-              <div style={{ fontSize: '13px' }}>
-                <strong>Duration:</strong> <code style={{ fontSize: '11px' }}>{data.appointmentDuration ? `${data.appointmentDuration} minutes` : 'N/A'}</code>
-              </div>
-            </>
-          ) : (
-            <div style={{ fontSize: '13px', color: '#856404' }}>
-              No appointment type match found
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div style={{
-        marginTop: '15px',
-        backgroundColor: data.toolError ? '#f8d7da' : '#d1edff',
-        padding: '12px',
-        borderRadius: '6px',
-        border: `1px solid ${data.toolError ? '#f5c6cb' : '#b3d9ff'}`
-      }}>
-        <h4 style={{ 
-          margin: '0 0 8px 0', 
-          color: data.toolError ? '#721c24' : '#0056b3', 
-          fontSize: '14px' 
-        }}>
-          {data.toolError ? '❌ Tool Error' : '✅ Tool Result'}
-        </h4>
-        <pre style={{
-          margin: '0',
-          fontSize: '12px',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          backgroundColor: '#fff',
-          padding: '8px',
-          borderRadius: '4px',
-          border: '1px solid #ddd',
-          maxHeight: '200px',
-          overflowY: 'auto'
-        }}>
-          {data.toolError || data.toolResult || 'No result available'}
-        </pre>
-      </div>
-
-      <div style={{
-        marginTop: '10px',
-        fontSize: '12px',
-        color: '#6c757d',
-        fontFamily: 'Arial, sans-serif'
-      }}>
-        <strong>Debug Status:</strong> 
-        {data.hasToolLog && <span style={{ color: '#28a745', marginLeft: '5px' }}>✓ Tool execution logged</span>}
-        {data.hasCallLogUpdate && <span style={{ color: '#28a745', marginLeft: '10px' }}>✓ Call log updated</span>}
-        {!data.hasToolLog && !data.hasCallLogUpdate && <span style={{ color: '#dc3545', marginLeft: '5px' }}>⚠ Incomplete debug data</span>}
-      </div>
-    </div>
-  );
-
-  if (isLoading && !logData) { // Show loading only on initial load
+  if (isLoading && !logData) {
     return (
       <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-        Loading logs...
+        Loading call debug details...
       </div>
     );
   }
@@ -299,31 +130,28 @@ export default function ToolCallLogPage() {
   if (error) {
     return (
       <div style={{ padding: '20px', color: 'red', fontFamily: 'Arial, sans-serif' }}>
-        Error loading logs: {error}
+        Error loading call debug details: {error}
       </div>
     );
   }
 
-  const findAppointmentTypeData = logData ? extractFindAppointmentTypeData(logData.logs) : null;
-
   return (
     <div style={{ 
-      fontFamily: 'monospace', 
+      fontFamily: 'Arial, sans-serif', 
       padding: '20px', 
-      whiteSpace: 'pre-wrap', 
-      wordBreak: 'break-all',
       backgroundColor: '#f8f9fa',
       minHeight: '100vh'
     }}>
       <h1 style={{ 
-        fontFamily: 'Arial, sans-serif', 
         color: '#333', 
         borderBottom: '2px solid #ddd',
-        paddingBottom: '10px'
+        paddingBottom: '10px',
+        marginBottom: '20px'
       }}>
-        Latest VAPI Tool Call Log
+        Latest Call Debug Dashboard
       </h1>
       
+      {/* Action Buttons */}
       <div style={{ 
         marginBottom: '20px', 
         padding: '15px',
@@ -349,15 +177,15 @@ export default function ToolCallLogPage() {
         
         <button 
           onClick={copyLogsToClipboard} 
-          disabled={!logData || logData.logs.length === 0} 
+          disabled={!logData} 
           style={{ 
             marginRight: '10px',
             padding: '8px 16px',
-            backgroundColor: (!logData || logData.logs.length === 0) ? '#6c757d' : '#28a745',
+            backgroundColor: !logData ? '#6c757d' : '#28a745',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
-            cursor: (!logData || logData.logs.length === 0) ? 'not-allowed' : 'pointer'
+            cursor: !logData ? 'not-allowed' : 'pointer'
           }}
         >
           Copy Logs
@@ -365,21 +193,21 @@ export default function ToolCallLogPage() {
         
         <button 
           onClick={clearLogsOnServer} 
-          disabled={!logData || !logData.callId} 
+          disabled={!logData?.callId} 
           style={{ 
             marginRight: '10px',
             padding: '8px 16px',
-            backgroundColor: (!logData || !logData.callId) ? '#6c757d' : '#ffc107',
-            color: (!logData || !logData.callId) ? 'white' : '#212529',
+            backgroundColor: !logData?.callId ? '#6c757d' : '#ffc107',
+            color: !logData?.callId ? 'white' : '#212529',
             border: 'none',
             borderRadius: '4px',
-            cursor: (!logData || !logData.callId) ? 'not-allowed' : 'pointer'
+            cursor: !logData?.callId ? 'not-allowed' : 'pointer'
           }}
         >
           Clear Server Logs
         </button>
         
-        <label style={{ display: 'inline-flex', alignItems: 'center', fontFamily: 'Arial, sans-serif' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center' }}>
           <input 
             type="checkbox" 
             checked={autoRefresh} 
@@ -390,166 +218,297 @@ export default function ToolCallLogPage() {
         </label>
       </div>
 
-      {logData && logData.callId ? (
+      {logData ? (
         <>
-          <h2 style={{ 
-            fontFamily: 'Arial, sans-serif', 
-            color: '#495057',
-            backgroundColor: '#e9ecef',
-            padding: '10px',
-            borderRadius: '4px',
-            borderLeft: '4px solid #007bff'
+          {/* General Call Information */}
+          <div style={{
+            backgroundColor: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '20px',
+            marginBottom: '20px'
           }}>
-            Call ID: {logData.callId}
-          </h2>
+            <h2 style={{ 
+              margin: '0 0 15px 0',
+              color: '#495057',
+              borderBottom: '1px solid #ddd',
+              paddingBottom: '10px'
+            }}>
+              📞 General Call Information
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+              <div><strong>Call ID:</strong> <code>{logData.callId}</code></div>
+              <div><strong>Practice ID:</strong> <code>{logData.practiceId || 'N/A'}</code></div>
+              <div><strong>Start Time:</strong> {logData.startTime ? new Date(logData.startTime).toLocaleString() : 'N/A'}</div>
+              <div><strong>End Time:</strong> {logData.endTime ? new Date(logData.endTime).toLocaleString() : 'N/A'}</div>
+              <div><strong>Status:</strong> <span style={{
+                backgroundColor: logData.status === 'ENDED' ? '#d4edda' : '#fff3cd',
+                color: logData.status === 'ENDED' ? '#155724' : '#856404',
+                padding: '2px 8px',
+                borderRadius: '4px'
+              }}>{logData.status || 'N/A'}</span></div>
+            </div>
+          </div>
 
-          {/* Enhanced findAppointmentType Debug Section */}
-          {findAppointmentTypeData && renderFindAppointmentTypeDebug(findAppointmentTypeData)}
-          
-          {logData.logs.length > 0 ? (
-            <div style={{ marginTop: '20px' }}>
-              <h3 style={{
-                fontFamily: 'Arial, sans-serif',
+          {/* Conversation Transcript */}
+          <div style={{
+            backgroundColor: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '20px',
+            marginBottom: '20px'
+          }}>
+            <h2 
+              onClick={() => setIsTranscriptOpen(!isTranscriptOpen)}
+              style={{ 
+                margin: '0 0 15px 0',
                 color: '#495057',
                 borderBottom: '1px solid #ddd',
-                paddingBottom: '5px',
-                marginBottom: '15px'
-              }}>
-                Raw Log Entries
-              </h3>
-              
-              {logData.logs.map((entry, index) => (
-                <div 
-                  key={index} 
-                  style={{ 
-                    borderBottom: '1px solid #dee2e6', 
-                    paddingBottom: '15px', 
-                    marginBottom: '15px',
-                    backgroundColor: '#fff',
-                    padding: '15px',
-                    borderRadius: '8px',
-                    border: '1px solid #ddd',
-                    // Highlight findAppointmentType related entries
-                    ...(entry.details?.toolName === 'findAppointmentType' || 
-                        (entry.details?.lastAppointmentTypeName) ? {
-                      borderLeft: '4px solid #007bff',
-                      backgroundColor: '#f8f9ff'
-                    } : {})
-                  }}
-                >
-                  <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: '1fr 1fr', 
-                    gap: '10px', 
-                    marginBottom: '10px',
-                    fontFamily: 'Arial, sans-serif'
-                  }}>
-                    <p style={{ margin: '0' }}>
-                      <strong>Timestamp:</strong> {new Date(entry.timestamp).toLocaleString()}
-                    </p>
-                    <p style={{ margin: '0' }}>
-                      <strong>Event:</strong> 
-                      <span style={{ 
-                        backgroundColor: entry.details?.toolName === 'findAppointmentType' ? '#007bff' : '#e7f3ff', 
-                        color: entry.details?.toolName === 'findAppointmentType' ? 'white' : 'inherit',
-                        padding: '2px 6px', 
-                        borderRadius: '3px',
-                        marginLeft: '5px'
-                      }}>
-                        {entry.event}
-                        {entry.details?.toolName === 'findAppointmentType' && ' (findAppointmentType)'}
-                      </span>
-                    </p>
+                paddingBottom: '10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              💬 Conversation Transcript ({logData.transcript?.length || 0} messages)
+              <span style={{ fontSize: '14px' }}>{isTranscriptOpen ? '▼' : '▶'}</span>
+            </h2>
+            
+            {isTranscriptOpen && (
+              <>
+                {logData.transcript && logData.transcript.length > 0 ? (
+                  <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    {logData.transcript.map((msg, index) => (
+                      <div 
+                        key={index}
+                        style={{
+                          padding: '10px',
+                          margin: '8px 0',
+                          borderRadius: '8px',
+                          backgroundColor: msg.role === 'user' ? '#e6ffed' : '#e6f7ff',
+                          border: `1px solid ${msg.role === 'user' ? '#b3e6b3' : '#b3d9ff'}`
+                        }}
+                      >
+                        <strong style={{ color: msg.role === 'user' ? '#155724' : '#004085' }}>
+                          {msg.role === 'assistant' ? 'Laine' : 'User'}:
+                        </strong> {msg.content}
+                        {msg.timestamp && (
+                          <span style={{ fontSize: '0.8em', color: '#777', marginLeft: '10px' }}>
+                            ({new Date(msg.timestamp).toLocaleTimeString()})
+                          </span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  
-                  {entry.source && (
-                    <p style={{ margin: '0 0 10px 0', fontFamily: 'Arial, sans-serif' }}>
-                      <strong>Source:</strong> 
-                      <span style={{ 
-                        backgroundColor: '#f8f9fa', 
-                        padding: '2px 6px', 
-                        borderRadius: '3px',
-                        marginLeft: '5px'
-                      }}>
-                        {entry.source}
-                      </span>
-                    </p>
-                  )}
-                  
-                  {entry.event === 'RAW_VAPI_PAYLOAD' && entry.details?.payloadString && (
-                    (() => {
-                      try {
-                        const payload = JSON.parse(entry.details.payloadString);
-                        const messages = payload?.message?.artifact?.messagesOpenAIFormatted || payload?.message?.artifact?.messages;
-                        if (Array.isArray(messages) && messages.length > 0) {
-                          return (
-                            <div style={{ marginTop: '10px', borderTop: '1px dashed #ccc', paddingTop: '10px' }}>
-                              <strong style={{ fontFamily: 'Arial, sans-serif', color: '#007bff' }}>Conversation Transcript (from RAW_VAPI_PAYLOAD):</strong>
-                              <pre style={{
-                                backgroundColor: '#e9f5ff',
-                                padding: '10px',
-                                borderRadius: '4px',
-                                border: '1px solid #bee5eb',
-                                fontSize: '12px',
-                                lineHeight: '1.5',
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word'
-                              }}>
-                                {messages.map((msg: TranscriptMessage, msgIdx: number) => (
-                                  <React.Fragment key={msgIdx}>
-                                    {msgIdx > 0 && <hr style={{border:0, borderTop:'1px dotted #ddd', margin:'5px 0'}}/>}
-                                    <div style={{ marginBottom: '5px' }}>
-                                      <span style={{ fontWeight: 'bold', color: msg.role === 'user' ? 'green' : 'purple' }}>
-                                        {msg.role === 'bot' ? 'Laine' : msg.role}:
-                                      </span>{' '}
-                                      {msg.content || msg.message}
-                                      {msg.duration && <span style={{fontSize: '0.8em', color: '#777'}}> ({ (msg.duration / 1000).toFixed(1)}s)</span>}
-                                    </div>
-                                  </React.Fragment>
-                                ))}
-                              </pre>
-                            </div>
-                          );
-                        }
-                      } catch (e) {
-                        console.warn("Could not parse payloadString for transcript", e);
-                      }
-                      return null;
-                    })()
-                  )}
+                ) : (
+                  <p style={{ color: '#6c757d', fontStyle: 'italic' }}>
+                    No transcript available for this call.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
 
+          {/* Tool Executions */}
+          <div style={{
+            backgroundColor: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '20px',
+            marginBottom: '20px'
+          }}>
+            <h2 
+              onClick={() => setIsToolsOpen(!isToolsOpen)}
+              style={{ 
+                margin: '0 0 15px 0',
+                color: '#495057',
+                borderBottom: '1px solid #ddd',
+                paddingBottom: '10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              🔧 Tool Executions ({logData.toolExecutions?.length || 0})
+              <span style={{ fontSize: '14px' }}>{isToolsOpen ? '▼' : '▶'}</span>
+            </h2>
+            
+            {isToolsOpen && (
+              <>
+                {logData.toolExecutions && logData.toolExecutions.length > 0 ? (
                   <div>
-                    <strong style={{ fontFamily: 'Arial, sans-serif' }}>Details:</strong>
-                    <pre style={{ 
-                      backgroundColor: '#f8f9fa', 
-                      padding: '15px', 
-                      borderRadius: '6px', 
-                      overflowX: 'auto',
-                      border: '1px solid #e9ecef',
-                      fontSize: '13px',
-                      lineHeight: '1.4'
-                    }}>
-                      {typeof entry.details === 'object' 
-                        ? JSON.stringify(entry.details, null, 2) 
-                        : String(entry.details)
-                      }
-                    </pre>
+                    {logData.toolExecutions.map((toolExecution, index) => (
+                      <div 
+                        key={index}
+                        style={{
+                          border: '1px solid #ddd',
+                          borderRadius: '6px',
+                          padding: '15px',
+                          marginBottom: '15px',
+                          backgroundColor: '#f8f9fa'
+                        }}
+                      >
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                          <div><strong>Tool:</strong> <code>{toolExecution.toolName}</code></div>
+                          <div><strong>Invocation ID:</strong> <code style={{ fontSize: '12px' }}>{toolExecution.toolCallId}</code></div>
+                          <div><strong>Timestamp:</strong> {new Date(toolExecution.timestamp).toLocaleString()}</div>
+                          <div>
+                            <strong>Status:</strong> 
+                            <span style={{
+                              backgroundColor: toolExecution.success ? '#d4edda' : '#f8d7da',
+                              color: toolExecution.success ? '#155724' : '#721c24',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              marginLeft: '5px'
+                            }}>
+                              {toolExecution.success ? 'Success' : 'Failed'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        {toolExecution.executionTimeMs != null && (
+                          <div style={{ marginBottom: '10px' }}>
+                            <strong>Execution Time:</strong> {toolExecution.executionTimeMs}ms
+                          </div>
+                        )}
+                        
+                        <div style={{ marginBottom: '10px' }}>
+                          <strong>Arguments:</strong>
+                          <pre style={{
+                            backgroundColor: '#fff',
+                            padding: '10px',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd',
+                            fontSize: '12px',
+                            overflow: 'auto'
+                          }}>
+                            {JSON.stringify(toolExecution.arguments, null, 2)}
+                          </pre>
+                        </div>
+
+                        {/* Conditional AI Details for findAppointmentType */}
+                        {toolExecution.toolName === 'findAppointmentType' && (
+                          <>
+                            {(toolExecution.aiMatcherInputQuery || toolExecution.aiMatcherOutputId) && (
+                              <div style={{ marginBottom: '10px' }}>
+                                <strong>AI Matcher Details:</strong>
+                                <div style={{ marginLeft: '10px', marginTop: '5px' }}>
+                                  <div><strong>Input Query:</strong> <code>{toolExecution.aiMatcherInputQuery || 'N/A'}</code></div>
+                                  <div><strong>Output ID:</strong> <code>{toolExecution.aiMatcherOutputId || 'N/A'}</code></div>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {toolExecution.aiResponderOutputMessage && (
+                              <div style={{ marginBottom: '10px' }}>
+                                <strong>AI Responder Output Message:</strong>
+                                <pre style={{
+                                  backgroundColor: '#e6f7ff',
+                                  padding: '10px',
+                                  borderRadius: '4px',
+                                  border: '1px solid #b3d9ff',
+                                  fontSize: '12px'
+                                }}>
+                                  {toolExecution.aiResponderOutputMessage}
+                                </pre>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <strong>Result Sent to VAPI:</strong>
+                            <pre style={{
+                              backgroundColor: '#fff',
+                              padding: '8px',
+                              borderRadius: '4px',
+                              border: '1px solid #ddd',
+                              fontSize: '12px',
+                              maxHeight: '150px',
+                              overflow: 'auto'
+                            }}>
+                              {toolExecution.resultSentToVapi || 'N/A'}
+                            </pre>
+                          </div>
+                          <div>
+                            <strong>Error Sent to VAPI:</strong>
+                            <pre style={{
+                              backgroundColor: toolExecution.errorSentToVapi ? '#f8d7da' : '#fff',
+                              padding: '8px',
+                              borderRadius: '4px',
+                              border: '1px solid #ddd',
+                              fontSize: '12px',
+                              maxHeight: '150px',
+                              overflow: 'auto'
+                            }}>
+                              {toolExecution.errorSentToVapi || 'N/A'}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ 
-              padding: '20px', 
-              backgroundColor: '#fff3cd', 
-              borderRadius: '8px',
-              border: '1px solid #ffeaa7',
-              color: '#856404',
-              fontFamily: 'Arial, sans-serif'
-            }}>
-              No log entries found for this call ID.
-            </div>
-          )}
+                ) : (
+                  <p style={{ color: '#6c757d', fontStyle: 'italic' }}>
+                    No tool executions logged for this call.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* CallLog Summary */}
+          <div style={{
+            backgroundColor: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '20px',
+            marginBottom: '20px'
+          }}>
+            <h2 
+              onClick={() => setIsCallLogOpen(!isCallLogOpen)}
+              style={{ 
+                margin: '0 0 15px 0',
+                color: '#495057',
+                borderBottom: '1px solid #ddd',
+                paddingBottom: '10px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              📋 Call Outcome Summary (from CallLog)
+              <span style={{ fontSize: '14px' }}>{isCallLogOpen ? '▼' : '▶'}</span>
+            </h2>
+            
+            {isCallLogOpen && (
+              <>
+                {logData.callLogSummary ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div><strong>Detected Intent:</strong> <code>{logData.callLogSummary.detectedIntent || 'N/A'}</code></div>
+                    <div><strong>Last Identified Appointment Type:</strong> <code>{logData.callLogSummary.lastAppointmentTypeName || 'N/A'}</code></div>
+                    <div><strong>Appointment Type ID:</strong> <code>{logData.callLogSummary.lastAppointmentTypeId || 'N/A'}</code></div>
+                    <div><strong>Appointment Duration:</strong> <code>{logData.callLogSummary.lastAppointmentDuration != null ? logData.callLogSummary.lastAppointmentDuration + ' mins' : 'N/A'}</code></div>
+                    <div><strong>Final Call Status:</strong> <code>{logData.callLogSummary.callStatus || 'N/A'}</code></div>
+                    <div><strong>NexHealth Patient ID:</strong> <code>{logData.callLogSummary.nexhealthPatientId || 'N/A'}</code></div>
+                    <div><strong>Booked Appointment ID:</strong> <code>{logData.callLogSummary.bookedAppointmentNexhealthId || 'N/A'}</code></div>
+                    <div><strong>Assistant ID:</strong> <code>{logData.callLogSummary.assistantId || 'N/A'}</code></div>
+                    <div><strong>End Reason:</strong> <code>{logData.callLogSummary.endedReason || 'N/A'}</code></div>
+                    <div><strong>Call Duration:</strong> <code>{logData.callLogSummary.callDurationSeconds != null ? Math.floor(logData.callLogSummary.callDurationSeconds / 60) + 'm ' + (logData.callLogSummary.callDurationSeconds % 60) + 's' : 'N/A'}</code></div>
+                    <div><strong>Cost:</strong> <code>{logData.callLogSummary.cost != null ? '$' + logData.callLogSummary.cost.toFixed(4) : 'N/A'}</code></div>
+                  </div>
+                ) : (
+                  <p style={{ color: '#6c757d', fontStyle: 'italic' }}>
+                    No call summary data available.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         </>
       ) : (
         <div style={{ 
@@ -557,12 +516,11 @@ export default function ToolCallLogPage() {
           backgroundColor: '#d1ecf1', 
           borderRadius: '8px',
           border: '1px solid #bee5eb',
-          color: '#0c5460',
-          fontFamily: 'Arial, sans-serif'
+          color: '#0c5460'
         }}>
-          No call logs available yet. Make a VAPI call involving tools to see logs here.
+          No call debug data available yet. Make a VAPI call involving tools to see detailed information here.
         </div>
       )}
     </div>
   );
-} 
+}

@@ -52,16 +52,22 @@ export interface VapiUpdatePayload {
   serverMessages?: string[];
 }
 
-export interface ServerMessageToolCallItem {
-  id: string;
+export interface VapiFunctionCall {
   name: string;
-  arguments: Record<string, any>;
+  arguments: Record<string, any> | string; // Arguments can be an object or a stringified JSON
+}
+
+export interface ServerMessageToolCallItem {
+  id: string; // This is VAPI's unique ID for this specific tool invocation
+  type: "function"; // Assuming 'function' type for these tool calls
+  function: VapiFunctionCall; // Contains the actual name and arguments
 }
 
 export interface ServerMessageToolCallsPayload {
   message: {
     type: "tool-calls";
-    toolCallList: ServerMessageToolCallItem[];
+    toolCallList?: ServerMessageToolCallItem[]; // VAPI payload shows 'toolCallList'
+    toolCalls?: ServerMessageToolCallItem[]; // VAPI payload also shows 'toolCalls'
     call: {
       id: string;
       orgId?: string;
