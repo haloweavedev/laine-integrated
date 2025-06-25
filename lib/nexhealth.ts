@@ -517,6 +517,62 @@ export async function deleteNexhealthAppointmentType(
 }
 
 // @deprecated: Appointment types are now managed directly in Laine and pushed to NexHealth. Syncing from NexHealth is no longer supported for appointment types.
+interface NexHealthAppointmentSlot {
+  lid: number; // Location ID
+  pid: number; // Provider ID
+  slots: Array<{
+    time: string; // ISO string like "2025-12-23T07:00:00.000-06:00"
+    operatory_id?: number;
+  }>;
+}
+
+
+
+/**
+ * Fetch available appointment slots from NexHealth API
+ */
+export async function getNexhealthAvailableSlots(
+  subdomain: string,
+  locationId: string,
+  startDate: string, // YYYY-MM-DD format
+  daysToSearch: number,
+  providerNexHealthIds: string[],
+  slotLengthMinutes: number
+): Promise<NexHealthAppointmentSlot[]> {
+  try {
+    console.log(`[NexHealth Slots] Fetching slots for ${startDate}, ${daysToSearch} days, providers: ${providerNexHealthIds.join(',')}, slot length: ${slotLengthMinutes} minutes`);
+
+    // Build query parameters
+    const params: Record<string, string | number | string[]> = {
+      start_date: startDate,
+      days: daysToSearch,
+      'lids[]': locationId,
+      slot_length: slotLengthMinutes,
+    };
+
+    // Add provider IDs as array parameters
+    if (providerNexHealthIds.length > 0) {
+      params['pids[]'] = providerNexHealthIds;
+    }
+
+    // Call NexHealth API
+    const response = await fetchNexhealthAPI('/appointment_slots', subdomain, params);
+    
+    if (!response.data) {
+      console.error('[NexHealth Slots] Invalid response structure:', response);
+      throw new Error('Invalid response structure from NexHealth /appointment_slots');
+    }
+
+    const slotsData: NexHealthAppointmentSlot[] = response.data;
+    console.log(`[NexHealth Slots] Successfully fetched ${slotsData.length} slot groups`);
+    
+    return slotsData;
+  } catch (error) {
+    console.error('[NexHealth Slots] Error fetching appointment slots:', error);
+    throw error;
+  }
+}
+
 export async function syncPracticeAppointmentTypes(
   practiceId: string,
   subdomain: string,

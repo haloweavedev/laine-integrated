@@ -200,6 +200,13 @@ model CallLog {
   lastAppointmentTypeName      String? // Last determined appointment type name for context
   lastAppointmentDuration      Int?    // Last determined appointment duration for context
 
+  // New fields for slot checking context
+  requestedDateForSlots     String? // The date user asked for (e.g., "tomorrow", or normalized "YYYY-MM-DD")
+  normalizedDateForSlots    String? // The YYYY-MM-DD date used for API call
+  timePreferenceForSlots    String? // e.g., "morning", "after 3 PM"
+  slotsOfferedToPatient     Json?   // JSON array of {time: string, operatoryId: number} for offered slots
+  lastToolConversationState Json?   // Store the full JSON state passed to/from tools
+
   // Enhanced fields as per refactoring plan
   assistantId         String? // VAPI assistant ID
   endedReason         String? // From end-of-call-report
