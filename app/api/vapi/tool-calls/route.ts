@@ -65,7 +65,28 @@ export async function POST(request: NextRequest) {
       practiceId = firstPractice.id;
     }
 
-    // Create initial ToolLog entry
+    // --- FIX: Ensure CallLog exists BEFORE creating ToolLog ---
+    // This prevents the foreign key constraint violation
+    try {
+      await prisma.callLog.upsert({
+        where: { vapiCallId: callId },
+        update: { updatedAt: new Date() }, // Just update timestamp if it exists
+        create: {
+          vapiCallId: callId,
+          practiceId: practiceId || "unknown",
+          callStatus: "TOOL_INTERACTION_STARTED",
+          callTimestampStart: new Date(startTime),
+          createdAt: new Date(startTime),
+          updatedAt: new Date(startTime),
+        },
+      });
+      console.log(`[DB Log] Ensured CallLog exists for vapiCallId: ${callId}`);
+    } catch (dbError) {
+      console.error(`[DB Log] Error upserting initial CallLog for ${callId}:`, dbError);
+      // Continue processing, but logging will be affected
+    }
+
+    // Create initial ToolLog entry (now CallLog exists)
     try {
       console.log(`[DB Log] Attempting to create ToolLog for toolCallId: ${toolId}`);
       await prisma.toolLog.create({
@@ -80,6 +101,7 @@ export async function POST(request: NextRequest) {
           updatedAt: new Date(startTime),
         }
       });
+      console.log(`[DB Log] Created initial ToolLog for toolCallId: ${toolId}`);
     } catch (error) {
       console.error(`[DB Log] Error creating ToolLog:`, error);
       // Don't stop processing if ToolLog creation fails
@@ -168,33 +190,22 @@ export async function POST(request: NextRequest) {
 
               console.log(`[Tool Handler] Successfully found appointment type: ${matchedAppointment.name}. Sending to VAPI.`);
 
-              // Update CallLog with successful appointment type identification
+              // Update CallLog with successful appointment type identification (now it definitely exists)
               try {
-                console.log(`[DB Log] Upserting CallLog for vapiCallId: ${callId} with appointment type: ${matchedAppointment.name}`);
-                await prisma.callLog.upsert({
+                console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId} with appointment type: ${matchedAppointment.name}`);
+                await prisma.callLog.update({
                   where: { vapiCallId: callId },
-                  update: {
+                  data: {
                     lastAppointmentTypeId: matchedAppointment.nexhealthAppointmentTypeId,
                     lastAppointmentTypeName: matchedAppointment.name,
                     lastAppointmentDuration: matchedAppointment.duration,
                     detectedIntent: patientRequest,
                     callStatus: "APPOINTMENT_TYPE_IDENTIFIED",
-                    updatedAt: new Date(),
-                  },
-                  create: {
-                    vapiCallId: callId,
-                    practiceId: practiceId,
-                    lastAppointmentTypeId: matchedAppointment.nexhealthAppointmentTypeId,
-                    lastAppointmentTypeName: matchedAppointment.name,
-                    lastAppointmentDuration: matchedAppointment.duration,
-                    detectedIntent: patientRequest,
-                    callStatus: "APPOINTMENT_TYPE_IDENTIFIED",
-                    createdAt: new Date(),
                     updatedAt: new Date(),
                   }
                 });
               } catch (error) {
-                console.error(`[DB Log] Error upserting CallLog:`, error);
+                console.error(`[DB Log] Error updating CallLog:`, error);
                 // Don't let CallLog errors stop the tool response
               }
             } else {
@@ -213,27 +224,19 @@ export async function POST(request: NextRequest) {
             };
             console.log(`[Tool Handler] No appointment type match found for query: "${patientRequest}".`);
 
-            // Update CallLog for no match case
+            // Update CallLog for no match case (now it definitely exists)
             try {
-              console.log(`[DB Log] Upserting CallLog for vapiCallId: ${callId}, no appointment type match.`);
-              await prisma.callLog.upsert({
+              console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId}, no appointment type match.`);
+              await prisma.callLog.update({
                 where: { vapiCallId: callId },
-                update: {
+                data: {
                   detectedIntent: patientRequest,
                   callStatus: "APPOINTMENT_TYPE_NOT_FOUND",
-                  updatedAt: new Date(),
-                },
-                create: {
-                  vapiCallId: callId,
-                  practiceId: practiceId,
-                  detectedIntent: patientRequest,
-                  callStatus: "APPOINTMENT_TYPE_NOT_FOUND",
-                  createdAt: new Date(),
                   updatedAt: new Date(),
                 }
               });
             } catch (error) {
-              console.error(`[DB Log] Error upserting CallLog:`, error);
+              console.error(`[DB Log] Error updating CallLog:`, error);
               // Don't let CallLog errors stop the tool response
             }
           }
@@ -289,13 +292,14 @@ export async function POST(request: NextRequest) {
         await prisma.toolLog.updateMany({
           where: { toolCallId: toolId! },
           data: {
-            result: toolResponse.result ? JSON.stringify(toolResponse.result) : undefined,
+            result: toolResponse.result || undefined, // Don't stringify, keep as string
             error: toolResponse.error || undefined,
             success: !toolResponse.error,
             executionTimeMs,
             updatedAt: new Date(),
           }
         });
+        console.log(`[DB Log] Updated ToolLog for toolCallId: ${toolId} with success: ${!toolResponse.error}`);
       } catch (error) {
         console.error(`[DB Log] Error updating ToolLog:`, error);
       }

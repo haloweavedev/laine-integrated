@@ -1,38 +1,186 @@
 import { NextResponse } from 'next/server';
-import { getLatestCallLogs, clearLatestCallLogs } from '@/lib/debugLogStore';
+import { prisma } from '@/lib/prisma';
+
+interface DetailedCallDebugData {
+  callId: string | null;
+  logs: Array<{
+    timestamp: string;
+    level: string;
+    message: string;
+    context?: any;
+  }>;
+  callLog?: {
+    vapiCallId: string;
+    practiceId: string;
+    callStatus: string;
+    detectedIntent?: string;
+    lastAppointmentTypeId?: string;
+    lastAppointmentTypeName?: string;
+    lastAppointmentDuration?: number;
+    callTimestampStart?: Date;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  toolLogs?: Array<{
+    toolCallId: string;
+    toolName: string;
+    arguments: string;
+    result?: string;
+    error?: string;
+    success: boolean;
+    executionTimeMs?: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+}
 
 /**
  * GET endpoint to retrieve the latest VAPI tool call logs
  * Returns aggregated logs for the most recent call that involved tool executions
  */
 export async function GET() {
-  // Basic security: Check for a specific query parameter or header if you want to restrict access
-  // For local development, this might not be strictly necessary, but good practice for anything potentially deployable.
-  // Example:
-  // const secret = request.headers.get('X-Debug-Secret');
-  // if (process.env.NODE_ENV === 'production' && secret !== process.env.DEBUG_SECRET_KEY) {
-  //     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  // }
-
   try {
-    const logData = getLatestCallLogs();
-    return NextResponse.json(logData, { status: 200 });
+    // Find the most recent CallLog that has associated ToolLogs
+    const latestCallWithTools = await prisma.callLog.findFirst({
+      where: {
+        toolLogs: {
+          some: {} // Has at least one tool log
+        }
+      },
+      orderBy: {
+        updatedAt: 'desc'
+      },
+      include: {
+        toolLogs: {
+          orderBy: {
+            createdAt: 'asc'
+          }
+        }
+      }
+    });
+
+    if (!latestCallWithTools) {
+      // No calls with tool interactions found
+      const emptyResponse: DetailedCallDebugData = {
+        callId: null,
+        logs: []
+      };
+      return NextResponse.json(emptyResponse, { status: 200 });
+    }
+
+    // Transform the data into the expected format
+    const logs: DetailedCallDebugData['logs'] = [];
+    
+    // Add call start log
+    logs.push({
+      timestamp: latestCallWithTools.createdAt.toISOString(),
+      level: 'info',
+      message: `Call started for practice ${latestCallWithTools.practiceId}`,
+      context: {
+        callId: latestCallWithTools.vapiCallId,
+        practiceId: latestCallWithTools.practiceId,
+        status: latestCallWithTools.callStatus
+      }
+    });
+
+    // Add tool execution logs
+    for (const toolLog of latestCallWithTools.toolLogs) {
+      // Tool call start
+      logs.push({
+        timestamp: toolLog.createdAt.toISOString(),
+        level: 'info',
+        message: `Tool ${toolLog.toolName} called`,
+                          context: {
+           toolCallId: toolLog.toolCallId,
+           toolName: toolLog.toolName,
+           arguments: toolLog.arguments || "{}"
+         }
+      });
+
+      // Tool call result
+      const resultLevel = toolLog.success ? 'info' : 'error';
+      const resultMessage = toolLog.success 
+        ? `Tool ${toolLog.toolName} completed successfully${toolLog.executionTimeMs ? ` in ${toolLog.executionTimeMs}ms` : ''}`
+        : `Tool ${toolLog.toolName} failed: ${toolLog.error}`;
+      
+      logs.push({
+        timestamp: toolLog.updatedAt.toISOString(),
+        level: resultLevel,
+        message: resultMessage,
+        context: {
+          toolCallId: toolLog.toolCallId,
+          toolName: toolLog.toolName,
+          success: toolLog.success,
+          result: toolLog.result,
+          error: toolLog.error,
+          executionTimeMs: toolLog.executionTimeMs
+        }
+      });
+    }
+
+    // Add final call status if available
+    if (latestCallWithTools.callStatus) {
+      logs.push({
+        timestamp: latestCallWithTools.updatedAt.toISOString(),
+        level: 'info',
+        message: `Call status: ${latestCallWithTools.callStatus}`,
+        context: {
+          callId: latestCallWithTools.vapiCallId,
+          status: latestCallWithTools.callStatus,
+          detectedIntent: latestCallWithTools.detectedIntent,
+          appointmentType: latestCallWithTools.lastAppointmentTypeName
+        }
+      });
+    }
+
+    const response: DetailedCallDebugData = {
+      callId: latestCallWithTools.vapiCallId,
+      logs: logs.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()),
+      callLog: {
+        vapiCallId: latestCallWithTools.vapiCallId,
+        practiceId: latestCallWithTools.practiceId,
+        callStatus: latestCallWithTools.callStatus,
+        detectedIntent: latestCallWithTools.detectedIntent || undefined,
+        lastAppointmentTypeId: latestCallWithTools.lastAppointmentTypeId || undefined,
+        lastAppointmentTypeName: latestCallWithTools.lastAppointmentTypeName || undefined,
+        lastAppointmentDuration: latestCallWithTools.lastAppointmentDuration || undefined,
+        callTimestampStart: latestCallWithTools.callTimestampStart || undefined,
+        createdAt: latestCallWithTools.createdAt,
+        updatedAt: latestCallWithTools.updatedAt,
+      },
+      toolLogs: latestCallWithTools.toolLogs.map(toolLog => ({
+        toolCallId: toolLog.toolCallId,
+        toolName: toolLog.toolName,
+        arguments: toolLog.arguments || "{}",
+        result: toolLog.result || undefined,
+        error: toolLog.error || undefined,
+        success: toolLog.success,
+        executionTimeMs: toolLog.executionTimeMs || undefined,
+        createdAt: toolLog.createdAt,
+        updatedAt: toolLog.updatedAt,
+      }))
+    };
+
+    return NextResponse.json(response, { status: 200 });
   } catch (error) {
-    console.error("Error fetching latest call logs:", error);
-    return NextResponse.json({ error: 'Failed to retrieve logs' }, { status: 500 });
+    console.error("Error fetching latest call logs from database:", error);
+    return NextResponse.json({ error: 'Failed to retrieve logs from database' }, { status: 500 });
   }
 }
 
 /**
- * DELETE endpoint to clear logs from the page if desired
+ * DELETE endpoint to clear logs from the database if desired
  * Useful for testing or manual cleanup
  */
 export async function DELETE() {
   try {
-    clearLatestCallLogs();
-    return NextResponse.json({ message: 'Logs cleared' }, { status: 200 });
+    // Delete all tool logs and call logs (in correct order due to foreign key constraints)
+    await prisma.toolLog.deleteMany({});
+    await prisma.callLog.deleteMany({});
+    
+    return NextResponse.json({ message: 'Database logs cleared' }, { status: 200 });
   } catch (error) {
-    console.error("Error clearing latest call logs:", error);
-    return NextResponse.json({ error: 'Failed to clear logs' }, { status: 500 });
+    console.error("Error clearing database logs:", error);
+    return NextResponse.json({ error: 'Failed to clear database logs' }, { status: 500 });
   }
 } 
