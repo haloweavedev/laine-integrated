@@ -79,4 +79,92 @@ export interface VapiToolResult {
   toolCallId: string;
   result?: string;
   error?: string;
+}
+
+// === VAPI Webhook Message Types ===
+
+// Base message structure for all VAPI webhook events
+export interface VapiBaseMessage {
+  timestamp: number;
+  type: string; // The crucial field, e.g., "status-update", "transcript", "end-of-call-report"
+  call?: {
+    id: string;
+    orgId?: string;
+    assistantId?: string;
+    status?: string;
+    startedAt?: string;
+    endedAt?: string;
+    endedReason?: string;
+    cost?: string;
+  };
+  assistant?: {
+    id: string;
+    name?: string;
+  };
+}
+
+// Status update message (e.g., call started, ended, etc.)
+export interface VapiStatusUpdateMessage extends VapiBaseMessage {
+  type: "status-update";
+  status?: string; // e.g., "queued", "ringing", "in-progress", "ended"
+  endedReason?: string; // e.g., "customer-ended-call", "assistant-ended-call"
+  call: {
+    id: string;
+    orgId?: string;
+    assistantId: string;
+    status: string;
+    startedAt?: string;
+    endedAt?: string;
+    endedReason?: string;
+    cost?: string;
+  };
+}
+
+// End of call report message with summary and final details
+export interface VapiEndOfCallReportMessage extends VapiBaseMessage {
+  type: "end-of-call-report";
+  summary?: string;
+  transcript?: {
+    url?: string;
+    text?: string;
+  };
+  call: {
+    id: string;
+    orgId?: string;
+    assistantId: string;
+    status: string;
+    startedAt?: string;
+    endedAt?: string;
+    endedReason?: string;
+    cost?: string;
+  };
+}
+
+// Transcript message for real-time or full transcript updates
+export interface VapiTranscriptMessage extends VapiBaseMessage {
+  type: "transcript";
+  transcript?: {
+    text?: string;
+    url?: string;
+  };
+  call: {
+    id: string;
+    orgId?: string;
+    assistantId: string;
+    status?: string;
+    startedAt?: string;
+  };
+}
+
+// Union type for all possible VAPI webhook messages
+export type VapiWebhookMessage = 
+  | VapiStatusUpdateMessage 
+  | VapiEndOfCallReportMessage 
+  | VapiTranscriptMessage 
+  | VapiBaseMessage;
+
+// Complete webhook payload structure
+export interface VapiWebhookPayload {
+  message: VapiWebhookMessage;
+  // Potentially other top-level fields from VAPI if any
 } 

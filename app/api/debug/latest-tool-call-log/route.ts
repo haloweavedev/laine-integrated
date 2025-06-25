@@ -7,28 +7,28 @@ interface DetailedCallDebugData {
     timestamp: string;
     level: string;
     message: string;
-    context?: any;
+    context?: Record<string, unknown>;
   }>;
   callLog?: {
     vapiCallId: string;
     practiceId: string;
-    callStatus: string;
-    detectedIntent?: string;
-    lastAppointmentTypeId?: string;
-    lastAppointmentTypeName?: string;
-    lastAppointmentDuration?: number;
-    callTimestampStart?: Date;
+    callStatus: string | null;
+    detectedIntent?: string | null;
+    lastAppointmentTypeId?: string | null;
+    lastAppointmentTypeName?: string | null;
+    lastAppointmentDuration?: number | null;
+    callTimestampStart?: Date | null;
     createdAt: Date;
     updatedAt: Date;
   };
   toolLogs?: Array<{
     toolCallId: string;
     toolName: string;
-    arguments: string;
-    result?: string;
-    error?: string;
+    arguments: string | null;
+    result?: string | null;
+    error?: string | null;
     success: boolean;
-    executionTimeMs?: number;
+    executionTimeMs?: number | null;
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -140,22 +140,22 @@ export async function GET() {
         vapiCallId: latestCallWithTools.vapiCallId,
         practiceId: latestCallWithTools.practiceId,
         callStatus: latestCallWithTools.callStatus,
-        detectedIntent: latestCallWithTools.detectedIntent || undefined,
-        lastAppointmentTypeId: latestCallWithTools.lastAppointmentTypeId || undefined,
-        lastAppointmentTypeName: latestCallWithTools.lastAppointmentTypeName || undefined,
-        lastAppointmentDuration: latestCallWithTools.lastAppointmentDuration || undefined,
-        callTimestampStart: latestCallWithTools.callTimestampStart || undefined,
+        detectedIntent: latestCallWithTools.detectedIntent,
+        lastAppointmentTypeId: latestCallWithTools.lastAppointmentTypeId,
+        lastAppointmentTypeName: latestCallWithTools.lastAppointmentTypeName,
+        lastAppointmentDuration: latestCallWithTools.lastAppointmentDuration,
+        callTimestampStart: latestCallWithTools.callTimestampStart,
         createdAt: latestCallWithTools.createdAt,
         updatedAt: latestCallWithTools.updatedAt,
       },
       toolLogs: latestCallWithTools.toolLogs.map(toolLog => ({
         toolCallId: toolLog.toolCallId,
         toolName: toolLog.toolName,
-        arguments: toolLog.arguments || "{}",
-        result: toolLog.result || undefined,
-        error: toolLog.error || undefined,
+        arguments: toolLog.arguments,
+        result: toolLog.result,
+        error: toolLog.error,
         success: toolLog.success,
-        executionTimeMs: toolLog.executionTimeMs || undefined,
+        executionTimeMs: toolLog.executionTimeMs,
         createdAt: toolLog.createdAt,
         updatedAt: toolLog.updatedAt,
       }))

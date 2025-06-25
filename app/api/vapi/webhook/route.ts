@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyVapiRequest } from "@/lib/vapi";
 import { prisma } from "@/lib/prisma";
+import type { VapiWebhookPayload, VapiStatusUpdateMessage, VapiEndOfCallReportMessage, VapiTranscriptMessage } from "@/types/vapi";
 
 export async function POST(request: NextRequest) {
   console.log("=== VAPI General Webhook Handler ===");
@@ -13,184 +14,209 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const payload = await request.json();
-    console.log("VAPI webhook payload type:", payload.type);
-    console.log("VAPI webhook payload:", JSON.stringify(payload, null, 2));
+    // Parse the JSON body and type it properly
+    const body: VapiWebhookPayload = await request.json();
+    
+    // Correctly extract the message type from body.message.type
+    const messageType = body.message?.type;
 
-    // Handle different webhook types
-    switch (payload.type) {
+    console.log("=== VAPI General Webhook Handler ===");
+    console.log("[VAPI] Request verification - not yet implemented"); 
+    console.log("VAPI webhook message type:", messageType);
+    console.log("VAPI webhook payload:", JSON.stringify(body, null, 2));
+
+    if (!messageType) {
+      console.error("[VAPI Webhook] Message type is missing or undefined in payload.");
+      return NextResponse.json({ error: "Malformed VAPI webhook payload: message.type missing." }, { status: 400 });
+    }
+
+    // Handle different webhook types based on message.type
+    switch (messageType) {
       case "status-update":
-        await handleStatusUpdate(payload);
+        await handleStatusUpdate(body.message as VapiStatusUpdateMessage);
         break;
       
       case "end-of-call-report":
-        await handleEndOfCallReport(payload);
+        await handleEndOfCallReport(body.message as VapiEndOfCallReportMessage);
         break;
       
       case "transcript":
-        await handleTranscript(payload);
+        await handleTranscript(body.message as VapiTranscriptMessage);
         break;
       
       default:
-        console.log(`Unhandled VAPI webhook type: ${payload.type}`);
+        console.log(`[VAPI Webhook] Received unhandled message type: ${messageType}`);
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, message: `Webhook type ${messageType} received.` }, { status: 200 });
   } catch (error) {
-    console.error("Error processing VAPI webhook:", error);
-    return NextResponse.json(
-      { error: "Internal server error" }, 
-      { status: 500 }
-    );
+    console.error("[VAPI Webhook] Error processing webhook:", error);
+    return NextResponse.json({ error: "Failed to process webhook" }, { status: 500 });
   }
 }
 
-async function handleStatusUpdate(payload: { call?: { id: string; assistantId: string; status: string; startedAt?: string } }) {
-  console.log("Handling status update:", payload.call?.status);
+async function handleStatusUpdate(message: VapiStatusUpdateMessage) {
+  console.log(`[VAPI Webhook] Received status-update. Status: ${message.call?.status}, Ended Reason: ${message.call?.endedReason}`);
   
   try {
-    if (!payload.call) {
+    if (!message.call) {
       console.error("No call data in status update payload");
       return;
     }
 
     // Find practice by assistant ID
-    const practice = await findPracticeByAssistantId(payload.call.assistantId);
+    const practice = await findPracticeByAssistantId(message.call.assistantId);
     if (!practice) {
-      console.error("Practice not found for assistant:", payload.call.assistantId);
+      console.error("Practice not found for assistant:", message.call.assistantId);
       return;
     }
 
     // Update or create call log
     await prisma.callLog.upsert({
-      where: { vapiCallId: payload.call.id },
+      where: { vapiCallId: message.call.id },
       create: {
-        vapiCallId: payload.call.id,
+        vapiCallId: message.call.id,
         practiceId: practice.id,
-        assistantId: payload.call.assistantId,
-        callTimestampStart: payload.call.startedAt ? new Date(payload.call.startedAt) : null,
-        callStatus: payload.call.status,
+        assistantId: message.call.assistantId,
+        callTimestampStart: message.call.startedAt ? new Date(message.call.startedAt) : null,
+        callStatus: message.call.status,
       },
       update: {
-        callStatus: payload.call.status,
-        assistantId: payload.call.assistantId,
+        callStatus: message.call.status,
+        assistantId: message.call.assistantId,
         updatedAt: new Date()
       }
     });
 
-    console.log(`Updated call status for ${payload.call.id}: ${payload.call.status}`);
+    console.log(`[VAPI Webhook] Updated call status for ${message.call.id}: ${message.call.status}`);
+    
+    // TODO: Enhanced status handling - if (message.call.status === 'ended' && message.call.endedReason) {
+    //   await prisma.callLog.updateMany({ 
+    //     where: { vapiCallId: message.call.id }, 
+    //     data: { 
+    //       callStatus: 'ENDED', 
+    //       endedReason: message.call.endedReason, 
+    //       updatedAt: new Date() 
+    //     }
+    //   });
+    // }
   } catch (error) {
-    console.error("Error handling status update:", error);
+    console.error("[VAPI Webhook] Error handling status update:", error);
   }
 }
 
-async function handleEndOfCallReport(payload: { 
-  call?: { 
-    id: string; 
-    assistantId: string; 
-    startedAt?: string; 
-    endedAt?: string; 
-    endedReason?: string; 
-    cost?: string 
-  }; 
-  summary?: string; 
-  transcript?: { url?: string } 
-}) {
-  console.log("Handling end of call report");
+async function handleEndOfCallReport(message: VapiEndOfCallReportMessage) {
+  console.log(`[VAPI Webhook] Received end-of-call-report. Call ID: ${message.call?.id}`);
   
   try {
-    if (!payload.call) {
-      console.error("No call data in end-of-call-report payload");
+    if (!message.call) {
+      console.error("[VAPI Webhook] No call data in end-of-call-report payload");
       return;
     }
 
     // Find practice by assistant ID
-    const practice = await findPracticeByAssistantId(payload.call.assistantId);
+    const practice = await findPracticeByAssistantId(message.call.assistantId);
     if (!practice) {
-      console.error("Practice not found for assistant:", payload.call.assistantId);
+      console.error("[VAPI Webhook] Practice not found for assistant:", message.call.assistantId);
       return;
     }
 
     // Update call log with final details
     await prisma.callLog.upsert({
-      where: { vapiCallId: payload.call.id },
+      where: { vapiCallId: message.call.id },
       create: {
-        vapiCallId: payload.call.id,
+        vapiCallId: message.call.id,
         practiceId: practice.id,
-        assistantId: payload.call.assistantId,
-        callTimestampStart: payload.call.startedAt ? new Date(payload.call.startedAt) : null,
+        assistantId: message.call.assistantId,
+        callTimestampStart: message.call.startedAt ? new Date(message.call.startedAt) : null,
         callStatus: "ENDED",
-        endedReason: payload.call.endedReason,
-        callDurationSeconds: payload.call.startedAt && payload.call.endedAt 
-          ? Math.round((new Date(payload.call.endedAt).getTime() - new Date(payload.call.startedAt).getTime()) / 1000)
+        endedReason: message.call.endedReason,
+        callDurationSeconds: message.call.startedAt && message.call.endedAt 
+          ? Math.round((new Date(message.call.endedAt).getTime() - new Date(message.call.startedAt).getTime()) / 1000)
           : null,
-        cost: payload.call.cost ? parseFloat(payload.call.cost) : null,
-        summary: payload.summary,
-        vapiTranscriptUrl: payload.transcript?.url,
+        cost: message.call.cost ? parseFloat(message.call.cost) : null,
+        summary: message.summary,
+        vapiTranscriptUrl: message.transcript?.url,
       },
       update: {
         callStatus: "ENDED",
-        endedReason: payload.call.endedReason,
-        callDurationSeconds: payload.call.startedAt && payload.call.endedAt 
-          ? Math.round((new Date(payload.call.endedAt).getTime() - new Date(payload.call.startedAt).getTime()) / 1000)
+        endedReason: message.call.endedReason,
+        callDurationSeconds: message.call.startedAt && message.call.endedAt 
+          ? Math.round((new Date(message.call.endedAt).getTime() - new Date(message.call.startedAt).getTime()) / 1000)
           : null,
-        cost: payload.call.cost ? parseFloat(payload.call.cost) : null,
-        summary: payload.summary,
-        vapiTranscriptUrl: payload.transcript?.url,
+        cost: message.call.cost ? parseFloat(message.call.cost) : null,
+        summary: message.summary,
+        vapiTranscriptUrl: message.transcript?.url,
         updatedAt: new Date()
       }
     });
 
-    console.log(`Updated end of call report for ${payload.call.id}`);
+    console.log(`[VAPI Webhook] Updated end of call report for ${message.call.id}`);
+    
+    // TODO: Additional end-of-call processing - if (message.call.id && message.summary) {
+    //   await prisma.callLog.updateMany({ 
+    //     where: { vapiCallId: message.call.id }, 
+    //     data: { 
+    //       summary: message.summary, 
+    //       cost: message.call.cost ? parseFloat(message.call.cost) : null,
+    //       callDurationSeconds: message.call.startedAt && message.call.endedAt 
+    //         ? Math.round((new Date(message.call.endedAt).getTime() - new Date(message.call.startedAt).getTime()) / 1000)
+    //         : null,
+    //       updatedAt: new Date() 
+    //     }
+    //   });
+    // }
   } catch (error) {
-    console.error("Error handling end of call report:", error);
+    console.error("[VAPI Webhook] Error handling end of call report:", error);
   }
 }
 
-async function handleTranscript(payload: { 
-  call?: { 
-    id: string; 
-    assistantId: string; 
-    startedAt?: string; 
-    status?: string 
-  }; 
-  transcript?: { text?: string } 
-}) {
-  console.log("Handling transcript update");
+async function handleTranscript(message: VapiTranscriptMessage) {
+  console.log(`[VAPI Webhook] Received transcript update. Call ID: ${message.call?.id}`);
   
   try {
-    if (!payload.call) {
-      console.error("No call data in transcript payload");
+    if (!message.call) {
+      console.error("[VAPI Webhook] No call data in transcript payload");
       return;
     }
 
     // Find practice by assistant ID
-    const practice = await findPracticeByAssistantId(payload.call.assistantId);
+    const practice = await findPracticeByAssistantId(message.call.assistantId);
     if (!practice) {
-      console.error("Practice not found for assistant:", payload.call.assistantId);
+      console.error("[VAPI Webhook] Practice not found for assistant:", message.call.assistantId);
       return;
     }
 
     // Update call log with transcript
     await prisma.callLog.upsert({
-      where: { vapiCallId: payload.call.id },
+      where: { vapiCallId: message.call.id },
       create: {
-        vapiCallId: payload.call.id,
+        vapiCallId: message.call.id,
         practiceId: practice.id,
-        assistantId: payload.call.assistantId,
-        callTimestampStart: payload.call.startedAt ? new Date(payload.call.startedAt) : null,
-        callStatus: payload.call.status || "IN_PROGRESS",
-        transcriptText: payload.transcript?.text,
+        assistantId: message.call.assistantId,
+        callTimestampStart: message.call.startedAt ? new Date(message.call.startedAt) : null,
+        callStatus: message.call.status || "IN_PROGRESS",
+        transcriptText: message.transcript?.text,
       },
       update: {
-        transcriptText: payload.transcript?.text,
+        transcriptText: message.transcript?.text,
         updatedAt: new Date()
       }
     });
 
-    console.log(`Updated transcript for ${payload.call.id}`);
+    console.log(`[VAPI Webhook] Updated transcript for ${message.call.id}`);
+    
+    // TODO: Enhanced transcript handling - if (message.call.id && message.transcript?.text) {
+    //   await prisma.callLog.updateMany({ 
+    //     where: { vapiCallId: message.call.id }, 
+    //     data: { 
+    //       transcriptText: message.transcript.text, 
+    //       updatedAt: new Date() 
+    //     }
+    //   });
+    // }
   } catch (error) {
-    console.error("Error handling transcript:", error);
+    console.error("[VAPI Webhook] Error handling transcript:", error);
   }
 }
 
