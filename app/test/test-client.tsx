@@ -106,7 +106,7 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
   };
 
   const handlePhoneCall = () => {
-    window.open('tel:+19203927291', '_self');
+    window.open('tel:+19016171554', '_self');
   };
 
   return (
@@ -129,7 +129,7 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
           >
             <div className="flex items-center space-x-2">
               <span className="text-lg">📱</span>
-              <span>+1 (920) 392 7260</span>
+              <span>+1 (901) 617 1554</span>
             </div>
           </button>
         </div>
