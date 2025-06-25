@@ -29,27 +29,8 @@ export interface VapiVoice {
   similarityBoost?: number;
   style?: number;
   useSpeakerBoost?: boolean;
-}
-
-export interface VapiTool {
-  type: "function";
-  async?: boolean;
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>; // JSON Schema object
-  };
-  server: {
-    url: string;
-    secret?: string;
-  };
-  messages?: Array<{
-    type: "request-start" | "request-response-delayed" | "request-complete" | "request-failed";
-    content?: string;
-    timingMilliseconds?: number;
-  }>;
-}
-
+  }
+  
 export interface VapiAssistant {
   id: string;
   name: string;
@@ -91,6 +72,10 @@ export interface UpdateAssistantDTO extends Partial<CreateAssistantDTO> {
   _placeholder?: never; // Placeholder to avoid empty interface error
 }
 
+// Import types from the new types file
+import type { VapiUpdatePayload, VapiTool } from '@/types/vapi';
+export type { VapiUpdatePayload, VapiTool } from '@/types/vapi';
+
 async function vapiRequest(
   endpoint: string,
   method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
@@ -114,9 +99,9 @@ async function vapiRequest(
     options.body = JSON.stringify(body);
   }
 
-  console.log(`VAPI API: ${method} ${url}`);
+  console.log(`[VAPI API] ${method} ${url}`);
   if (body) {
-    console.log("VAPI API body:", JSON.stringify(body, null, 2));
+    console.log("[VAPI API] Request body:", JSON.stringify(body, null, 2));
   }
 
   try {
@@ -124,42 +109,46 @@ async function vapiRequest(
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`VAPI API error (${response.status}):`, errorText);
+      console.error(`[VAPI API] Error (${response.status}):`, errorText);
       throw new Error(`VAPI API error (${response.status}): ${errorText}`);
     }
 
     const data = await response.json();
-    console.log(`VAPI API response:`, JSON.stringify(data, null, 2));
+    console.log(`[VAPI API] Response:`, JSON.stringify(data, null, 2));
     return data as Record<string, unknown>;
   } catch (error) {
-    console.error("VAPI API request failed:", error);
+    console.error("[VAPI API] Request failed:", error);
     throw error;
   }
 }
 
 export async function createVapiAssistant(assistantConfig: CreateAssistantDTO): Promise<VapiAssistant> {
-  console.log("Creating VAPI assistant:", assistantConfig.name);
+  console.log("[VAPI] Creating assistant:", assistantConfig.name);
   const result = await vapiRequest("/assistant", "POST", assistantConfig as unknown as Record<string, unknown>);
   return result as unknown as VapiAssistant;
 }
 
-export async function updateVapiAssistant(
-  assistantId: string, 
-  assistantConfig: UpdateAssistantDTO
-): Promise<VapiAssistant> {
-  console.log(`Updating VAPI assistant ${assistantId}`);
-  const result = await vapiRequest(`/assistant/${assistantId}`, "PATCH", assistantConfig as unknown as Record<string, unknown>);
-  return result as unknown as VapiAssistant;
+// Refactored updateVapiAssistant function for Subphase 1.1
+export async function updateVapiAssistant(assistantId: string, payload: VapiUpdatePayload): Promise<void> {
+  console.log(`[VAPI Update] Updating assistant ID: ${assistantId}`);
+  
+  try {
+    await vapiRequest(`/assistant/${assistantId}`, "PATCH", payload as unknown as Record<string, unknown>);
+    console.log(`[VAPI Update] Successfully updated assistant ID: ${assistantId}`);
+  } catch (error) {
+    console.error(`[VAPI Update] Failed to update assistant ${assistantId}:`, error);
+    throw error;
+  }
 }
 
 export async function getVapiAssistant(assistantId: string): Promise<VapiAssistant | null> {
   try {
-    console.log(`Getting VAPI assistant ${assistantId}`);
+    console.log(`[VAPI] Getting assistant ${assistantId}`);
     const result = await vapiRequest(`/assistant/${assistantId}`, "GET");
     return result as unknown as VapiAssistant;
   } catch (error: unknown) {
     if (error instanceof Error && error.message.includes("404")) {
-      console.log(`VAPI assistant ${assistantId} not found`);
+      console.log(`[VAPI] Assistant ${assistantId} not found`);
       return null;
     }
     throw error;
@@ -167,7 +156,7 @@ export async function getVapiAssistant(assistantId: string): Promise<VapiAssista
 }
 
 export async function deleteVapiAssistant(assistantId: string): Promise<void> {
-  console.log(`Deleting VAPI assistant ${assistantId}`);
+  console.log(`[VAPI] Deleting assistant ${assistantId}`);
   await vapiRequest(`/assistant/${assistantId}`, "DELETE");
 }
 
@@ -175,6 +164,6 @@ export async function deleteVapiAssistant(assistantId: string): Promise<void> {
 export async function verifyVapiRequest(): Promise<{ verified: boolean; error?: string }> {
   // TODO: Implement if VAPI provides request signing
   // For now, return true as a placeholder
-  console.log("VAPI request verification - not yet implemented");
+  console.log("[VAPI] Request verification - not yet implemented");
   return { verified: true };
 } 

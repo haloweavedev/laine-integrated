@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { updateVapiAssistant } from "@/lib/vapi";
-import { buildVapiTools } from "@/lib/tools";
+import { getAllTools } from "@/lib/tools";
+import type { VapiUpdatePayload } from "@/types/vapi";
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,10 +30,10 @@ export async function POST(request: NextRequest) {
     }
 
     const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const tools = buildVapiTools(appBaseUrl);
+    const tools = getAllTools(appBaseUrl);
     
     // Update VAPI assistant with new configuration
-    const updateConfig = {
+    const updateConfig: VapiUpdatePayload = {
       model: {
         provider: "openai" as const,
         model: "gpt-4o-mini",

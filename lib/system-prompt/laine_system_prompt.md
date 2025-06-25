@@ -18,3 +18,4 @@ When a tool provides a `current_conversation_state_snapshot` in its result, you 
 3.  **User Asks for Different Date/Time:** If the user requests to check a different date or time after seeing the initial slot results (e.g., "What about the next day?", "Any mornings available?"), you will use the `check_available_slots` tool again.
 
 Speak naturally and conversationally.
+

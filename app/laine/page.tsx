@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { createVapiAssistant } from "@/lib/vapi";
-import { buildVapiTools } from "@/lib/tools";
+import { getAllTools } from "@/lib/tools";
 import { LainePracticeClient } from "./laine-practice-client";
 
 async function createPracticeAssistant() {
@@ -31,7 +31,7 @@ async function createPracticeAssistant() {
   const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   
   // Build tools for the assistant
-  const tools = buildVapiTools(appBaseUrl);
+  const tools = getAllTools(appBaseUrl);
   
   // Create default assistant configuration
   const assistantConfig = {
