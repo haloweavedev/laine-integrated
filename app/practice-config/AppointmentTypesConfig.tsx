@@ -396,15 +396,29 @@ export function AppointmentTypesConfig({
                     onChange={(e) => setFormData({ ...formData, minutes: parseInt(e.target.value) })}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
+                    <option value={10}>10 minutes</option>
                     <option value={15}>15 minutes</option>
+                    <option value={20}>20 minutes</option>
                     <option value={30}>30 minutes</option>
+                    <option value={40}>40 minutes</option>
                     <option value={45}>45 minutes</option>
+                    <option value={50}>50 minutes</option>
                     <option value={60}>60 minutes</option>
+                    <option value={70}>70 minutes</option>
                     <option value={75}>75 minutes</option>
+                    <option value={80}>80 minutes</option>
                     <option value={90}>90 minutes</option>
+                    <option value={100}>100 minutes</option>
                     <option value={105}>105 minutes</option>
+                    <option value={110}>110 minutes</option>
                     <option value={120}>120 minutes</option>
+                    <option value={130}>130 minutes</option>
+                    <option value={135}>135 minutes</option>
+                    <option value={140}>140 minutes</option>
                     <option value={150}>150 minutes</option>
+                    <option value={160}>160 minutes</option>
+                    <option value={165}>165 minutes</option>
+                    <option value={170}>170 minutes</option>
                     <option value={180}>180 minutes</option>
                   </select>
                 </div>
@@ -517,15 +531,29 @@ export function AppointmentTypesConfig({
                     onChange={(e) => setFormData({ ...formData, minutes: parseInt(e.target.value) })}
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
+                    <option value={10}>10 minutes</option>
                     <option value={15}>15 minutes</option>
+                    <option value={20}>20 minutes</option>
                     <option value={30}>30 minutes</option>
+                    <option value={40}>40 minutes</option>
                     <option value={45}>45 minutes</option>
+                    <option value={50}>50 minutes</option>
                     <option value={60}>60 minutes</option>
+                    <option value={70}>70 minutes</option>
                     <option value={75}>75 minutes</option>
+                    <option value={80}>80 minutes</option>
                     <option value={90}>90 minutes</option>
+                    <option value={100}>100 minutes</option>
                     <option value={105}>105 minutes</option>
+                    <option value={110}>110 minutes</option>
                     <option value={120}>120 minutes</option>
+                    <option value={130}>130 minutes</option>
+                    <option value={135}>135 minutes</option>
+                    <option value={140}>140 minutes</option>
                     <option value={150}>150 minutes</option>
+                    <option value={160}>160 minutes</option>
+                    <option value={165}>165 minutes</option>
+                    <option value={170}>170 minutes</option>
                     <option value={180}>180 minutes</option>
                   </select>
                 </div>

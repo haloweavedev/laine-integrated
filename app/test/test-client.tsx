@@ -129,7 +129,7 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
           >
             <div className="flex items-center space-x-2">
               <span className="text-lg">📱</span>
-              <span>+1 (901) 617 1554</span>
+              <span>+1 (910) 418 1866</span>
             </div>
           </button>
         </div>
