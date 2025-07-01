@@ -4,7 +4,26 @@ import { DateTime } from "luxon";
 import type { CoreMessage } from "ai";
 
 /**
+ * Defines the time ranges for different parts of the day.
+ * Used to filter appointment slots based on user preference.
+ * Note: 'Morning' and 'Afternoon' are broad, while others are more specific.
+ * 'Midday' overlaps with both Morning and Afternoon to catch appointments around noon.
+ */
+export const TIME_BUCKETS = {
+  Early:     { start: "05:00", end: "08:30" },
+  Morning:   { start: "05:00", end: "12:00" },
+  Midday:    { start: "10:00", end: "15:00" },
+  Afternoon: { start: "12:00", end: "17:00" },
+  Evening:   { start: "15:30", end: "20:00" },
+  Late:      { start: "17:00", end: "22:00" },
+  AllDay:    { start: "05:00", end: "22:00" }
+};
+
+export type TimeBucket = keyof typeof TIME_BUCKETS;
+
+/**
  * Normalize a date query using AI to convert natural language dates into YYYY-MM-DD format
+ * @deprecated This function will be removed in a future refactor phase as we move to preference-based scheduling
  */
 export async function normalizeDateWithAI(
   dateQuery: string, 
@@ -100,6 +119,7 @@ Normalized Date (YYYY-MM-DD or INVALID_DATE):`;
 
 /**
  * Generate a natural spoken message presenting available slots or alternatives
+ * @deprecated This function will be removed in a future refactor phase as we move to preference-based scheduling
  */
 export async function generateSlotResponseMessage(
   appointmentTypeName: string,

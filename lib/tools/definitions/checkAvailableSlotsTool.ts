@@ -9,24 +9,24 @@ export function getCheckAvailableSlotsTool(appBaseUrl: string): VapiTool {
     type: "function" as const,
     function: {
       name: "checkAvailableSlots",
-      description: "Checks for available appointment slots for a previously identified appointment type on a specific date, optionally considering a time preference. Use this AFTER an appointment type has been confirmed with the user and they have provided a date.",
+      description: "Finds the next 2 available appointment slots based on the user's preferred days and time of day. Use this AFTER an appointment type has been confirmed.",
       parameters: {
         type: "object" as const,
         properties: {
-          requestedDate: {
+          preferredDaysOfWeek: {
             type: "string" as const,
-            description: "The date the patient wants to check for availability. Can be relative (e.g., 'tomorrow', 'next Monday') or specific (e.g., 'July 25th', 'August 10 2024')."
+            description: "A JSON string array of the user's preferred days of the week. Example: '[\"Monday\", \"Wednesday\"]'. This is collected from the user."
           },
-          timePreference: {
+          timeBucket: {
             type: "string" as const,
-            description: "Optional. The patient's preferred time of day (e.g., 'morning', 'afternoon', 'any time', 'around 2 PM')."
+            description: "The user's general time preference, which must be one of the following values: 'Early', 'Morning', 'Midday', 'Afternoon', 'Evening', 'Late', or 'AllDay'. This is collected from the user."
           },
           conversationState: {
             type: "string" as const,
             description: "CRITICAL: The JSON string representing the current_conversation_state_snapshot from the result of the PREVIOUS tool call (e.g., from findAppointmentType). This contains essential context like the appointment type ID and duration."
           }
         },
-        required: ["requestedDate", "conversationState"]
+        required: ["preferredDaysOfWeek", "timeBucket", "conversationState"]
       }
     },
     server: {
