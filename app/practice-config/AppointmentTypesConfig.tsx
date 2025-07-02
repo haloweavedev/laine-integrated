@@ -470,6 +470,18 @@ export function AppointmentTypesConfig({
                 <div className="flex items-center">
                   <input
                     type="checkbox"
+                    id="createCheckImmediate"
+                    checked={formData.check_immediate_next_available}
+                    onChange={(e) => setFormData({ ...formData, check_immediate_next_available: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="createCheckImmediate" className="ml-2 block text-sm text-gray-700">
+                    Immediately find next available slot
+                  </label>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
                     id="bookableOnline"
                     checked={formData.bookableOnline}
                     onChange={(e) => setFormData({ ...formData, bookableOnline: e.target.checked })}
@@ -624,18 +636,6 @@ export function AppointmentTypesConfig({
                   />
                   <label htmlFor="editBookableOnline" className="ml-2 block text-sm text-gray-700">
                     Bookable Online
-                  </label>
-                </div>
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="checkImmediate"
-                    checked={formData.check_immediate_next_available}
-                    onChange={(e) => setFormData({ ...formData, check_immediate_next_available: e.target.checked })}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="checkImmediate" className="ml-2 block text-sm text-gray-700">
-                    Immediately find next available slot
                   </label>
                 </div>
               </div>
