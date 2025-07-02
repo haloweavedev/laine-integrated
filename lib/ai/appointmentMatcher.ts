@@ -114,7 +114,9 @@ Identified appointment:
 - Spoken Name: "${spokenName}"
 - Duration: ${matchedAppointmentDuration} minutes.
 
-Craft the spoken response for Laine using the Spoken Name (ensure it's a single line):`
+Example Output: "Okay, for ${spokenName}, that will take about ${matchedAppointmentDuration} minutes. Does that sound right?"
+
+Your turn. Generate the single, fluid, spoken response for Laine:`
       }
     ];
 

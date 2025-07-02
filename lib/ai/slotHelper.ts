@@ -503,30 +503,26 @@ export async function generateSlotResponse(
 
     const slotsList = formattedSlots.join(' or ');
     
-    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+    const userPrompt = `You are an AI response generator for a voice assistant named Laine. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering appointment slots.
 
-**CRITICAL RULES:**
-1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
-2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+Patient needs a: "${spokenName}"
+Available slots are: "${slotsList}"
 
-**Task:** For the patient's request for a '${spokenName}', you have found these openings: ${slotsList}. Offer them and ask if they work.
+Example Output: "For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?"
 
-**Example Output:** "For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?"`;
+Your turn. Generate the single, fluid, spoken response for Laine:`;
 
     try {
       const { text } = await generateText({
         model: openai("gpt-4o-mini"),
-        messages: [
-          { role: 'system', content: systemPrompt }
-        ],
+        messages: [{ role: "user", content: userPrompt }],
         temperature: 0.3,
         maxTokens: 100
       });
-
-      return text.trim() || `Great! For your ${spokenName}, I have ${slotsList} available. Would either of those work for you?`;
+      return text.trim() || `For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?`;
     } catch (error) {
       console.error('[Slot Response] Error generating AI response:', error);
-      return `Great! For your ${spokenName}, I have ${slotsList} available. Would either of those work for you?`;
+      return `For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?`;
     }
 
   } else if (searchResult.nextAvailableDate) {
