@@ -329,7 +329,7 @@ export async function findAvailableSlots(
   
   // Generate search dates based on startDate and searchDays
   const searchDates: string[] = [];
-  const startDateTime = DateTime.fromISO(startDate).setZone(timezone);
+  const startDateTime = DateTime.fromISO(startDate, { zone: timezone });
   
   for (let i = 0; i < searchDays; i++) {
     searchDates.push(startDateTime.plus({ days: i }).toFormat('yyyy-MM-dd'));
