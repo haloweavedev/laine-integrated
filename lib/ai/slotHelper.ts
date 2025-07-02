@@ -23,61 +23,36 @@ export type TimeBucket = keyof typeof TIME_BUCKETS;
 
 /**
  * Normalize a date query using AI to convert natural language dates into YYYY-MM-DD format
- * @deprecated This function will be removed in a future refactor phase as we move to preference-based scheduling
  */
 export async function normalizeDateWithAI(
   dateQuery: string, 
   practiceTimezone: string
 ): Promise<string | null> {
   try {
-    // Get current date in practice timezone for context
     const now = DateTime.now().setZone(practiceTimezone);
-    const currentDateForLLM = now.toFormat('yyyy-MM-dd');
-    const currentDayOfWeekForLLM = now.toFormat('cccc'); // e.g., "Monday"
-    const currentYear = now.year;
+    const systemPromptContent = `You are a highly specialized date parsing AI. Your only task is to convert a user's spoken date query into a strict 'YYYY-MM-DD' format.
     
-    console.log(`[Date Normalization] Parsing "${dateQuery}" in timezone ${practiceTimezone}, today is ${currentDateForLLM} (${currentDayOfWeekForLLM})`);
-
-    const systemPromptContent = `You are a date parsing expert. Your task is to convert a user's spoken date query, which may include speech-to-text (STT) transcription artifacts, into a strict 'YYYY-MM-DD' format.
-
-Current context:
-- Today's date is: ${currentDateForLLM} (${currentDayOfWeekForLLM}).
-- The user is interacting with a dental office in the timezone: ${practiceTimezone}.
-
-General Date Interpretation Instructions:
-1. Interpret relative dates like "today", "tomorrow", "next Monday", "in two weeks" based on the current date provided.
-2. If a month and day are given (e.g., "December 23rd", "July 4th") without a year, assume the *next upcoming occurrence* of that date.
-   - Example: If today is ${currentDateForLLM} and the user says "December 23rd", and December 23rd of the current year (${currentYear}) has already passed or is today, interpret it as December 23rd of the *next* year. Otherwise, interpret it as December 23rd of the current year.
-3. If a full date with year is provided, use that.
-
-Handling Speech-to-Text (STT) Artifacts for Dates:
-STT systems sometimes misinterpret spoken ordinal numbers. You need to correct these common patterns:
-- "twenty first" might be transcribed as "20 first". You should interpret this as the 21st.
-- "twenty second" might be transcribed as "20 second". You should interpret this as the 22nd.
-- "twenty third" might be transcribed as "20 third". You should interpret this as the 23rd.
-- "twenty fourth" might be transcribed as "20 fourth". You should interpret this as the 24th.
-- "twenty fifth" might be transcribed as "20 fifth". You should interpret this as the 25th.
-- "twenty sixth" might be transcribed as "20 sixth". You should interpret this as the 26th.
-- "twenty seventh" might be transcribed as "20 seventh". You should interpret this as the 27th.
-- "twenty eighth" might be transcribed as "20 eighth". You should interpret this as the 28th.
-- "twenty ninth" might be transcribed as "20 ninth". You should interpret this as the 29th.
-- "thirty first" might be transcribed as "30 first". You should interpret this as the 31st.
-- Similar patterns apply for other numbers (e.g., "thirty second" as "30 second" -> 32nd, but this would be invalid for dates).
-
-STT Artifact Examples (Assume today is ${currentDateForLLM}):
-- User Query: "December 20 third" -> This means December 23rd -> Calculate appropriate year based on current date
-- User Query: "Jan 30 first" -> This means January 31st -> Calculate appropriate year based on current date
-- User Query: "next month on the 20 second" -> This means the 22nd of next month -> Calculate appropriate YYYY-MM-DD
-- User Query: "March 20 fifth" -> This means March 25th -> Calculate appropriate year based on current date
-
-Additional STT Patterns to Handle:
-- Numbers written as digits followed by words: "23 rd", "21 st", "22 nd" should be interpreted as 23rd, 21st, 22nd
-- Mixed formats: "Dec 20 third", "January 30 first", etc.
-
-Output Format (CRITICAL):
-- If the query can be confidently resolved to a valid date after considering STT artifacts, your entire response MUST be ONLY the 'YYYY-MM-DD' string.
-- If the query is ambiguous, nonsensical as a date, or clearly not a date after considering STT artifacts, respond with the exact string "INVALID_DATE".
-- Do NOT add any other words, explanations, or formatting.`;
+    Current Context:
+    - Today's date is: ${now.toFormat('EEEE, MMMM d, yyyy')} (${now.toFormat('yyyy-MM-dd')}).
+    - The user is in the timezone: ${practiceTimezone}.
+    
+    Interpretation Rules:
+    1.  **Relative Dates:** Interpret "today", "tomorrow" based on the current date.
+    2.  **"Next" Keyword:** If the user says "next [day of week]" (e.g., "next Wednesday") and today is also a Wednesday, you MUST interpret this as the Wednesday of the *following* week (7 days from now). If today is a Monday and they say "next Wednesday", you mean the upcoming Wednesday of the same week.
+    3.  **Ambiguity:** If a query is ambiguous (e.g., "the 10th" without a month), or not a date, you MUST return 'INVALID_DATE'.
+    
+    Examples (Assuming today is Wednesday, 2025-07-02):
+    - "tomorrow" -> "2025-07-03"
+    - "next Wednesday" -> "2025-07-09"
+    - "this Friday" -> "2025-07-04"
+    - "July 10th" -> "2025-07-10"
+    - "a week from today" -> "2025-07-09"
+    - "the day after tomorrow" -> "2025-07-04"
+    
+    Output Format (CRITICAL):
+    - Your entire response MUST be ONLY the 'YYYY-MM-DD' string.
+    - If the query is invalid or cannot be resolved, your entire response MUST be the exact string "INVALID_DATE".
+    - Do NOT add any other words, explanations, or formatting.`;
 
     const userPromptContent = `User Query: "${dateQuery}"
 
@@ -321,19 +296,23 @@ interface NexHealthSlotsResponse {
 }
 
 /**
- * Find the immediate next available slots for an appointment type
+ * Find available slots for an appointment type
  * @param appointmentTypeId NexHealth appointment type ID
  * @param practice Practice details with NexHealth configuration
+ * @param startDate Starting date to search from in YYYY-MM-DD format
+ * @param searchDays Number of days to search
  * @returns Object with found slots and next available date if no slots found
  */
-export async function findImmediateNextAvailableSlots(
+export async function findAvailableSlots(
   appointmentTypeId: string,
   practice: {
     id: string;
     nexhealthSubdomain: string;
     nexhealthLocationId: string;
     timezone: string;
-  }
+  },
+  startDate: string,
+  searchDays: number
 ): Promise<{ foundSlots: SlotData[]; nextAvailableDate: string | null }> {
   const { fetchNexhealthAPI } = await import("@/lib/nexhealth");
   
@@ -343,34 +322,34 @@ export async function findImmediateNextAvailableSlots(
     practice.id
   );
 
-  console.log(`[Immediate Slot Search] Searching for ${duration}-minute slots with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
+  console.log(`[Slot Search] Searching for ${duration}-minute slots with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
 
   // Use practice timezone, default to America/Chicago if not set
   const timezone = practice.timezone || 'America/Chicago';
   
-  // Get current date and set up search dates (today, tomorrow, day after tomorrow)
-  const now = DateTime.now().setZone(timezone);
-  const searchDates = [
-    now.toFormat('yyyy-MM-dd'),           // today
-    now.plus({ days: 1 }).toFormat('yyyy-MM-dd'), // tomorrow  
-    now.plus({ days: 2 }).toFormat('yyyy-MM-dd')  // day after tomorrow
-  ];
+  // Generate search dates based on startDate and searchDays
+  const searchDates: string[] = [];
+  const startDateTime = DateTime.fromISO(startDate).setZone(timezone);
+  
+  for (let i = 0; i < searchDays; i++) {
+    searchDates.push(startDateTime.plus({ days: i }).toFormat('yyyy-MM-dd'));
+  }
 
-  console.log(`[Immediate Slot Search] Searching dates: ${searchDates.join(', ')} in timezone ${timezone}`);
+  console.log(`[Slot Search] Searching dates: ${searchDates.join(', ')} in timezone ${timezone}`);
 
   const foundSlots: SlotData[] = [];
   let nextAvailableDate: string | null = null;
 
-  // Search up to 3 days
+  // Search through the specified date range
   for (let i = 0; i < searchDates.length; i++) {
-    const startDate = searchDates[i];
+    const searchDate = searchDates[i];
     
     try {
-      console.log(`[Immediate Slot Search] Searching date ${startDate} (day ${i + 1}/3)`);
+      console.log(`[Slot Search] Searching date ${searchDate} (day ${i + 1}/${searchDates.length})`);
       
       // Construct API parameters for NexHealth appointment_slots endpoint
       const params: Record<string, string | string[]> = {
-        start_date: startDate,
+        start_date: searchDate,
         days: '1',
         'lids[]': practice.nexhealthLocationId,
         slot_length: duration.toString()
@@ -389,7 +368,7 @@ export async function findImmediateNextAvailableSlots(
         params
       ) as NexHealthSlotsResponse;
 
-      console.log(`[Immediate Slot Search] API response for ${startDate}:`, JSON.stringify(response, null, 2));
+      console.log(`[Slot Search] API response for ${searchDate}:`, JSON.stringify(response, null, 2));
 
       // Process the response data
       if (response.data && Array.isArray(response.data)) {
@@ -406,11 +385,11 @@ export async function findImmediateNextAvailableSlots(
         });
 
         foundSlots.push(...daySlots);
-        console.log(`[Immediate Slot Search] Found ${daySlots.length} slots on ${startDate}, total so far: ${foundSlots.length}`);
+        console.log(`[Slot Search] Found ${daySlots.length} slots on ${searchDate}, total so far: ${foundSlots.length}`);
 
         // If we have 2 or more slots, we can break early
         if (foundSlots.length >= 2) {
-          console.log(`[Immediate Slot Search] Found sufficient slots (${foundSlots.length}), stopping search`);
+          console.log(`[Slot Search] Found sufficient slots (${foundSlots.length}), stopping search`);
           break;
         }
       }
@@ -418,11 +397,11 @@ export async function findImmediateNextAvailableSlots(
       // Store next_available_date from the last API response if present
       if (response.next_available_date) {
         nextAvailableDate = response.next_available_date;
-        console.log(`[Immediate Slot Search] Found next_available_date: ${nextAvailableDate}`);
+        console.log(`[Slot Search] Found next_available_date: ${nextAvailableDate}`);
       }
 
     } catch (error) {
-      console.error(`[Immediate Slot Search] Error searching ${startDate}:`, error);
+      console.error(`[Slot Search] Error searching ${searchDate}:`, error);
       // Continue to next date on error
     }
   }
@@ -430,7 +409,7 @@ export async function findImmediateNextAvailableSlots(
   // Limit to first 2-3 slots for response
   const limitedSlots = foundSlots.slice(0, 3);
   
-  console.log(`[Immediate Slot Search] Final result: ${limitedSlots.length} slots found, next available: ${nextAvailableDate}`);
+  console.log(`[Slot Search] Final result: ${limitedSlots.length} slots found, next available: ${nextAvailableDate}`);
 
   return {
     foundSlots: limitedSlots,
@@ -439,13 +418,13 @@ export async function findImmediateNextAvailableSlots(
 }
 
 /**
- * Generate a natural AI response for immediate slot checking results
- * @param searchResult The result from findImmediateNextAvailableSlots
+ * Generate a natural AI response for slot checking results
+ * @param searchResult The result from findAvailableSlots
  * @param spokenName The natural name of the appointment type for conversation
  * @param practiceTimezone The practice's timezone for proper time formatting
  * @returns Generated AI response message
  */
-export async function generateImmediateSlotResponse(
+export async function generateSlotResponse(
   searchResult: { foundSlots: SlotData[]; nextAvailableDate: string | null },
   spokenName: string,
   practiceTimezone: string
@@ -474,7 +453,7 @@ export async function generateImmediateSlotResponse(
         const timeString = slotDateTime.toFormat('h:mm a'); // e.g., "2:30 PM"
         return `${dayReference} at ${timeString}`;
       } catch (error) {
-        console.error('[Immediate Slot Response] Error formatting slot time:', error);
+        console.error('[Slot Response] Error formatting slot time:', error);
         return slot.time; // Fallback to raw time
       }
     });
@@ -495,7 +474,7 @@ export async function generateImmediateSlotResponse(
 
       return text.trim() || `Great! For your ${spokenName}, I have ${slotsList} available. Would either of those work for you?`;
     } catch (error) {
-      console.error('[Immediate Slot Response] Error generating AI response:', error);
+      console.error('[Slot Response] Error generating AI response:', error);
       return `Great! For your ${spokenName}, I have ${slotsList} available. Would either of those work for you?`;
     }
 
@@ -506,7 +485,7 @@ export async function generateImmediateSlotResponse(
       const nextDate = DateTime.fromISO(searchResult.nextAvailableDate).setZone(practiceTimezone);
       friendlyDate = nextDate.toFormat('EEEE, MMMM d'); // e.g., "Wednesday, July 9th"
     } catch (error) {
-      console.error('[Immediate Slot Response] Error formatting next available date:', error);
+      console.error('[Slot Response] Error formatting next available date:', error);
       friendlyDate = searchResult.nextAvailableDate;
     }
 
@@ -524,7 +503,7 @@ export async function generateImmediateSlotResponse(
 
       return text.trim() || `I'm sorry, we don't have any openings for your ${spokenName} in the next few days. The next available date is ${friendlyDate}. Would you like me to check for times on that day?`;
     } catch (error) {
-      console.error('[Immediate Slot Response] Error generating AI response for next available:', error);
+      console.error('[Slot Response] Error generating AI response for next available:', error);
       return `I'm sorry, we don't have any openings for your ${spokenName} in the next few days. The next available date is ${friendlyDate}. Would you like me to check for times on that day?`;
     }
 
@@ -544,7 +523,7 @@ export async function generateImmediateSlotResponse(
 
       return text.trim() || `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
     } catch (error) {
-      console.error('[Immediate Slot Response] Error generating AI response for no availability:', error);
+      console.error('[Slot Response] Error generating AI response for no availability:', error);
       return `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
     }
   }

@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage } from "@/lib/ai/appointmentMatcher";
-import { normalizeDateWithAI, generateSlotResponseMessage } from "@/lib/ai/slotHelper";
-import { getNexhealthAvailableSlots } from "@/lib/nexhealth";
+import { normalizeDateWithAI } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
-import { toZonedTime, format } from 'date-fns-tz';
 import type { 
   ServerMessageToolCallsPayload, 
   VapiToolResult,
@@ -200,106 +198,105 @@ export async function POST(request: NextRequest) {
             dbAppointmentTypes.map(at => ({
               id: at.nexhealthAppointmentTypeId,
               name: at.name,
-              keywords: at.keywords,
+              keywords: at.keywords || "",
             }))
           );
 
-          if (matchedApptId) {
-            // Find the full appointment details from the matched ID
-            const matchedAppointment = dbAppointmentTypes.find(
-              at => at.nexhealthAppointmentTypeId === matchedApptId
-            );
+          if (!matchedApptId) {
+            console.log(`[VAPI Tool Handler] No appointment type matched for request: "${patientRequest}"`);
 
-            if (matchedAppointment) {
-              // Generate natural confirmation message
-              const generatedMessage = await generateAppointmentConfirmationMessage(
-                patientRequest,
-                matchedAppointment.name,
-                matchedAppointment.duration
-              );
-
-              // Prepare conversation state for next tool
-              const conversationState: ConversationState = {
-                lastAppointmentTypeId: matchedAppointment.nexhealthAppointmentTypeId,
-                lastAppointmentTypeName: matchedAppointment.name,
-                lastAppointmentDuration: matchedAppointment.duration,
-                practiceId: practiceId,
-                patientStatus: patientStatus || 'unknown',
-                originalPatientRequestForType: patientRequest,
-                check_immediate_next_available: matchedAppointment.check_immediate_next_available || false,
-                spokenName: matchedAppointment.spokenName || matchedAppointment.name
-              };
-
-              toolResponse = {
-                toolCallId: toolId!,
-                result: JSON.stringify({
-                  tool_output_data: {
-                    messageForAssistant: generatedMessage
-                  },
-                  current_conversation_state_snapshot: JSON.stringify(conversationState)
-                })
-              };
-
-              console.log(`[Tool Handler] Successfully found appointment type: ${matchedAppointment.name}. Sending to VAPI.`);
-
-              // Update CallLog with successful appointment type identification using new schema fields
-              try {
-                console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId} with appointment type: ${matchedAppointment.name}`);
-                await prisma.callLog.update({
-                  where: { vapiCallId: callId },
-                  data: {
-                    lastAppointmentTypeId: matchedAppointment.nexhealthAppointmentTypeId,
-                    lastAppointmentTypeName: matchedAppointment.name,
-                    lastAppointmentDuration: matchedAppointment.duration,
-                    detectedIntent: patientRequest,
-                    callStatus: "APPOINTMENT_TYPE_IDENTIFIED",
-                    patientStatus: patientStatus || 'unknown',
-                    originalPatientRequestForType: patientRequest,
-                    lastToolConversationState: JSON.stringify(conversationState),
-                    updatedAt: new Date(),
-                  }
-                });
-                console.log(`[DB Log] Successfully updated CallLog with appointment type and enhanced fields`);
-              } catch (error) {
-                console.error(`[DB Log] Error updating CallLog with appointment type:`, error);
-                // Don't let CallLog errors stop the tool response
-              }
-            } else {
-              // Defensive coding - this shouldn't happen if AI returns valid ID
-              toolResponse = {
-                toolCallId: toolId!,
-                error: "Internal error: Matched ID not found in local list."
-              };
-              console.error(`[Tool Handler] Error: Matched ID ${matchedApptId} not found in dbAppointmentTypes.`);
-            }
-          } else {
-            // No match found
+            // Generate and return the response
             toolResponse = {
               toolCallId: toolId!,
-              result: "Hmm, I'm not quite sure I have an exact match for that. Could you tell me a bit more about what you need, or perhaps rephrase your request?"
+              result: "I understand you're looking for an appointment, but I couldn't determine the exact type of service you need. Could you please be more specific about what you'd like to schedule?"
             };
-            console.log(`[Tool Handler] No appointment type match found for query: "${patientRequest}".`);
 
-            // Update CallLog for no match case using new schema fields
+            // Record this negative outcome in the CallLog for analysis
             try {
-              console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId}, no appointment type match.`);
+              console.log(`[DB Log] Updating CallLog for no match found...`);
               await prisma.callLog.update({
                 where: { vapiCallId: callId },
                 data: {
-                  detectedIntent: patientRequest,
-                  callStatus: "APPOINTMENT_TYPE_NOT_FOUND",
-                  patientStatus: patientStatus || 'unknown',
+                  callStatus: "NO_APPOINTMENT_TYPE_MATCH",
+                  detectedIntent: "appointment_scheduling",
                   originalPatientRequestForType: patientRequest,
                   updatedAt: new Date(),
                 }
               });
-              console.log(`[DB Log] Successfully updated CallLog for no match case with enhanced fields`);
+              console.log(`[DB Log] Successfully updated CallLog with NO_APPOINTMENT_TYPE_MATCH for vapiCallId: ${callId}`);
             } catch (error) {
               console.error(`[DB Log] Error updating CallLog for no match:`, error);
               // Don't let CallLog errors stop the tool response
             }
+            break;
           }
 
+          // Find the matched appointment type's details 
+          const matchedAppointmentType = dbAppointmentTypes.find(at => 
+            at.nexhealthAppointmentTypeId === matchedApptId
+          );
+
+          if (!matchedAppointmentType) {
+            toolResponse = {
+              toolCallId: toolId!,
+              error: "Error retrieving appointment type details."
+            };
+            break;
+          }
+
+          // Generate natural confirmation message
+          const generatedMessage = await generateAppointmentConfirmationMessage(
+            patientRequest,
+            matchedAppointmentType.name,
+            matchedAppointmentType.duration
+          );
+
+          // Prepare conversation state for next tool
+          const conversationState: ConversationState = {
+            lastAppointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+            lastAppointmentTypeName: matchedAppointmentType.name,
+            lastAppointmentDuration: matchedAppointmentType.duration,
+            practiceId: practiceId,
+            patientStatus: patientStatus || 'unknown',
+            originalPatientRequestForType: patientRequest,
+            check_immediate_next_available: matchedAppointmentType.check_immediate_next_available || false,
+            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name
+          };
+
+          toolResponse = {
+            toolCallId: toolId!,
+            result: JSON.stringify({
+              tool_output_data: {
+                messageForAssistant: generatedMessage
+              },
+              current_conversation_state_snapshot: JSON.stringify(conversationState)
+            })
+          };
+
+          console.log(`[Tool Handler] Successfully found appointment type: ${matchedAppointmentType.name}. Sending to VAPI.`);
+
+          // Update CallLog with successful appointment type identification using new schema fields
+          try {
+            console.log(`[DB Log] Updating CallLog for vapiCallId: ${callId} with appointment type: ${matchedAppointmentType.name}`);
+            await prisma.callLog.update({
+              where: { vapiCallId: callId },
+              data: {
+                lastAppointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+                lastAppointmentTypeName: matchedAppointmentType.name,
+                lastAppointmentDuration: matchedAppointmentType.duration,
+                detectedIntent: patientRequest,
+                callStatus: "APPOINTMENT_TYPE_IDENTIFIED",
+                patientStatus: patientStatus || 'unknown',
+                originalPatientRequestForType: patientRequest,
+                lastToolConversationState: JSON.stringify(conversationState),
+                updatedAt: new Date(),
+              }
+            });
+            console.log(`[DB Log] Successfully updated CallLog with appointment type and enhanced fields`);
+          } catch (error) {
+            console.error(`[DB Log] Error updating CallLog with appointment type:`, error);
+            // Don't let CallLog errors stop the tool response
+          }
         } catch (error) {
           console.error(`[VAPI Tool Handler] Error fetching appointment types:`, error);
           toolResponse = {
@@ -311,13 +308,10 @@ export async function POST(request: NextRequest) {
       }
 
       case "checkAvailableSlots": {
-        const preferredDaysOfWeek = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.preferredDaysOfWeek as string : undefined;
-        const timeBucket = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.timeBucket as string : undefined;
         const requestedDate = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.requestedDate as string : undefined;
-        const timePreference = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.timePreference as string : undefined;
         const conversationState = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.conversationState as string : undefined;
         
-        console.log(`[VAPI Tool Handler] checkAvailableSlots called with preferredDaysOfWeek: "${preferredDaysOfWeek}", timeBucket: "${timeBucket}"`);
+        console.log(`[VAPI Tool Handler] checkAvailableSlots called with requestedDate: "${requestedDate}"`);
         
         try {
           if (!practiceId) {
@@ -350,106 +344,11 @@ export async function POST(request: NextRequest) {
             break;
           }
 
-          // **NEW: Check for immediate slot checking**
-          if (parsedState.check_immediate_next_available === true && parsedState.immediate_check_performed !== true) {
-            console.log(`[VAPI Tool Handler] Performing immediate slot check for appointment type: ${parsedState.lastAppointmentTypeName}`);
-            
-            // Fetch practice details for immediate check
-            const practice = await prisma.practice.findUnique({
-              where: { id: practiceId },
-              select: {
-                id: true,
-                timezone: true,
-                nexhealthSubdomain: true,
-                nexhealthLocationId: true,
-              }
-            });
-
-            if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
-              toolResponse = {
-                toolCallId: toolId!,
-                error: "Practice NexHealth configuration not found."
-              };
-              break;
-            }
-
-            // Import the immediate slot functions
-            const { findImmediateNextAvailableSlots, generateImmediateSlotResponse } = await import("@/lib/ai/slotHelper");
-            
-            try {
-              // Find immediate slots
-              const searchResult = await findImmediateNextAvailableSlots(
-                parsedState.lastAppointmentTypeId,
-                {
-                  id: practice.id,
-                  nexhealthSubdomain: practice.nexhealthSubdomain,
-                  nexhealthLocationId: practice.nexhealthLocationId,
-                  timezone: practice.timezone || 'America/Chicago'
-                }
-              );
-
-              // Generate AI response
-              const spokenName = parsedState.spokenName || parsedState.lastAppointmentTypeName;
-              const aiResponse = await generateImmediateSlotResponse(
-                searchResult,
-                spokenName,
-                practice.timezone || 'America/Chicago'
-              );
-
-              // Update conversation state
-              const updatedState: ConversationState = {
-                ...parsedState,
-                immediate_check_performed: true,
-                foundSlots: searchResult.foundSlots,
-                nextAvailableDate: searchResult.nextAvailableDate || undefined
-              };
-
-              toolResponse = {
-                toolCallId: toolId!,
-                result: JSON.stringify({
-                  tool_output_data: {
-                    messageForAssistant: aiResponse
-                  },
-                  current_conversation_state_snapshot: JSON.stringify(updatedState)
-                })
-              };
-
-              console.log(`[VAPI Tool Handler] Immediate slot check completed. Found ${searchResult.foundSlots.length} slots.`);
-              break;
-
-            } catch (error) {
-              console.error(`[VAPI Tool Handler] Error during immediate slot check:`, error);
-              toolResponse = {
-                toolCallId: toolId!,
-                error: "Error finding immediate available slots."
-              };
-              break;
-            }
-                     }
-
-          // **ELSE: Handle standard slot checking with preferences**
-          if (!preferredDaysOfWeek || !timeBucket || !requestedDate) {
-            toolResponse = {
-              toolCallId: toolId!,
-              error: "Missing required parameters: preferredDaysOfWeek, timeBucket, and requestedDate for standard slot checking."
-            };
-            break;
-          }
-
-          const { lastAppointmentTypeId, lastAppointmentTypeName, lastAppointmentDuration } = parsedState;
-          
-          if (!lastAppointmentTypeId || !lastAppointmentTypeName || !lastAppointmentDuration) {
-            toolResponse = {
-              toolCallId: toolId!,
-              error: "Conversation state missing appointment type information."
-            };
-            break;
-          }
-
           // Fetch practice details
           const practice = await prisma.practice.findUnique({
             where: { id: practiceId },
             select: {
+              id: true,
               timezone: true,
               nexhealthSubdomain: true,
               nexhealthLocationId: true,
@@ -464,262 +363,74 @@ export async function POST(request: NextRequest) {
             break;
           }
 
-          // Normalize the date using AI with improved context
-          console.log(`[Date Normalization] Input requestedDate: "${requestedDate}", Practice timezone: ${practice.timezone || 'America/Chicago'}`);
-          const normalizedDate = await normalizeDateWithAI(requestedDate, practice.timezone || 'America/Chicago');
-          console.log(`[Date Normalization] Output normalizedDate: "${normalizedDate}"`);
-          
-          if (!normalizedDate) {
-            toolResponse = {
-              toolCallId: toolId!,
-              result: `I couldn't understand the date "${requestedDate}". Could you please specify a clearer date?`
-            };
+          let searchDate: string | null = null;
+
+          // 1. PRIORITY 1: Handle explicit user date request
+          if (requestedDate) {
+            console.log(`[VAPI Tool Handler] User provided a specific date: "${requestedDate}". Normalizing...`);
+            searchDate = await normalizeDateWithAI(requestedDate, practice.timezone || 'America/Chicago');
+            if (!searchDate) {
+              // Handle INVALID_DATE response from AI
+              toolResponse = { toolCallId: toolId!, result: `I couldn't quite understand the date "${requestedDate}". Could you try saying it a different way?` };
+              break; // Exit the switch case
+            }
+            console.log(`[VAPI Tool Handler] Normalized date to: ${searchDate}`);
+          }
+
+          // 2. PRIORITY 2: Handle immediate check if no date was given
+          else if (parsedState.check_immediate_next_available && !parsedState.immediate_check_performed) {
+            console.log(`[VAPI Tool Handler] No date provided. Performing immediate slot check.`);
+            // For immediate check, the start date is today.
+            searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
+          }
+
+          // 3. FALLBACK: If no date and not an immediate check, ask the user.
+          else {
+            toolResponse = { toolCallId: toolId!, result: "To find an appointment, what day and time would you be looking for?" };
             break;
           }
 
-          // Fetch provider IDs for this appointment type
-          const providerData = await prisma.providerAcceptedAppointmentType.findMany({
-            where: {
-              appointmentType: {
-                nexhealthAppointmentTypeId: lastAppointmentTypeId,
-                practiceId: practiceId
-              },
-              savedProvider: {
-                isActive: true
-              }
+          // Now, perform the search using the determined searchDate
+          const searchDays = (requestedDate) ? 1 : 3; // Search 1 day if specific, 3 if immediate
+          
+          // Import the refactored slot functions
+          const { findAvailableSlots, generateSlotResponse } = await import("@/lib/ai/slotHelper");
+          
+          const searchResult = await findAvailableSlots(
+            parsedState.lastAppointmentTypeId,
+            {
+              id: practice.id,
+              nexhealthSubdomain: practice.nexhealthSubdomain!,
+              nexhealthLocationId: practice.nexhealthLocationId!,
+              timezone: practice.timezone || 'America/Chicago'
             },
-            include: {
-              savedProvider: {
-                include: {
-                  provider: true
-                }
-              }
-            }
-          });
-
-          if (providerData.length === 0) {
-            toolResponse = {
-              toolCallId: toolId!,
-              error: "No active providers are configured for this appointment type."
-            };
-            break;
-          }
-
-          const providerNexHealthIds = providerData.map(pd => pd.savedProvider.provider.nexhealthProviderId);
-          console.log(`[VAPI Tool Handler] Found ${providerNexHealthIds.length} providers for appointment type: ${lastAppointmentTypeId}`);
-
-          // Call NexHealth API for slots
-          const slotsData = await getNexhealthAvailableSlots(
-            practice.nexhealthSubdomain,
-            practice.nexhealthLocationId,
-            normalizedDate,
-            1, // Search 1 day for now
-            providerNexHealthIds,
-            lastAppointmentDuration
+            searchDate,
+            searchDays
           );
 
-          console.log(`[Slot Processing] Raw slots received from NexHealth for ${normalizedDate}:`, slotsData.length, 'slot groups');
-          
-          // Process and filter slots with extremely detailed logging
-          const allSlots: Array<{ time: string; operatoryId?: number; providerId: number }> = [];
-          
-          for (const slotGroup of slotsData) {
-            console.log(`[Slot Processing] Processing slot group for provider ${slotGroup.pid}: ${slotGroup.slots.length} slots`);
-            for (const slot of slotGroup.slots) {
-              allSlots.push({
-                time: slot.time,
-                operatoryId: slot.operatory_id,
-                providerId: slotGroup.pid
-              });
-            }
-          }
-
-          console.log(`[Slot Processing] Total raw slots: ${allSlots.length}`);
-
-          // Enhanced slot filtering with extremely detailed logging
-          const practiceTimezone = practice.timezone || 'America/Chicago';
-          const appointmentDurationMinutes = lastAppointmentDuration;
-          const filteredSlots: Array<{ time: string; operatoryId?: number; providerId: number }> = [];
-
-          console.log(`[Slot Filter] ===== BEGINNING DETAILED SLOT FILTERING =====`);
-          console.log(`[Slot Filter] Practice timezone: ${practiceTimezone}`);
-          console.log(`[Slot Filter] Appointment duration: ${appointmentDurationMinutes} minutes`);
-          console.log(`[Slot Filter] Time preference: ${timePreference || 'none'}`);
-          console.log(`[Slot Filter] Lunch break: 1:00 PM - 2:00 PM local time`);
-
-          for (let i = 0; i < allSlots.length; i++) {
-            const slot = allSlots[i];
-            console.log(`[Slot Filter] --- Evaluating Raw Slot ${i + 1}/${allSlots.length} ---`);
-            console.log(`[Slot Filter] Raw NexHealth Time: ${slot.time}`);
-
-            const localStartTime = toZonedTime(new Date(slot.time), practiceTimezone);
-            const calculatedLocalEndTime = new Date(localStartTime.getTime() + appointmentDurationMinutes * 60000);
-
-            console.log(`[Slot Filter] Converted to Practice Local Time (${practiceTimezone}):`);
-            console.log(`[Slot Filter] Local Start: ${format(localStartTime, 'yyyy-MM-dd HH:mm:ss zzz', { timeZone: practiceTimezone })}`);
-            console.log(`[Slot Filter] Calculated Local End (Start + ${appointmentDurationMinutes}min): ${format(calculatedLocalEndTime, 'yyyy-MM-dd HH:mm:ss zzz', { timeZone: practiceTimezone })}`);
-
-            // Lunch break check (13:00 to 14:00 local time)
-            const lunchStartLocalHour = 13;
-            const lunchEndLocalHour = 14;
-            const slotStartLocalHour = localStartTime.getHours();
-            const slotStartLocalMinutes = localStartTime.getMinutes();
-            const slotCalculatedEndLocalHour = calculatedLocalEndTime.getHours();
-            const slotCalculatedEndLocalMinutes = calculatedLocalEndTime.getMinutes();
-
-            console.log(`[Slot Filter] Lunch Break Analysis:`);
-            console.log(`[Slot Filter] Slot starts at: ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} local`);
-            console.log(`[Slot Filter] Slot ends at: ${slotCalculatedEndLocalHour}:${slotCalculatedEndLocalMinutes.toString().padStart(2, '0')} local`);
-            console.log(`[Slot Filter] Lunch break: ${lunchStartLocalHour}:00 - ${lunchEndLocalHour}:00 local`);
-
-            let skipDueToLunch = false;
-            let lunchSkipReason = '';
-
-            // Check if slot STARTS within lunch
-            if (slotStartLocalHour >= lunchStartLocalHour && slotStartLocalHour < lunchEndLocalHour) {
-              skipDueToLunch = true;
-              lunchSkipReason = `Slot starts at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} during lunch break (1 PM - 2 PM local)`;
-            }
-            // Check if slot ENDS within lunch (but doesn't start in it)
-            else if (slotCalculatedEndLocalHour >= lunchStartLocalHour && slotCalculatedEndLocalHour < lunchEndLocalHour) {
-              // If it ends exactly at 1pm (13:00), it's okay. If it ends after 1pm but before 2pm, it's not.
-              if (!(slotCalculatedEndLocalHour === lunchStartLocalHour && slotCalculatedEndLocalMinutes === 0)) {
-                skipDueToLunch = true;
-                lunchSkipReason = `Slot ends at ${slotCalculatedEndLocalHour}:${slotCalculatedEndLocalMinutes.toString().padStart(2, '0')} during lunch break (1 PM - 2 PM local)`;
-              }
-            }
-            // Check if slot SPANS the entire lunch break
-            else if (slotStartLocalHour < lunchStartLocalHour && 
-                     (slotCalculatedEndLocalHour > lunchEndLocalHour || 
-                      (slotCalculatedEndLocalHour === lunchEndLocalHour && slotCalculatedEndLocalMinutes > 0))) {
-              skipDueToLunch = true;
-              lunchSkipReason = `Slot spans entire lunch break (1 PM - 2 PM local). Starts ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')}, Ends ${slotCalculatedEndLocalHour}:${slotCalculatedEndLocalMinutes.toString().padStart(2, '0')}`;
-            }
-
-            if (skipDueToLunch) {
-              console.log(`[Slot Filter] DISCARDED: ${lunchSkipReason}`);
-              console.log(`[Slot Filter] --- End Slot Evaluation (REJECTED) ---`);
-              continue;
-            } else {
-              console.log(`[Slot Filter] KEPT: Slot at ${format(localStartTime, 'HH:mm aa', { timeZone: practiceTimezone })} passes lunch break filter`);
-            }
-
-            // Apply time preference filter if provided
-            if (timePreference) {
-              const preference = timePreference.toLowerCase();
-              let skipForTimePreference = false;
-              let timeSkipReason = '';
-              
-              console.log(`[Slot Filter] Time Preference Analysis:`);
-              console.log(`[Slot Filter] User preference: "${timePreference}"`);
-              console.log(`[Slot Filter] Slot time: ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')}`);
-              
-              if (preference.includes('morning') && slotStartLocalHour >= 12) {
-                skipForTimePreference = true;
-                timeSkipReason = `Time preference is morning, but slot is at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} (afternoon)`;
-              }
-              if (preference.includes('afternoon') && slotStartLocalHour < 12) {
-                skipForTimePreference = true;
-                timeSkipReason = `Time preference is afternoon, but slot is at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')} (morning)`;
-              }
-              // Handle specific time mentions like "11:00 AM", "11 AM", "after 3 PM", etc.
-              if (preference.includes('11') && preference.includes('am')) {
-                if (slotStartLocalHour !== 11 || slotStartLocalMinutes !== 0) {
-                  skipForTimePreference = true;
-                  timeSkipReason = `Time preference is 11:00 AM, but slot is at ${slotStartLocalHour}:${slotStartLocalMinutes.toString().padStart(2, '0')}`;
-                }
-              }
-              
-              if (skipForTimePreference) {
-                console.log(`[Slot Filter] DISCARDED: ${timeSkipReason}`);
-                console.log(`[Slot Filter] --- End Slot Evaluation (REJECTED) ---`);
-                continue;
-              } else {
-                console.log(`[Slot Filter] KEPT: Slot passes time preference filter`);
-              }
-            }
-
-            console.log(`[Slot Filter] FINAL RESULT: Slot at ${format(localStartTime, 'HH:mm aa', { timeZone: practiceTimezone })} ACCEPTED`);
-            filteredSlots.push(slot);
-            console.log(`[Slot Filter] --- End Slot Evaluation (ACCEPTED) ---`);
-          }
-
-          console.log(`[Slot Filter] ===== SLOT FILTERING COMPLETE =====`);
-          console.log(`[Slot Filter] Final filtered slots: ${filteredSlots.length} out of ${allSlots.length} total`);
-
-          // Format slots for presentation (limit to 3)
-          const formattedSlots = filteredSlots.slice(0, 3).map(slot => {
-            const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
-            return slotDateTime.toFormat('h:mm a'); // e.g., "9:00 AM"
-          });
-
-          console.log(`[Slot Response] Final slots to present to patient:`, formattedSlots);
-
-          // Generate spoken response using AI
-          const messageForAssistant = await generateSlotResponseMessage(
-            lastAppointmentTypeName,
-            normalizedDate,
-            formattedSlots,
-            timePreference
+          const spokenName = parsedState.spokenName || parsedState.lastAppointmentTypeName;
+          const aiResponse = await generateSlotResponse(
+            searchResult,
+            spokenName,
+            practice.timezone || 'America/Chicago'
           );
 
-          // Prepare updated conversation state - carry over all previous info and add new slot info
-          const updatedConversationState: ConversationState = {
-            // Carry over from previous state
-            lastAppointmentTypeId: parsedState.lastAppointmentTypeId,
-            lastAppointmentTypeName: parsedState.lastAppointmentTypeName,
-            lastAppointmentDuration: parsedState.lastAppointmentDuration,
-            practiceId: practiceId,
-            patientStatus: parsedState.patientStatus,
-            originalPatientRequestForType: parsedState.originalPatientRequestForType,
-            // Add/update slot-specific information
-            requestedDate,
-            normalizedDateForSlots: normalizedDate,
-            timePreferenceForSlots: timePreference,
-            slotsOfferedToPatient: filteredSlots.slice(0, 3).map((slot, index) => ({
-              time: formattedSlots[index],
-              operatoryId: slot.operatoryId,
-              providerId: slot.providerId
-            }))
+          // Update conversation state
+          const updatedState: ConversationState = {
+            ...parsedState,
+            immediate_check_performed: true, // Mark as performed so it doesn't loop
+            foundSlots: searchResult.foundSlots,
+            nextAvailableDate: searchResult.nextAvailableDate || undefined,
+            normalizedDateForSlots: searchDate,
           };
 
           toolResponse = {
             toolCallId: toolId!,
             result: JSON.stringify({
-              tool_output_data: {
-                messageForAssistant: messageForAssistant
-              },
-              current_conversation_state_snapshot: JSON.stringify(updatedConversationState)
+              tool_output_data: { messageForAssistant: aiResponse },
+              current_conversation_state_snapshot: JSON.stringify(updatedState)
             })
           };
-
-          console.log(`[VAPI Tool Handler] Successfully checked slots for ${lastAppointmentTypeName} on ${normalizedDate}. Found ${filteredSlots.length} available slots.`);
-
-          // Update CallLog with enhanced slot information using new schema fields
-          try {
-            console.log(`[DB Log] Updating CallLog for slot check with enhanced fields...`);
-            await prisma.callLog.update({
-              where: { vapiCallId: callId },
-              data: {
-                callStatus: "SLOTS_CHECKED",
-                requestedDateForSlots: requestedDate,
-                normalizedDateForSlots: normalizedDate,
-                timePreferenceForSlots: timePreference,
-                slotsOfferedToPatient: filteredSlots.slice(0, 3).map((slot, index) => ({
-                  time: formattedSlots[index],
-                  operatoryId: slot.operatoryId,
-                  providerId: slot.providerId
-                })),
-                lastToolConversationState: JSON.stringify(updatedConversationState),
-                updatedAt: new Date(),
-              }
-            });
-            console.log(`[DB Log] Successfully updated CallLog with enhanced slot tracking fields for vapiCallId: ${callId}`);
-            console.log(`[DB Log] Stored: requestedDate=${requestedDate}, normalizedDate=${normalizedDate}, timePreference=${timePreference}, slotsOffered=${filteredSlots.length}`);
-          } catch (error) {
-            console.error(`[DB Log] Error updating CallLog for slot check:`, error);
-            // Don't let CallLog errors stop the tool response
-          }
 
         } catch (error) {
           console.error(`[VAPI Tool Handler] Error checking available slots:`, error);
