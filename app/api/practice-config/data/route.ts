@@ -19,7 +19,8 @@ export async function GET() {
             name: true,
             duration: true,
             bookableOnline: true,
-            groupCode: true,
+            spokenName: true,
+            check_immediate_next_available: true,
             keywords: true,
             createdAt: true,
             updatedAt: true

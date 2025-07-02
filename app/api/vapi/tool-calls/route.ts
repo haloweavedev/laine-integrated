@@ -26,6 +26,17 @@ interface ConversationState {
     operatoryId?: number;
     providerId: number;
   }>;
+  // New fields for immediate slot checking
+  check_immediate_next_available?: boolean;
+  immediate_check_performed?: boolean;
+  spokenName?: string;
+  foundSlots?: Array<{
+    time: string;
+    operatory_id?: number;
+    providerId: number;
+    locationId: number;
+  }>;
+  nextAvailableDate?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -167,7 +178,9 @@ export async function POST(request: NextRequest) {
               nexhealthAppointmentTypeId: true,
               name: true,
               duration: true,
-              keywords: true
+              keywords: true,
+              check_immediate_next_available: true,
+              spokenName: true
             }
           });
 
@@ -212,7 +225,9 @@ export async function POST(request: NextRequest) {
                 lastAppointmentDuration: matchedAppointment.duration,
                 practiceId: practiceId,
                 patientStatus: patientStatus || 'unknown',
-                originalPatientRequestForType: patientRequest
+                originalPatientRequestForType: patientRequest,
+                check_immediate_next_available: matchedAppointment.check_immediate_next_available || false,
+                spokenName: matchedAppointment.spokenName || matchedAppointment.name
               };
 
               toolResponse = {
@@ -296,11 +311,13 @@ export async function POST(request: NextRequest) {
       }
 
       case "checkAvailableSlots": {
+        const preferredDaysOfWeek = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.preferredDaysOfWeek as string : undefined;
+        const timeBucket = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.timeBucket as string : undefined;
         const requestedDate = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.requestedDate as string : undefined;
         const timePreference = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.timePreference as string : undefined;
         const conversationState = (typeof toolArguments === 'object' && toolArguments !== null) ? toolArguments.conversationState as string : undefined;
         
-        console.log(`[VAPI Tool Handler] checkAvailableSlots called with date: "${requestedDate}", timePreference: "${timePreference}"`);
+        console.log(`[VAPI Tool Handler] checkAvailableSlots called with preferredDaysOfWeek: "${preferredDaysOfWeek}", timeBucket: "${timeBucket}"`);
         
         try {
           if (!practiceId) {
@@ -311,10 +328,10 @@ export async function POST(request: NextRequest) {
             break;
           }
 
-          if (!requestedDate || !conversationState) {
+          if (!conversationState) {
             toolResponse = {
               toolCallId: toolId!,
-              error: "Missing required parameters: requestedDate and conversationState."
+              error: "Missing required parameter: conversationState."
             };
             break;
           }
@@ -329,6 +346,92 @@ export async function POST(request: NextRequest) {
             toolResponse = {
               toolCallId: toolId!,
               error: "Invalid conversationState format."
+            };
+            break;
+          }
+
+          // **NEW: Check for immediate slot checking**
+          if (parsedState.check_immediate_next_available === true && parsedState.immediate_check_performed !== true) {
+            console.log(`[VAPI Tool Handler] Performing immediate slot check for appointment type: ${parsedState.lastAppointmentTypeName}`);
+            
+            // Fetch practice details for immediate check
+            const practice = await prisma.practice.findUnique({
+              where: { id: practiceId },
+              select: {
+                id: true,
+                timezone: true,
+                nexhealthSubdomain: true,
+                nexhealthLocationId: true,
+              }
+            });
+
+            if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+              toolResponse = {
+                toolCallId: toolId!,
+                error: "Practice NexHealth configuration not found."
+              };
+              break;
+            }
+
+            // Import the immediate slot functions
+            const { findImmediateNextAvailableSlots, generateImmediateSlotResponse } = await import("@/lib/ai/slotHelper");
+            
+            try {
+              // Find immediate slots
+              const searchResult = await findImmediateNextAvailableSlots(
+                parsedState.lastAppointmentTypeId,
+                {
+                  id: practice.id,
+                  nexhealthSubdomain: practice.nexhealthSubdomain,
+                  nexhealthLocationId: practice.nexhealthLocationId,
+                  timezone: practice.timezone || 'America/Chicago'
+                }
+              );
+
+              // Generate AI response
+              const spokenName = parsedState.spokenName || parsedState.lastAppointmentTypeName;
+              const aiResponse = await generateImmediateSlotResponse(
+                searchResult,
+                spokenName,
+                practice.timezone || 'America/Chicago'
+              );
+
+              // Update conversation state
+              const updatedState: ConversationState = {
+                ...parsedState,
+                immediate_check_performed: true,
+                foundSlots: searchResult.foundSlots,
+                nextAvailableDate: searchResult.nextAvailableDate || undefined
+              };
+
+              toolResponse = {
+                toolCallId: toolId!,
+                result: JSON.stringify({
+                  tool_output_data: {
+                    messageForAssistant: aiResponse
+                  },
+                  current_conversation_state_snapshot: JSON.stringify(updatedState)
+                })
+              };
+
+              console.log(`[VAPI Tool Handler] Immediate slot check completed. Found ${searchResult.foundSlots.length} slots.`);
+              break;
+
+            } catch (error) {
+              console.error(`[VAPI Tool Handler] Error during immediate slot check:`, error);
+              toolResponse = {
+                toolCallId: toolId!,
+                error: "Error finding immediate available slots."
+              };
+              break;
+            }
+                     }
+
+          // **ELSE: Handle standard slot checking with preferences**
+          if (!preferredDaysOfWeek || !timeBucket || !requestedDate) {
+            toolResponse = {
+              toolCallId: toolId!,
+              error: "Missing required parameters: preferredDaysOfWeek, timeBucket, and requestedDate for standard slot checking."
             };
             break;
           }

@@ -25,7 +25,8 @@ interface Practice {
     name: string;
     duration: number;
     bookableOnline: boolean | null;
-    groupCode: string | null;
+    spokenName: string | null;
+    check_immediate_next_available: boolean;
     keywords: string | null;
     lastSyncError: string | null;
     createdAt: string;

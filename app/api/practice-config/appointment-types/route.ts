@@ -14,7 +14,8 @@ const createAppointmentTypeSchema = z.object({
     .min(5, "Duration must be at least 5 minutes")
     .max(480, "Duration must be 8 hours or less"),
   bookableOnline: z.boolean().optional().default(true),
-  groupCode: z.string().nullable().optional(),
+  spokenName: z.string().nullable().optional(),
+  check_immediate_next_available: z.boolean().optional(),
   keywords: z.string().nullable().optional()
 });
 
@@ -85,10 +86,10 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { name, minutes, bookableOnline, groupCode, keywords } = validationResult.data;
+    const { name, minutes, bookableOnline, spokenName, check_immediate_next_available, keywords } = validationResult.data;
 
     try {
-      // Create appointment type in NexHealth (groupCode and keywords are Laine-specific, not sent to NexHealth)
+      // Create appointment type in NexHealth (spokenName, check_immediate_next_available and keywords are Laine-specific, not sent to NexHealth)
       const nexhealthResponse = await createNexhealthAppointmentType(
         practice.nexhealthSubdomain,
         practice.nexhealthLocationId,
@@ -109,7 +110,8 @@ export async function POST(req: NextRequest) {
           name: nexhealthResponse.name,
           duration: nexhealthResponse.minutes,
           bookableOnline: nexhealthResponse.bookable_online,
-          groupCode: groupCode || null, // Store the Laine-specific group code
+          spokenName: spokenName || null, // Store the Laine-specific spoken name
+          check_immediate_next_available: check_immediate_next_available || false, // Store the immediate check flag
           keywords: keywords || null, // Store the Laine-specific keywords
           parentType: nexhealthResponse.parent_type,
           parentId: nexhealthResponse.parent_id.toString(),

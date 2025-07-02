@@ -69,7 +69,7 @@ async function checkProviderConfiguration() {
     });
     console.log(`\n🕐 Appointment Types: ${appointmentTypes.length}`);
     appointmentTypes.forEach(at => {
-      console.log(`  - ${at.name} (${at.duration} min, Group: ${at.groupCode || 'None'})`);
+      console.log(`  - ${at.name} (${at.duration} min, Spoken: ${at.spokenName || 'None'})`);
     });
     
     // Check operatories

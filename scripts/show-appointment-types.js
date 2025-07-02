@@ -82,11 +82,11 @@ function printAppointmentType(appointmentType, index, total) {
   console.log(`  NexHealth ID: ${colors.magenta}${appointmentType.nexhealthAppointmentTypeId}${colors.reset}`);
   console.log(`  Practice ID: ${colors.dim}${appointmentType.practiceId}${colors.reset}`);
   
-  if (appointmentType.groupCode || appointmentType.keywords || appointmentType.parentType) {
+  if (appointmentType.spokenName || appointmentType.keywords || appointmentType.parentType) {
     console.log();
     console.log(`${colors.bright}Classification:${colors.reset}`);
-    if (appointmentType.groupCode) {
-      console.log(`  Group Code: ${colors.blue}${appointmentType.groupCode}${colors.reset}`);
+    if (appointmentType.spokenName) {
+      console.log(`  Spoken Name: ${colors.blue}${appointmentType.spokenName}${colors.reset}`);
     }
     if (appointmentType.keywords) {
       console.log(`  Keywords: ${colors.green}${truncateText(appointmentType.keywords, 80)}${colors.reset}`);

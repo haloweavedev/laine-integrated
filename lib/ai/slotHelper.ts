@@ -215,4 +215,337 @@ Example format: "I'm sorry, I don't have any available slots for your ${appointm
       return `I'm sorry, I don't have any available slots for your ${appointmentTypeName} on that date. Would you like to try a different date?`;
     }
   }
+}
+
+/**
+ * Get slot search parameters for a specific appointment type from the database
+ * @param appointmentTypeId NexHealth appointment type ID 
+ * @param practiceId Practice ID
+ * @returns Object with duration, providerIds, and operatoryIds needed for slot search
+ */
+export async function getSlotSearchParams(
+  appointmentTypeId: string,
+  practiceId: string
+): Promise<{ duration: number; providerIds: string[]; operatoryIds: string[] }> {
+  const { prisma } = await import("@/lib/prisma");
+  
+  // Fetch the AppointmentType to get its duration
+  const appointmentType = await prisma.appointmentType.findFirst({
+    where: {
+      nexhealthAppointmentTypeId: appointmentTypeId,
+      practiceId: practiceId
+    },
+    select: {
+      duration: true
+    }
+  });
+
+  if (!appointmentType) {
+    throw new Error(`Appointment type with ID ${appointmentTypeId} not found for practice ${practiceId}`);
+  }
+
+  // Fetch all active SavedProviders that accept this appointment type
+  const savedProviders = await prisma.savedProvider.findMany({
+    where: {
+      practiceId: practiceId,
+      isActive: true,
+      acceptedAppointmentTypes: {
+        some: {
+          appointmentType: {
+            nexhealthAppointmentTypeId: appointmentTypeId
+          }
+        }
+      }
+    },
+    include: {
+      provider: true,
+      assignedOperatories: {
+        include: {
+          savedOperatory: true
+        }
+      }
+    }
+  });
+
+  if (savedProviders.length === 0) {
+    throw new Error("No active providers are configured for this appointment type.");
+  }
+
+  // Collect unique NexHealth provider IDs
+  const providerIds = Array.from(
+    new Set(savedProviders.map(sp => sp.provider.nexhealthProviderId))
+  );
+
+  // Collect unique NexHealth operatory IDs from provider assignments
+  const operatoryIds = Array.from(
+    new Set(
+      savedProviders
+        .flatMap(sp => sp.assignedOperatories)
+        .map(assignment => assignment.savedOperatory.nexhealthOperatoryId)
+    )
+  );
+
+  if (operatoryIds.length === 0) {
+    throw new Error("No active operatories are assigned to the providers for this appointment type.");
+  }
+
+  return {
+    duration: appointmentType.duration,
+    providerIds,
+    operatoryIds
+  };
+}
+
+// Interface for individual slot data
+interface SlotData {
+  time: string;
+  operatory_id?: number;
+  providerId: number;
+  locationId: number;
+}
+
+// Interface for provider data from NexHealth API
+interface ProviderSlotData {
+  pid: number;
+  lid: number;
+  slots: Array<{
+    time: string;
+    operatory_id?: number;
+  }>;
+}
+
+// Interface for NexHealth API response
+interface NexHealthSlotsResponse {
+  data: ProviderSlotData[];
+  next_available_date?: string;
+}
+
+/**
+ * Find the immediate next available slots for an appointment type
+ * @param appointmentTypeId NexHealth appointment type ID
+ * @param practice Practice details with NexHealth configuration
+ * @returns Object with found slots and next available date if no slots found
+ */
+export async function findImmediateNextAvailableSlots(
+  appointmentTypeId: string,
+  practice: {
+    id: string;
+    nexhealthSubdomain: string;
+    nexhealthLocationId: string;
+    timezone: string;
+  }
+): Promise<{ foundSlots: SlotData[]; nextAvailableDate: string | null }> {
+  const { fetchNexhealthAPI } = await import("@/lib/nexhealth");
+  
+  // Get slot search parameters
+  const { duration, providerIds, operatoryIds } = await getSlotSearchParams(
+    appointmentTypeId,
+    practice.id
+  );
+
+  console.log(`[Immediate Slot Search] Searching for ${duration}-minute slots with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
+
+  // Use practice timezone, default to America/Chicago if not set
+  const timezone = practice.timezone || 'America/Chicago';
+  
+  // Get current date and set up search dates (today, tomorrow, day after tomorrow)
+  const now = DateTime.now().setZone(timezone);
+  const searchDates = [
+    now.toFormat('yyyy-MM-dd'),           // today
+    now.plus({ days: 1 }).toFormat('yyyy-MM-dd'), // tomorrow  
+    now.plus({ days: 2 }).toFormat('yyyy-MM-dd')  // day after tomorrow
+  ];
+
+  console.log(`[Immediate Slot Search] Searching dates: ${searchDates.join(', ')} in timezone ${timezone}`);
+
+  const foundSlots: SlotData[] = [];
+  let nextAvailableDate: string | null = null;
+
+  // Search up to 3 days
+  for (let i = 0; i < searchDates.length; i++) {
+    const startDate = searchDates[i];
+    
+    try {
+      console.log(`[Immediate Slot Search] Searching date ${startDate} (day ${i + 1}/3)`);
+      
+      // Construct API parameters for NexHealth appointment_slots endpoint
+      const params: Record<string, string | string[]> = {
+        start_date: startDate,
+        days: '1',
+        'lids[]': practice.nexhealthLocationId,
+        slot_length: duration.toString()
+      };
+
+      // Add provider IDs as array parameters
+      params['pids[]'] = providerIds;
+      
+      // Add operatory IDs as array parameters  
+      params['operatory_ids[]'] = operatoryIds;
+
+      // Call NexHealth API
+      const response = await fetchNexhealthAPI(
+        '/appointment_slots',
+        practice.nexhealthSubdomain,
+        params
+      ) as NexHealthSlotsResponse;
+
+      console.log(`[Immediate Slot Search] API response for ${startDate}:`, JSON.stringify(response, null, 2));
+
+      // Process the response data
+      if (response.data && Array.isArray(response.data)) {
+        // Collect all slots from all providers for this date
+        const daySlots = response.data.flatMap((providerData: ProviderSlotData) => {
+          if (providerData.slots && Array.isArray(providerData.slots)) {
+            return providerData.slots.map((slot) => ({
+              ...slot,
+              providerId: providerData.pid,
+              locationId: providerData.lid
+            }));
+          }
+          return [];
+        });
+
+        foundSlots.push(...daySlots);
+        console.log(`[Immediate Slot Search] Found ${daySlots.length} slots on ${startDate}, total so far: ${foundSlots.length}`);
+
+        // If we have 2 or more slots, we can break early
+        if (foundSlots.length >= 2) {
+          console.log(`[Immediate Slot Search] Found sufficient slots (${foundSlots.length}), stopping search`);
+          break;
+        }
+      }
+
+      // Store next_available_date from the last API response if present
+      if (response.next_available_date) {
+        nextAvailableDate = response.next_available_date;
+        console.log(`[Immediate Slot Search] Found next_available_date: ${nextAvailableDate}`);
+      }
+
+    } catch (error) {
+      console.error(`[Immediate Slot Search] Error searching ${startDate}:`, error);
+      // Continue to next date on error
+    }
+  }
+
+  // Limit to first 2-3 slots for response
+  const limitedSlots = foundSlots.slice(0, 3);
+  
+  console.log(`[Immediate Slot Search] Final result: ${limitedSlots.length} slots found, next available: ${nextAvailableDate}`);
+
+  return {
+    foundSlots: limitedSlots,
+    nextAvailableDate
+  };
+}
+
+/**
+ * Generate a natural AI response for immediate slot checking results
+ * @param searchResult The result from findImmediateNextAvailableSlots
+ * @param spokenName The natural name of the appointment type for conversation
+ * @param practiceTimezone The practice's timezone for proper time formatting
+ * @returns Generated AI response message
+ */
+export async function generateImmediateSlotResponse(
+  searchResult: { foundSlots: SlotData[]; nextAvailableDate: string | null },
+  spokenName: string,
+  practiceTimezone: string
+): Promise<string> {
+  const { generateText } = await import("ai");
+  const { openai } = await import("@ai-sdk/openai");
+
+  if (searchResult.foundSlots.length > 0) {
+    // Format the slot times into a human-readable format
+    const formattedSlots = searchResult.foundSlots.slice(0, 2).map((slot) => {
+      try {
+        // Parse the ISO time string and convert to practice timezone
+        const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
+        const isToday = slotDateTime.hasSame(DateTime.now().setZone(practiceTimezone), 'day');
+        const isTomorrow = slotDateTime.hasSame(DateTime.now().setZone(practiceTimezone).plus({ days: 1 }), 'day');
+        
+        let dayReference: string;
+        if (isToday) {
+          dayReference = "today";
+        } else if (isTomorrow) {
+          dayReference = "tomorrow";
+        } else {
+          dayReference = slotDateTime.toFormat('EEEE'); // e.g., "Wednesday"
+        }
+        
+        const timeString = slotDateTime.toFormat('h:mm a'); // e.g., "2:30 PM"
+        return `${dayReference} at ${timeString}`;
+      } catch (error) {
+        console.error('[Immediate Slot Response] Error formatting slot time:', error);
+        return slot.time; // Fallback to raw time
+      }
+    });
+
+    const slotsList = formattedSlots.join(' or ');
+    
+    const systemPrompt = `You are Laine, a helpful dental assistant. For the patient's ${spokenName}, you have found the following openings: ${slotsList}. Offer these to the patient and ask if either would work. Be warm, friendly, and professional. Keep your response concise.`;
+
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o-mini"),
+        messages: [
+          { role: 'system', content: systemPrompt }
+        ],
+        temperature: 0.3,
+        maxTokens: 100
+      });
+
+      return text.trim() || `Great! For your ${spokenName}, I have ${slotsList} available. Would either of those work for you?`;
+    } catch (error) {
+      console.error('[Immediate Slot Response] Error generating AI response:', error);
+      return `Great! For your ${spokenName}, I have ${slotsList} available. Would either of those work for you?`;
+    }
+
+  } else if (searchResult.nextAvailableDate) {
+    // Format the next available date into a friendly format
+    let friendlyDate: string;
+    try {
+      const nextDate = DateTime.fromISO(searchResult.nextAvailableDate).setZone(practiceTimezone);
+      friendlyDate = nextDate.toFormat('EEEE, MMMM d'); // e.g., "Wednesday, July 9th"
+    } catch (error) {
+      console.error('[Immediate Slot Response] Error formatting next available date:', error);
+      friendlyDate = searchResult.nextAvailableDate;
+    }
+
+    const systemPrompt = `You are Laine, a helpful dental assistant. For the patient's ${spokenName}, there are no openings in the next few days. The next available date is ${friendlyDate}. Inform the patient and ask if they'd like you to check for times on that day. Be warm, empathetic, and helpful.`;
+
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o-mini"),
+        messages: [
+          { role: 'system', content: systemPrompt }
+        ],
+        temperature: 0.3,
+        maxTokens: 120
+      });
+
+      return text.trim() || `I'm sorry, we don't have any openings for your ${spokenName} in the next few days. The next available date is ${friendlyDate}. Would you like me to check for times on that day?`;
+    } catch (error) {
+      console.error('[Immediate Slot Response] Error generating AI response for next available:', error);
+      return `I'm sorry, we don't have any openings for your ${spokenName} in the next few days. The next available date is ${friendlyDate}. Would you like me to check for times on that day?`;
+    }
+
+  } else {
+    // No slots found and no next available date
+    const systemPrompt = `You are Laine, a helpful dental assistant. For the patient's ${spokenName}, it looks like we are fully booked for the near future. Apologize and suggest that a staff member will call them back to find a time. Be warm, empathetic, and professional.`;
+
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o-mini"),
+        messages: [
+          { role: 'system', content: systemPrompt }
+        ],
+        temperature: 0.3,
+        maxTokens: 100
+      });
+
+      return text.trim() || `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
+    } catch (error) {
+      console.error('[Immediate Slot Response] Error generating AI response for no availability:', error);
+      return `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
+    }
+  }
 } 

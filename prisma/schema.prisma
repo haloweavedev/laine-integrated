@@ -256,7 +256,8 @@ model AppointmentType {
   name                       String
   duration                   Int // Duration in minutes (maps to NexHealth 'minutes')
   bookableOnline             Boolean? // Added field for online booking status
-  groupCode                  String? // Optional group code for categorizing appointment types
+  spokenName                 String? // A more natural name for the AI to use in conversation
+  check_immediate_next_available Boolean @default(false) // Flag to immediately find the next available slot
   keywords                   String? // Comma-separated keywords for AI mapping
 
   // Optional: Enhanced tracking fields

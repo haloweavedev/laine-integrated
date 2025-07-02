@@ -59,8 +59,7 @@ export async function GET(
                 id: true,
                 name: true,
                 nexhealthAppointmentTypeId: true,
-                duration: true,
-                groupCode: true
+                duration: true
               }
             }
           }
@@ -90,7 +89,7 @@ export async function GET(
       id: savedProvider.id,
       provider: savedProvider.provider,
       isActive: savedProvider.isActive,
-      acceptedAppointmentTypes: savedProvider.acceptedAppointmentTypes.map((relation: { appointmentType: { id: string; name: string; nexhealthAppointmentTypeId: string; duration: number; groupCode: string | null } }) => relation.appointmentType),
+      acceptedAppointmentTypes: savedProvider.acceptedAppointmentTypes.map((relation: { appointmentType: { id: string; name: string; nexhealthAppointmentTypeId: string; duration: number } }) => relation.appointmentType),
       assignedOperatories: savedProvider.assignedOperatories?.map((assignment: { savedOperatory: { id: string; name: string; nexhealthOperatoryId: string } }) => assignment.savedOperatory) || [],
       createdAt: savedProvider.createdAt,
       updatedAt: savedProvider.updatedAt
@@ -287,7 +286,8 @@ export async function PUT(
                 name: true,
                 nexhealthAppointmentTypeId: true,
                 duration: true,
-                groupCode: true
+                spokenName: true,
+                check_immediate_next_available: true
               }
             }
           }

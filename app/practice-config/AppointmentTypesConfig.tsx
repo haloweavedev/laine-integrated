@@ -9,7 +9,8 @@ interface AppointmentType {
   name: string;
   duration: number;
   bookableOnline: boolean | null;
-  groupCode: string | null;
+  spokenName: string | null;
+  check_immediate_next_available: boolean;
   keywords: string | null;
   lastSyncError: string | null;
   createdAt: string;
@@ -25,7 +26,8 @@ interface FormData {
   name: string;
   minutes: number;
   bookableOnline: boolean;
-  groupCode: string;
+  spokenName: string;
+  check_immediate_next_available: boolean;
   keywords: string;
 }
 
@@ -44,7 +46,8 @@ export function AppointmentTypesConfig({
     name: '',
     minutes: 30,
     bookableOnline: true,
-    groupCode: '',
+    spokenName: '',
+    check_immediate_next_available: false,
     keywords: ''
   });
 
@@ -53,7 +56,8 @@ export function AppointmentTypesConfig({
       name: '',
       minutes: 30,
       bookableOnline: true,
-      groupCode: '',
+      spokenName: '',
+      check_immediate_next_available: false,
       keywords: ''
     });
   };
@@ -103,7 +107,8 @@ export function AppointmentTypesConfig({
           name: formData.name.trim(),
           minutes: formData.minutes,
           bookableOnline: formData.bookableOnline,
-          groupCode: formData.groupCode.trim() || null,
+          spokenName: formData.spokenName.trim() || null,
+          check_immediate_next_available: formData.check_immediate_next_available,
           keywords: formData.keywords.trim() || null
         })
       });
@@ -153,7 +158,8 @@ export function AppointmentTypesConfig({
           name: formData.name.trim(),
           minutes: formData.minutes,
           bookableOnline: formData.bookableOnline,
-          groupCode: formData.groupCode.trim() || null,
+          spokenName: formData.spokenName.trim() || null,
+          check_immediate_next_available: formData.check_immediate_next_available,
           keywords: formData.keywords.trim() || null
         })
       });
@@ -216,7 +222,8 @@ export function AppointmentTypesConfig({
       name: type.name,
       minutes: type.duration,
       bookableOnline: type.bookableOnline ?? true,
-      groupCode: type.groupCode || '',
+      spokenName: type.spokenName || '',
+      check_immediate_next_available: type.check_immediate_next_available ?? false,
       keywords: type.keywords || ''
     });
     setShowEditModal(true);
@@ -271,7 +278,10 @@ export function AppointmentTypesConfig({
                 Duration
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Group Code
+                Spoken Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Immediate Check
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Keywords
@@ -300,7 +310,16 @@ export function AppointmentTypesConfig({
                   {type.duration} minutes
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {type.groupCode || '-'}
+                  {type.spokenName || '-'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                    type.check_immediate_next_available 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {type.check_immediate_next_available ? 'Yes' : 'No'}
+                  </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 max-w-xs truncate" title={type.keywords || undefined}>
                   {type.keywords || '-'}
@@ -424,16 +443,16 @@ export function AppointmentTypesConfig({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Group Code
+                    Spoken Name
                   </label>
                   <input
                     type="text"
-                    value={formData.groupCode}
-                    onChange={(e) => setFormData({ ...formData, groupCode: e.target.value })}
-                    placeholder="e.g., CLEANING, EXAM, XRAY"
+                    value={formData.spokenName}
+                    onChange={(e) => setFormData({ ...formData, spokenName: e.target.value })}
+                    placeholder="e.g., a full check-up with x-rays"
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Optional: Used for categorizing appointment types in Laine</p>
+                  <p className="text-xs text-gray-500 mt-1">Optional: A natural phrase for Laine to use, e.g., &quot;a full check-up with x-rays&quot;.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -559,16 +578,16 @@ export function AppointmentTypesConfig({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Group Code
+                    Spoken Name
                   </label>
                   <input
                     type="text"
-                    value={formData.groupCode}
-                    onChange={(e) => setFormData({ ...formData, groupCode: e.target.value })}
-                    placeholder="e.g., CLEANING, EXAM, XRAY"
+                    value={formData.spokenName}
+                    onChange={(e) => setFormData({ ...formData, spokenName: e.target.value })}
+                    placeholder="e.g., a full check-up with x-rays"
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Optional: Used for categorizing appointment types in Laine</p>
+                  <p className="text-xs text-gray-500 mt-1">Optional: A natural phrase for Laine to use, e.g., &quot;a full check-up with x-rays&quot;.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -586,6 +605,18 @@ export function AppointmentTypesConfig({
                 <div className="flex items-center">
                   <input
                     type="checkbox"
+                    id="editCheckImmediate"
+                    checked={formData.check_immediate_next_available}
+                    onChange={(e) => setFormData({ ...formData, check_immediate_next_available: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="editCheckImmediate" className="ml-2 block text-sm text-gray-700">
+                    Immediately find next available slot
+                  </label>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
                     id="editBookableOnline"
                     checked={formData.bookableOnline}
                     onChange={(e) => setFormData({ ...formData, bookableOnline: e.target.checked })}
@@ -593,6 +624,18 @@ export function AppointmentTypesConfig({
                   />
                   <label htmlFor="editBookableOnline" className="ml-2 block text-sm text-gray-700">
                     Bookable Online
+                  </label>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="checkImmediate"
+                    checked={formData.check_immediate_next_available}
+                    onChange={(e) => setFormData({ ...formData, check_immediate_next_available: e.target.checked })}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="checkImmediate" className="ml-2 block text-sm text-gray-700">
+                    Immediately find next available slot
                   </label>
                 </div>
               </div>

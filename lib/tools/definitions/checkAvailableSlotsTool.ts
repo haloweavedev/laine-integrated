@@ -26,7 +26,7 @@ export function getCheckAvailableSlotsTool(appBaseUrl: string): VapiTool {
             description: "CRITICAL: The JSON string representing the current_conversation_state_snapshot from the result of the PREVIOUS tool call (e.g., from findAppointmentType). This contains essential context like the appointment type ID and duration."
           }
         },
-        required: ["preferredDaysOfWeek", "timeBucket", "conversationState"]
+        required: ["conversationState"]
       }
     },
     server: {
