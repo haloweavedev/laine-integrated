@@ -361,6 +361,29 @@ export async function findAvailableSlots(
       // Add operatory IDs as array parameters  
       params['operatory_ids[]'] = operatoryIds;
 
+      // --- BEGIN: New logging block ---
+      try {
+        // Use URLSearchParams for robust and correct URL encoding
+        const queryParams = new URLSearchParams();
+        for (const key in params) {
+          const value = params[key];
+          if (Array.isArray(value)) {
+            value.forEach(item => queryParams.append(key, item));
+          } else {
+            queryParams.append(key, value);
+          }
+        }
+        
+        // Construct the full URL for logging purposes
+        const fullRequestUrl = `https://api.nexhealth.com/v2/appointment_slots?subdomain=${practice.nexhealthSubdomain}&${queryParams.toString()}`;
+        
+        console.log(`[NexHealth API Request] GET ${fullRequestUrl}`);
+
+      } catch (logError) {
+        console.error("[NexHealth API Request] Error constructing log URL:", logError);
+      }
+      // --- END: New logging block ---
+
       // Call NexHealth API
       const response = await fetchNexhealthAPI(
         '/appointment_slots',
