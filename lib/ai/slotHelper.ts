@@ -503,7 +503,15 @@ export async function generateSlotResponse(
 
     const slotsList = formattedSlots.join(' or ');
     
-    const systemPrompt = `You are Laine, a helpful dental assistant. For the patient's ${spokenName}, you have found the following openings: ${slotsList}. Offer these to the patient and ask if either would work. Be warm, friendly, and professional. Keep your response concise.`;
+    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+
+**CRITICAL RULES:**
+1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+
+**Task:** For the patient's request for a '${spokenName}', you have found these openings: ${slotsList}. Offer them and ask if they work.
+
+**Example Output:** "For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?"`;
 
     try {
       const { text } = await generateText({
@@ -532,7 +540,15 @@ export async function generateSlotResponse(
       friendlyDate = searchResult.nextAvailableDate;
     }
 
-    const systemPrompt = `You are Laine, a helpful dental assistant. For the patient's ${spokenName}, there are no openings in the next few days. The next available date is ${friendlyDate}. Inform the patient and ask if they'd like you to check for times on that day. Be warm, empathetic, and helpful.`;
+    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+
+**CRITICAL RULES:**
+1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+
+**Task:** For the patient's request for a '${spokenName}', there are no openings in the next few days. The next available date is ${friendlyDate}. Inform them and ask if they'd like you to check for times on that day.
+
+**Example Output:** "I'm sorry, we don't have any openings for your ${spokenName} in the next few days, but the next available date is ${friendlyDate}. Would you like me to check for times on that day?"`;
 
     try {
       const { text } = await generateText({
@@ -552,7 +568,15 @@ export async function generateSlotResponse(
 
   } else {
     // No slots found and no next available date
-    const systemPrompt = `You are Laine, a helpful dental assistant. For the patient's ${spokenName}, it looks like we are fully booked for the near future. Apologize and suggest that a staff member will call them back to find a time. Be warm, empathetic, and professional.`;
+    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+
+**CRITICAL RULES:**
+1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+
+**Task:** For the patient's request for a '${spokenName}', you are fully booked for the near future. Apologize and suggest that a staff member will call them back to find a time.
+
+**Example Output:** "I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future, so let me have one of our staff members call you back to find a time that works."`;
 
     try {
       const { text } = await generateText({
