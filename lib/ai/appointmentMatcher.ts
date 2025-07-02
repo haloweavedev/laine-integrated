@@ -77,50 +77,50 @@ Which appointment type ID is the best match? (Return ONLY the ID or "NO_MATCH")`
 
 export async function generateAppointmentConfirmationMessage(
   patientQuery: string,
-  matchedAppointmentName: string,
+  officialName: string,
+  spokenName: string,
   matchedAppointmentDuration: number
 ): Promise<string> {
   try {
-    console.log(`[AI Responder] Generating confirmation for: ${matchedAppointmentName}`);
+    console.log(`[AI Responder] Generating confirmation for: ${officialName} (spoken: ${spokenName})`);
 
     // Check if OpenAI API key is available
     if (!process.env.OPENAI_API_KEY) {
       console.error("[AI Responder] OPENAI_API_KEY not found in environment variables");
-      return `Okay, we can schedule a ${matchedAppointmentName} which is ${matchedAppointmentDuration} minutes. Is that correct?`;
+      return `Okay, we can schedule a ${spokenName} which is ${matchedAppointmentDuration} minutes. Is that correct?`;
     }
 
     // Construct messages for the generateText call
     const messages: CoreMessage[] = [
       {
         role: "system",
-        content: `You are Laine, a friendly, empathetic, and natural-sounding AI assistant for a dental office.
-A patient has described their need, and you have identified a suitable appointment type.
-Your task is to craft a concise, conversational, and reassuring response that will be spoken to the patient.
-1. Briefly acknowledge the patient's stated problem/request in a natural way.
-2. Clearly state the appointment type you've found for them.
-3. Mention its typical duration.
-4. End with a gentle confirmation question like "Does that sound about right?" or "Would that work for you?".
-Avoid robotic phrasing. Sound human. Keep it to one or two short sentences. Ensure the entire response is a single line of text with no newline characters.
+        content: `You are Laine, a friendly, empathetic, and natural-sounding AI assistant for a dental office. Your task is to craft a concise, conversational response to confirm an appointment type you've identified.
 
-Example Acknowledgment Phrases:
-- "Okay, I understand."
-- "Got it."
-- "Alright, for something like that..."
-- "I see, so you're dealing with [paraphrased problem]..."
+**CRITICAL INSTRUCTION:** You MUST use the 'Spoken Name' when talking to the patient. The 'Official Name' is for your internal context only.
 
-Example Full Responses (ensure these are single line when generated):
-Patient said: "I have a terrible toothache in my back molar." Matched: "Emergency Exam", 30 mins.
-Response: "Oh dear, a toothache can be really uncomfortable. For that, we have an Emergency Exam which typically takes about 30 minutes. Does that sound like what you need?"
+**Example:**
+- Official Name: "Comprehensive Oral Evaluation"
+- Spoken Name: "a full check-up with x-rays"
+- Your response to the patient should use "a full check-up with x-rays".
 
-Patient said: "I need a cleaning." Matched: "Standard Cleaning", 60 mins.
-Response: "Okay, for a cleaning, our Standard Cleaning appointment is usually around 60 minutes. How does that sound?"`
+**Guidelines:**
+1.  Acknowledge the patient's request naturally.
+2.  State the appointment type using the **Spoken Name**.
+3.  Mention the duration.
+4.  Ask a gentle confirmation question.
+5.  Keep it to a single, warm, and reassuring sentence.
+
+**DO NOT use the 'Official Name' in your response.**`
       },
       {
         role: "user",
         content: `Patient's original request: "${patientQuery}"
-Identified appointment: Name: "${matchedAppointmentName}", Duration: ${matchedAppointmentDuration} minutes.
+Identified appointment:
+- Official Name: "${officialName}"
+- Spoken Name: "${spokenName}"
+- Duration: ${matchedAppointmentDuration} minutes.
 
-Craft the spoken response for Laine (ensure it's a single line):`
+Craft the spoken response for Laine using the Spoken Name (ensure it's a single line):`
       }
     ];
 
@@ -140,7 +140,7 @@ Craft the spoken response for Laine (ensure it's a single line):`
 
   } catch (error) {
     console.error("[AI Responder] Error during AI call:", error);
-    // Provide fallback response
-    return `Okay, we can schedule a ${matchedAppointmentName} which is ${matchedAppointmentDuration} minutes. Is that correct?`;
+    // Provide fallback response using spokenName
+    return `Okay, we can schedule ${spokenName} which is ${matchedAppointmentDuration} minutes. Is that correct?`;
   }
 } 

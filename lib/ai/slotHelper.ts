@@ -384,8 +384,51 @@ export async function findAvailableSlots(
           return [];
         });
 
-        foundSlots.push(...daySlots);
-        console.log(`[Slot Search] Found ${daySlots.length} slots on ${searchDate}, total so far: ${foundSlots.length}`);
+        // Filter out slots that overlap with lunch break (1:00 PM - 2:00 PM)
+        const filteredDaySlots = daySlots.filter((slot) => {
+          try {
+            // Parse the slot time to get the start time
+            const slotStartTime = DateTime.fromISO(slot.time).setZone(timezone);
+            const slotStartHour = slotStartTime.hour;
+            const slotStartMinute = slotStartTime.minute;
+            
+            // Calculate the slot end time by adding duration
+            const slotEndTime = slotStartTime.plus({ minutes: duration });
+            const slotEndHour = slotEndTime.hour;
+            const slotEndMinute = slotEndTime.minute;
+            
+            // Define lunch break: 1:00 PM (13:00) to 2:00 PM (14:00)
+            const lunchStartHour = 13;
+            const lunchEndHour = 14;
+            
+            // Check if slot overlaps with lunch break
+            const slotStartsInLunch = (slotStartHour === lunchStartHour && slotStartMinute >= 0) || 
+                                     (slotStartHour > lunchStartHour && slotStartHour < lunchEndHour);
+            
+            const slotEndsInLunch = (slotEndHour === lunchStartHour && slotEndMinute > 0) || 
+                                   (slotEndHour > lunchStartHour && slotEndHour <= lunchEndHour);
+            
+            const slotSpansLunch = slotStartHour < lunchStartHour && slotEndHour > lunchEndHour;
+            
+            const isLunchConflict = slotStartsInLunch || slotEndsInLunch || slotSpansLunch;
+            
+            if (isLunchConflict) {
+              console.log(`[Lunch Filter] Discarded slot at ${slot.time} - conflicts with lunch break (${slotStartTime.toFormat('h:mm a')} - ${slotEndTime.toFormat('h:mm a')})`);
+              return false;
+            }
+            
+            return true;
+          } catch (error) {
+            console.error(`[Lunch Filter] Error parsing slot time ${slot.time}:`, error);
+            // Keep the slot if we can't parse it rather than losing potentially valid slots
+            return true;
+          }
+        });
+
+        console.log(`[Lunch Filter] Filtered ${daySlots.length} slots to ${filteredDaySlots.length} slots after removing lunch conflicts on ${searchDate}`);
+
+        foundSlots.push(...filteredDaySlots);
+        console.log(`[Slot Search] Found ${filteredDaySlots.length} slots on ${searchDate} (after lunch filtering), total so far: ${foundSlots.length}`);
 
         // If we have 2 or more slots, we can break early
         if (foundSlots.length >= 2) {

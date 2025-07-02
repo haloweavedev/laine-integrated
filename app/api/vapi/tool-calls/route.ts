@@ -247,7 +247,8 @@ export async function POST(request: NextRequest) {
           // Generate natural confirmation message
           const generatedMessage = await generateAppointmentConfirmationMessage(
             patientRequest,
-            matchedAppointmentType.name,
+            matchedAppointmentType.name, // Official Name
+            matchedAppointmentType.spokenName || matchedAppointmentType.name, // Spoken Name (fallback to official if null)
             matchedAppointmentType.duration
           );
 
