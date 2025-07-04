@@ -68,12 +68,21 @@ async function handleFirstBookingStep(
     };
   }
 
-  // Step 1: Match the slot using AI
+  // Step 1: Get practice timezone for slot matching
+  const practice = await prisma.practice.findUnique({
+    where: { id: currentState.practiceId },
+    select: { timezone: true }
+  });
+
+  const practiceTimezone = practice?.timezone || 'America/Chicago';
+
+  // Step 2: Match the slot using AI
   console.log(`[BookAppointmentHandler] Matching user selection against ${currentState.appointmentBooking.presentedSlots.length} presented slots`);
   
   const matchedSlot = await matchUserSelectionToSlot(
     userSelection,
-    currentState.appointmentBooking.presentedSlots
+    currentState.appointmentBooking.presentedSlots,
+    practiceTimezone
   );
 
   // Step 2: Validate the match
@@ -142,6 +151,13 @@ async function handleSecondBookingStep(
   // Step 1: Generate appointment note
   console.log(`[BookAppointmentHandler] Generating appointment note`);
   const appointmentNote = await generateAppointmentNote(currentState);
+  
+  // Log the generated note to database
+  await prisma.toolLog.updateMany({
+    where: { toolCallId: toolId },
+    data: { result: `[AI Summary] Generated Note: "${appointmentNote}"` }
+  });
+  console.log(`[DB Log] Logged generated appointment note for tool call ${toolId}.`);
 
   // Step 2: Get practice configuration for API call
   const practice = await prisma.practice.findUnique({
@@ -178,6 +194,14 @@ async function handleSecondBookingStep(
   };
 
   console.log(`[BookAppointmentHandler] Constructed appointment payload:`, appointmentPayload);
+  
+  // Log the payload to database for debugging
+  const payloadToLog = { ...appointmentPayload };
+  await prisma.toolLog.updateMany({
+    where: { toolCallId: toolId },
+    data: { result: `[NexHealth Request] Sending payload: ${JSON.stringify(payloadToLog)}` }
+  });
+  console.log(`[DB Log] Logged NexHealth request payload for tool call ${toolId}.`);
 
   // Step 4: Make the API call
   try {

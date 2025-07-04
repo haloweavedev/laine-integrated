@@ -1,89 +1,69 @@
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { DateTime } from 'luxon';
 import type { CoreMessage } from "ai";
+import type { SlotData } from "@/types/vapi";
+import { DateTime } from "luxon";
 
-interface SlotData {
-  time: string; // ISO format
-  operatory_id?: number;
-  providerId: number;
-}
-
-/**
- * Uses AI to match a user's verbal selection to the best available slot
- * @param userSelection The user's verbatim selection (e.g., "the 2 PM one", "tomorrow at 7:40 AM")
- * @param presentedSlots Array of slots that were previously presented to the user
- * @returns The matching slot object or null if no match found
- */
 export async function matchUserSelectionToSlot(
   userSelection: string,
-  presentedSlots: SlotData[]
+  presentedSlots: SlotData[],
+  practiceTimezone: string
 ): Promise<SlotData | null> {
-  if (!presentedSlots || presentedSlots.length === 0) {
-    console.warn('[SlotMatcher] No presented slots to match against');
-    return null;
-  }
-
   try {
-    // Create a numbered list of slots for the AI to reference
-    const slotOptions = presentedSlots.map((slot, index) => {
-      const slotTime = DateTime.fromISO(slot.time);
-      const dayName = slotTime.toFormat('cccc'); // Full day name
-      const time = slotTime.toFormat('h:mm a'); // 2:00 PM format
-      const date = slotTime.toFormat('MMM d'); // Dec 23 format
-      
-      return `${index + 1}. ${dayName}, ${date} at ${time}`;
-    }).join('\n');
+    if (!presentedSlots || presentedSlots.length === 0) {
+      console.error("[SlotMatcher] No presented slots provided to match against.");
+      return null;
+    }
 
-    const prompt = `You are helping match a user's verbal response to a specific appointment time slot.
+    // Create a simplified, numbered list of slots for the AI to parse.
+    const formattedSlotsForAI = presentedSlots.map((slot, index) => {
+      const time = DateTime.fromISO(slot.time, { zone: practiceTimezone }).toFormat("h:mm a");
+      return `${index + 1}. ${time}`;
+    }).join("\n");
 
-The user was previously offered these time slot options:
-${slotOptions}
+    const systemPrompt = `You are a highly accurate AI assistant specializing in natural language understanding. Your task is to match a user's verbal selection to one of the provided time slot options.
 
-The user's response was: "${userSelection}"
+**CRITICAL RULES:**
+1.  **RETURN ONLY THE NUMBER:** Your entire response must be ONLY the number corresponding to the best match.
+2.  **HANDLE AMBIGUITY:** If the user's selection is ambiguous or doesn't clearly match any option, return "NO_MATCH".
+3.  **BE FLEXIBLE:** Understand various phrasings. "The first one," "the 2 PM slot," "seven forty," and "the later one" should all be interpreted correctly based on the options.
 
-Your task: Determine which numbered slot (1, 2, 3, etc.) best matches what the user said.
+**CONTEXT:**
+The user was presented with the following time slot options:
+${formattedSlotsForAI}
 
-Rules:
-- Return ONLY the number of the matching slot (e.g., "1", "2", "3")
-- If the user's response is unclear or doesn't match any slot, return "NO_MATCH"
-- Consider variations like "the first one", "2 PM", "tomorrow morning", "that works", "yes"
-- Be flexible with time references and casual language
+The user then said: "${userSelection}"
 
-Response:`;
+**EXAMPLES:**
+- If options are "1. 2:00 PM\n2. 2:40 PM" and user says "The first one," you return "1".
+- If options are "1. 7:00 AM\n2. 7:40 AM" and user says "The 7 40 one," you return "2".
+- If options are "1. 9:00 AM\n2. 10:00 AM" and user says "Let's do the later one," you return "2".
+- If user says "None of those work," you return "NO_MATCH".
 
-    const messages: CoreMessage[] = [
-      { role: 'user', content: prompt }
-    ];
+Which option number did the user select? (Return ONLY the number or "NO_MATCH")`;
+
+    const messages: CoreMessage[] = [{ role: 'system', content: systemPrompt }];
 
     const { text } = await generateText({
       model: openai("gpt-4o-mini"),
       messages,
-      temperature: 0.1,
-      maxTokens: 10
+      temperature: 0, // Set to 0 for maximum predictability
+      maxTokens: 10,
     });
 
-    const result = text.trim();
-    
-    if (!result || result === 'NO_MATCH') {
-      console.log(`[SlotMatcher] No match found for user selection: "${userSelection}"`);
-      return null;
+    const matchedIndex = parseInt(text.trim(), 10) - 1;
+
+    if (!isNaN(matchedIndex) && matchedIndex >= 0 && matchedIndex < presentedSlots.length) {
+      const matchedSlot = presentedSlots[matchedIndex];
+      console.log(`[SlotMatcher] Successfully matched "${userSelection}" to slot #${matchedIndex + 1}: ${matchedSlot.time}`);
+      return matchedSlot;
     }
 
-    // Parse the slot number
-    const slotNumber = parseInt(result, 10);
-    if (isNaN(slotNumber) || slotNumber < 1 || slotNumber > presentedSlots.length) {
-      console.warn(`[SlotMatcher] Invalid slot number returned: ${result}`);
-      return null;
-    }
-
-    const selectedSlot = presentedSlots[slotNumber - 1]; // Convert to 0-based index
-    console.log(`[SlotMatcher] Successfully matched "${userSelection}" to slot ${slotNumber}: ${selectedSlot.time}`);
-    
-    return selectedSlot;
+    console.log(`[SlotMatcher] No definitive match found for user selection: "${userSelection}". AI response: "${text.trim()}"`);
+    return null;
 
   } catch (error) {
-    console.error('[SlotMatcher] Error matching user selection to slot:', error);
+    console.error("[SlotMatcher] Error during AI slot matching:", error);
     return null;
   }
 } 

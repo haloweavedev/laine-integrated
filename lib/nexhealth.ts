@@ -169,6 +169,11 @@ export async function fetchNexhealthAPI(
     options.body = JSON.stringify(body);
   }
 
+  // Log the request details
+  const loggableBody = body ? JSON.stringify(body) : 'None';
+  console.log(`[NexHealth API] Requesting: ${method} ${url.toString()}`);
+  console.log(`[NexHealth API] Body: ${loggableBody}`);
+
   try {
     const response = await fetch(url.toString(), options);
     
@@ -191,6 +196,8 @@ export async function fetchNexhealthAPI(
     }
 
     const data = await response.json();
+    console.log(`[NexHealth API] Response Status: ${response.status}`);
+    // console.log(`[NexHealth API] Response Body:`, JSON.stringify(data, null, 2)); // Optional: uncomment for deep debugging
     return data;
   } catch (error) {
     console.error('NexHealth API error:', error);
