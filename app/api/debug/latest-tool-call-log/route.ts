@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import type { ConversationState } from '@/types/vapi';
 
 interface DetailedCallDebugData {
   callId: string | null;
@@ -14,9 +15,7 @@ interface DetailedCallDebugData {
     practiceId: string;
     callStatus: string | null;
     detectedIntent?: string | null;
-    lastAppointmentTypeId?: string | null;
-    lastAppointmentTypeName?: string | null;
-    lastAppointmentDuration?: number | null;
+    conversationState?: ConversationState;
     callTimestampStart?: Date | null;
     createdAt: Date;
     updatedAt: Date;
@@ -120,6 +119,9 @@ export async function GET() {
 
     // Add final call status if available
     if (latestCallWithTools.callStatus) {
+      const conversationState = latestCallWithTools.conversationState as unknown as ConversationState;
+      const appointmentType = conversationState?.appointmentBooking?.typeName || null;
+      
       logs.push({
         timestamp: latestCallWithTools.updatedAt.toISOString(),
         level: 'info',
@@ -128,7 +130,7 @@ export async function GET() {
           callId: latestCallWithTools.vapiCallId,
           status: latestCallWithTools.callStatus,
           detectedIntent: latestCallWithTools.detectedIntent,
-          appointmentType: latestCallWithTools.lastAppointmentTypeName
+          appointmentType: appointmentType
         }
       });
     }
@@ -141,9 +143,7 @@ export async function GET() {
         practiceId: latestCallWithTools.practiceId,
         callStatus: latestCallWithTools.callStatus,
         detectedIntent: latestCallWithTools.detectedIntent,
-        lastAppointmentTypeId: latestCallWithTools.lastAppointmentTypeId,
-        lastAppointmentTypeName: latestCallWithTools.lastAppointmentTypeName,
-        lastAppointmentDuration: latestCallWithTools.lastAppointmentDuration,
+        conversationState: latestCallWithTools.conversationState ? latestCallWithTools.conversationState as unknown as ConversationState : undefined,
         callTimestampStart: latestCallWithTools.callTimestampStart,
         createdAt: latestCallWithTools.createdAt,
         updatedAt: latestCallWithTools.updatedAt,

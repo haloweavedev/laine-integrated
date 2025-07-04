@@ -24,13 +24,9 @@ export function getCheckAvailableSlotsTool(appBaseUrl: string): VapiTool {
           requestedDate: {
             type: "string" as const,
             description: "The user's specific requested date, like 'tomorrow', 'next Wednesday', or 'July 10th'. Use this for specific date searches."
-          },
-          conversationState: {
-            type: "string" as const,
-            description: "CRITICAL: The JSON string representing the current_conversation_state_snapshot from the result of the PREVIOUS tool call (e.g., from findAppointmentType). This contains essential context like the appointment type ID and duration."
           }
         },
-        required: ["conversationState"]
+        required: []
       }
     },
     server: {

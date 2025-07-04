@@ -1,6 +1,50 @@
 // Core VAPI TypeScript type definitions for type safety
 // These types are based on VAPI API documentation and webhook specifications
 
+export type ConversationStage = 
+  | 'GREETING'
+  | 'IDENTIFYING_APPOINTMENT_TYPE'
+  | 'CONFIRMING_APPOINTMENT_TYPE'
+  | 'GATHERING_AVAILABILITY_PREFERENCES'
+  | 'PRESENTING_SLOTS'
+  | 'AWAITING_SLOT_CONFIRMATION'
+  | 'GATHERING_PATIENT_DETAILS'
+  | 'READY_FOR_BOOKING'
+  | 'BOOKING_CONFIRMED'
+  | 'ENDED_NO_BOOKING';
+
+// Interface for individual slot data
+export interface SlotData {
+  time: string; // ISO format
+  operatory_id?: number;
+  providerId: number;
+}
+
+export interface ConversationState {
+  currentStage: ConversationStage;
+  practiceId: string;
+  callId: string;
+  
+  appointmentBooking: {
+    typeId?: string;
+    typeName?: string;
+    spokenName?: string;
+    duration?: number;
+    patientRequest?: string;
+    selectedSlot?: SlotData;
+    presentedSlots?: SlotData[];
+    nextAvailableDate?: string | null;
+    lastTimePreference?: 'Morning' | 'Afternoon' | 'Evening' | 'Any';
+  };
+
+  patientDetails: {
+    // Hardcoding demo ID for now, to be replaced in a future phase
+    nexhealthPatientId: number; 
+    firstName?: string;
+    lastName?: string;
+  };
+}
+
 export interface VapiToolFunctionParameters {
   type: "object";
   properties: {
