@@ -19,9 +19,7 @@ export async function generateConfirmationMessage(
 
     // Format the selected time into a friendly format
     const selectedTime = DateTime.fromISO(state.appointmentBooking.selectedSlot.time);
-    const dayName = selectedTime.toFormat('cccc'); // Full day name (e.g., "Friday")
-    const time = selectedTime.toFormat('h:mm a'); // Time format (e.g., "2:00 PM")
-    const date = selectedTime.toFormat('MMMM d'); // Date format (e.g., "December 23")
+    const friendlyDateTime = selectedTime.toFormat("cccc, MMMM d 'at' h:mm a");
 
     // Get the spoken name of the appointment type
     const appointmentType = state.appointmentBooking.spokenName || 
@@ -38,9 +36,9 @@ export async function generateConfirmationMessage(
 
 **Context:**
 - Appointment Type: ${appointmentType}
-- Selected Time: ${dayName}, ${date} at ${time}
+- Selected Time: ${friendlyDateTime}
 
-**Example Output:** "Okay, great. So I have you down for a ${appointmentType} on ${dayName}, ${date} at ${time}. Is that all correct?"
+**Example Output:** "Okay, great. So I have you down for a ${appointmentType} on ${friendlyDateTime}. Is that all correct?"
 
 Your turn. Generate the single, fluid, spoken response for Laine:`;
 
@@ -59,13 +57,11 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
     
     // Fallback to a simple template-based message if AI generation fails
     const selectedTime = DateTime.fromISO(state.appointmentBooking.selectedSlot?.time || "");
-    const dayName = selectedTime.toFormat('cccc');
-    const time = selectedTime.toFormat('h:mm a');
-    const date = selectedTime.toFormat('MMMM d');
+    const friendlyDateTime = selectedTime.toFormat("cccc, MMMM d 'at' h:mm a");
     const appointmentType = state.appointmentBooking.spokenName || 
                            state.appointmentBooking.typeName || 
                            'appointment';
 
-    return `Great. So I have you down for a ${appointmentType} on ${dayName}, ${date} at ${time}. Is that all correct?`;
+    return `Great. So I have you down for a ${appointmentType} on ${friendlyDateTime}. Is that all correct?`;
   }
 } 

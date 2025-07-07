@@ -6,40 +6,31 @@ import type { ConversationState } from '@/types/vapi';
 /**
  * Generates a concise, professional appointment note for dental office staff
  * @param state The full conversation state containing booking details
+ * @param transcript The call transcript for context-rich note generation
  * @returns A professional note string for the appointment
  */
-export async function generateAppointmentNote(state: ConversationState): Promise<string> {
+export async function generateAppointmentNote(
+  state: ConversationState,
+  transcript: string
+): Promise<string> {
   try {
     const { appointmentBooking } = state;
     
-    // Gather available context
-    const patientRequest = appointmentBooking.patientRequest || 'General appointment request';
-    const appointmentType = appointmentBooking.spokenName || appointmentBooking.typeName || 'Unknown type';
-    const timePreference = appointmentBooking.lastTimePreference || null;
-    
-    // Build context for the AI
-    let contextInfo = `Patient request: "${patientRequest}"`;
-    contextInfo += `\nAppointment type: ${appointmentType}`;
-    
-    if (timePreference && timePreference !== 'Any') {
-      contextInfo += `\nTime preference: ${timePreference}`;
-    }
-    
-    const prompt = `You are generating a brief, professional note for a dental office appointment booking system.
+    const prompt = `You are an expert at summarizing conversations for a dental office's internal notes. Based on the provided call transcript, create a concise, one-to-two-sentence note for the appointment.
 
-Context from the call:
-${contextInfo}
+**CRITICAL RULES:**
+1.  Be brief and professional.
+2.  Focus on the patient's stated problem or reason for the visit.
+3.  Do not include conversational filler (e.g., "Patient said hello").
 
-Create a concise internal note (1-2 sentences) that includes:
-- The patient's original concern/request
-- The type of appointment booked
-- Any relevant preferences mentioned
+**Call Transcript:**
+---
+${transcript || "No transcript available."}
+---
 
-The note should be professional and helpful for the dental office staff. Do not include patient names, specific times, or provider details.
+**Example Output:** "Patient called regarding a chipped front tooth. Mentioned it is not causing pain but would like it looked at soon."
 
-Example: "Patient called regarding a missing tooth. Booked for a Dental Implant Consult. Indicated a preference for afternoon appointments."
-
-Note:`;
+Your turn. Generate the appointment note:`;
 
     const messages: CoreMessage[] = [
       { role: 'user', content: prompt }
@@ -56,6 +47,8 @@ Note:`;
     
     if (!generatedNote) {
       console.warn('[SummaryHelper] No note generated, using fallback');
+      const appointmentType = appointmentBooking.spokenName || appointmentBooking.typeName || 'appointment';
+      const patientRequest = appointmentBooking.patientRequest || 'General request';
       return `${appointmentType} appointment. Original request: ${patientRequest}`;
     }
 

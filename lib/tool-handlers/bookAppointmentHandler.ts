@@ -85,17 +85,23 @@ async function handleFirstBookingStep(
     practiceTimezone
   );
 
-  // Step 2: Validate the match
   if (!matchedSlot) {
-    console.log(`[BookAppointmentHandler] No match found for user selection: "${userSelection}"`);
+    console.log(`[BookAppointmentHandler] No definitive match found for user selection: "${userSelection}"`);
+    // Create a list of the exact times for the AI to read back for clarification
+    const presentedTimes = currentState.appointmentBooking.presentedSlots.map(s => 
+        DateTime.fromISO(s.time, { zone: practiceTimezone }).toFormat("h:mm a")
+    ).join(' or ');
+
     return {
-      toolResponse: {
-        toolCallId: toolId,
-        result: "I'm sorry, I didn't quite catch that. Which of the time slots I mentioned would you like?"
-      },
-      newState: currentState
+        toolResponse: {
+            toolCallId: toolId,
+            result: `I'm sorry, I didn't quite catch that. Of the times I mentioned, would you like the ${presentedTimes}?`
+        },
+        newState: currentState // Return the state unchanged, awaiting clarification
     };
   }
+
+  // If validation passes, the rest of the function proceeds as before.
 
   console.log(`[BookAppointmentHandler] Successfully matched slot: ${matchedSlot.time}`);
 
@@ -148,9 +154,15 @@ async function handleSecondBookingStep(
     };
   }
 
-  // Step 1: Generate appointment note
-  console.log(`[BookAppointmentHandler] Generating appointment note`);
-  const appointmentNote = await generateAppointmentNote(currentState);
+  // Step 1: Fetch transcript and generate appointment note
+  console.log(`[BookAppointmentHandler] Fetching call transcript and generating appointment note`);
+  const callLog = await prisma.callLog.findUnique({
+      where: { vapiCallId: currentState.callId },
+      select: { transcriptText: true }
+  });
+  const transcript = callLog?.transcriptText || '';
+  
+  const appointmentNote = await generateAppointmentNote(currentState, transcript);
   
   // Log the generated note to database
   await prisma.toolLog.updateMany({
@@ -181,16 +193,18 @@ async function handleSecondBookingStep(
 
   // Step 3: Construct NexHealth payload
   const selectedSlot = currentState.appointmentBooking.selectedSlot;
-  const startTimeUTC = DateTime.fromISO(selectedSlot.time).toUTC();
-  const endTimeUTC = startTimeUTC.plus({ minutes: currentState.appointmentBooking.duration || 30 });
+  const startTimeLocal = DateTime.fromISO(selectedSlot.time, { zone: practice.timezone || 'America/Chicago' });
+  const endTimeLocal = startTimeLocal.plus({ minutes: currentState.appointmentBooking.duration || 30 });
 
   const appointmentPayload = {
-    patient_id: currentState.patientDetails.nexhealthPatientId,
-    provider_id: selectedSlot.providerId,
-    operatory_id: selectedSlot.operatory_id || 0,
-    start_time: startTimeUTC.toFormat("yyyy-MM-dd'T'HH:mm:ss'+0000'"),
-    end_time: endTimeUTC.toFormat("yyyy-MM-dd'T'HH:mm:ss'+0000'"),
-    note: appointmentNote
+    appt: {
+      patient_id: currentState.patientDetails.nexhealthPatientId,
+      provider_id: selectedSlot.providerId,
+      operatory_id: selectedSlot.operatory_id || 0, // Ensure fallback for safety
+      start_time: startTimeLocal.toFormat("yyyy-MM-dd'T'HH:mm:ssZZ"), // e.g., ...T14:00:00-05:00
+      end_time: endTimeLocal.toFormat("yyyy-MM-dd'T'HH:mm:ssZZ"),
+      note: appointmentNote
+    }
   };
 
   console.log(`[BookAppointmentHandler] Constructed appointment payload:`, appointmentPayload);
@@ -210,7 +224,7 @@ async function handleSecondBookingStep(
     const apiResponse = await fetchNexhealthAPI(
       '/appointments',
       practice.nexhealthSubdomain,
-      {},
+      { location_id: practice.nexhealthLocationId }, // <-- THIS IS THE FIX
       'POST',
       appointmentPayload
     );
@@ -232,7 +246,7 @@ async function handleSecondBookingStep(
                            currentState.appointmentBooking.typeName || 
                            'appointment';
 
-    const confirmationMessage = `You're all set! I've booked your ${appointmentType} for ${dayName}, ${date} at ${time}. You should receive a confirmation shortly. Is there anything else I can help you with?`;
+    const confirmationMessage = `You're all set! I've booked your ${appointmentType} for ${dayName}, ${date} at ${time}. You should receive a confirmation shortly. Is there anything else I can help you with today?`;
 
     const toolResponse: VapiToolResult = {
       toolCallId: toolId,
@@ -250,7 +264,27 @@ async function handleSecondBookingStep(
     // Step 5: Handle API failure
     console.error(`[BookAppointmentHandler] Failed to create appointment:`, apiError);
     
-    const errorMessage = "I'm sorry, there was a system error and I couldn't finalize your booking. Please call the office directly to schedule your appointment. Is there anything else I can help you with?";
+    // Check if the error indicates the slot is already booked
+    const errorMessageText = apiError instanceof Error ? apiError.message.toLowerCase() : '';
+    if (errorMessageText.includes('slot is not available') || errorMessageText.includes('already booked')) {
+        const revertedState: ConversationState = {
+            ...currentState,
+            currentStage: 'PRESENTING_SLOTS'
+        };
+        const lastPresented = revertedState.appointmentBooking.presentedSlots?.filter(s => s.time !== revertedState.appointmentBooking.selectedSlot?.time);
+        const nextOption = lastPresented && lastPresented.length > 0 ? `I still have the ${DateTime.fromISO(lastPresented[0].time).toFormat('h:mm a')} available, would you like to book that one instead?` : 'Would you like me to search for other times?';
+
+        return {
+            toolResponse: {
+                toolCallId: toolId,
+                result: `I'm so sorry, it looks like that time was just taken. ${nextOption}`
+            },
+            newState: revertedState
+        };
+    }
+    
+    // Fallback to the generic error message for all other API errors
+    const errorMessage = "I'm sorry, but there was a system error and I couldn't finalize your booking. Our staff has been notified and will give you a call back shortly to confirm a time. Thank you for your patience.";
 
     const toolResponse: VapiToolResult = {
       toolCallId: toolId,

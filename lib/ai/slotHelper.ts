@@ -499,39 +499,18 @@ export async function generateSlotResponse(
   const { openai } = await import("@ai-sdk/openai");
 
   if (searchResult.foundSlots.length > 0) {
-    // Format the slot times into a human-readable format
-    const formattedSlots = searchResult.foundSlots.slice(0, 2).map((slot) => {
-      try {
-        // Parse the ISO time string and convert to practice timezone
+    const formattedSlots = searchResult.foundSlots.slice(0, 2).map(slot => {
         const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
-        const isToday = slotDateTime.hasSame(DateTime.now().setZone(practiceTimezone), 'day');
-        const isTomorrow = slotDateTime.hasSame(DateTime.now().setZone(practiceTimezone).plus({ days: 1 }), 'day');
-        
-        let dayReference: string;
-        if (isToday) {
-          dayReference = "today";
-        } else if (isTomorrow) {
-          dayReference = "tomorrow";
-        } else {
-          dayReference = slotDateTime.toFormat('EEEE'); // e.g., "Wednesday"
-        }
-        
-        const timeString = slotDateTime.toFormat('h:mm a'); // e.g., "2:30 PM"
-        return `${dayReference} at ${timeString}`;
-      } catch (error) {
-        console.error('[Slot Response] Error formatting slot time:', error);
-        return slot.time; // Fallback to raw time
-      }
-    });
+        // Create a full, friendly string: "Wednesday, July 9th at 7:00 AM"
+        return slotDateTime.toFormat("cccc, MMMM d 'at' h:mm a");
+    }).join(' or ');
 
-    const slotsList = formattedSlots.join(' or ');
-    
     const userPrompt = `You are an AI response generator for a voice assistant named Laine. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering appointment slots.
 
 Patient needs a: "${spokenName}"
-Available slots are: "${slotsList}"
+Available slots are: "${formattedSlots}"
 
-Example Output: "For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?"
+Example Output: "Okay, for your ${spokenName}, I have openings on ${formattedSlots}. Would one of those work for you?"
 
 Your turn. Generate the single, fluid, spoken response for Laine:`;
 
@@ -542,10 +521,10 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
         temperature: 0.3,
         maxTokens: 100
       });
-      return text.trim() || `For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?`;
+      return text.trim() || `For your ${spokenName}, I have openings on ${formattedSlots}. Would either of those work for you?`;
     } catch (error) {
       console.error('[Slot Response] Error generating AI response:', error);
-      return `For your ${spokenName}, I have openings ${slotsList}. Would either of those work for you?`;
+      return `For your ${spokenName}, I have openings on ${formattedSlots}. Would either of those work for you?`;
     }
 
   } else if (searchResult.nextAvailableDate) {
