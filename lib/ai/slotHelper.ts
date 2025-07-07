@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { DateTime } from "luxon";
 import type { CoreMessage } from "ai";
+import type { ConversationState } from "@/types/vapi";
 
 /**
  * Defines the time ranges for different parts of the day.
@@ -591,5 +592,127 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
       console.error('[Slot Response] Error generating AI response for no availability:', error);
       return `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
     }
+  }
+}
+
+/**
+ * Generate a natural AI response offering time buckets instead of specific slots
+ * @param availableBuckets Array of time bucket names that have availability
+ * @param dayOfWeek The day being offered (e.g., "Thursday") 
+ * @param spokenName The natural name of the appointment type
+ * @returns Generated AI response offering time bucket choices
+ */
+export async function generateTimeBucketResponse(
+  availableBuckets: string[],
+  dayOfWeek: string,
+  spokenName: string
+): Promise<string> {
+  if (availableBuckets.length === 0) {
+    return `I'm sorry, but I couldn't find any available times for your ${spokenName} on ${dayOfWeek}. Would you like to try another day?`;
+  }
+
+  const bucketList = availableBuckets.join(' or ');
+  const prompt = `You are an AI response generator. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering time-of-day options.
+
+Context:
+- Appointment Type: "${spokenName}"
+- Day: "${dayOfWeek}"
+- Available Time Windows: "${bucketList}"
+
+Example Output: "Okay, for your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?"
+
+Your turn. Generate the single, fluid, spoken response for Laine:`;
+  
+  try {
+    const { generateText } = await import("ai");
+    const { openai } = await import("@ai-sdk/openai");
+    
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      maxTokens: 100
+    });
+    
+    return text.trim() || `For your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?`;
+  } catch (error) {
+    console.error('[Time Bucket Response] Error generating AI response:', error);
+    return `For your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?`;
+  }
+}
+
+/**
+ * Generate a natural AI response presenting specific slots from a chosen time bucket
+ * @param currentState Current conversation state containing presented slots
+ * @param timeBucket The chosen time bucket (e.g., "Afternoon")
+ * @param practiceTimezone Practice timezone for proper formatting
+ * @returns Generated AI response offering specific time slots
+ */
+export async function generateSpecificSlotResponse(
+  currentState: ConversationState,
+  timeBucket: string,
+  practiceTimezone: string
+): Promise<string> {
+  const presentedSlots = currentState.appointmentBooking.presentedSlots || [];
+  const spokenName = currentState.appointmentBooking.spokenName || 'appointment';
+  
+  // Filter slots to the chosen time bucket
+  const timeBucketRange = TIME_BUCKETS[timeBucket as TimeBucket];
+  if (!timeBucketRange) {
+    return `I'm sorry, I couldn't understand that time preference. Could you please choose from morning, afternoon, or evening?`;
+  }
+  
+  const [startHour, startMinute] = timeBucketRange.start.split(':').map(Number);
+  const [endHour, endMinute] = timeBucketRange.end.split(':').map(Number);
+  
+  const bucketSlots = presentedSlots.filter(slot => {
+    const slotTime = DateTime.fromISO(slot.time);
+    const slotHour = slotTime.hour;
+    const slotMinute = slotTime.minute;
+    
+    const slotTimeInMinutes = slotHour * 60 + slotMinute;
+    const startTimeInMinutes = startHour * 60 + startMinute;
+    const endTimeInMinutes = endHour * 60 + endMinute;
+    
+    return slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
+  });
+  
+  if (bucketSlots.length === 0) {
+    return `I'm sorry, I don't actually have any slots available in the ${timeBucket.toLowerCase()}. Would you like to try a different time of day?`;
+  }
+  
+  // Take first 2-3 slots from the bucket
+  const slotsToPresent = bucketSlots.slice(0, 3);
+  const formattedSlots = slotsToPresent.map(slot => {
+    const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
+    return slotDateTime.toFormat('h:mm a');
+  }).join(' or ');
+  
+  const prompt = `You are an AI response generator. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering specific appointment times.
+
+Context:
+- Appointment Type: "${spokenName}"
+- Time Period: "${timeBucket}"
+- Available Times: "${formattedSlots}"
+
+Example Output: "Okay, in the ${timeBucket.toLowerCase()} I have ${formattedSlots}. Does one of those work?"
+
+Your turn. Generate the single, fluid, spoken response for Laine:`;
+  
+  try {
+    const { generateText } = await import("ai");
+    const { openai } = await import("@ai-sdk/openai");
+    
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      maxTokens: 100
+    });
+    
+    return text.trim() || `In the ${timeBucket.toLowerCase()}, I have ${formattedSlots}. Does one of those work?`;
+  } catch (error) {
+    console.error('[Specific Slot Response] Error generating AI response:', error);
+    return `In the ${timeBucket.toLowerCase()}, I have ${formattedSlots}. Does one of those work?`;
   }
 } 

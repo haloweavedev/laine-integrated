@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { normalizeDateWithAI, findAvailableSlots, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
+import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
 import type { ConversationState, VapiToolResult } from "@/types/vapi";
 
@@ -19,9 +19,9 @@ export async function handleCheckAvailableSlots(
   toolArguments: CheckAvailableSlotsArgs,
   toolId: string
 ): Promise<HandlerResult> {
-  const { requestedDate, timeBucket } = toolArguments;
+  const { requestedDate, timeBucket, preferredDaysOfWeek } = toolArguments;
   
-  console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}"`);
+  console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}", preferredDaysOfWeek: "${preferredDaysOfWeek}"`);
   
   try {
     if (!currentState.practiceId) {
@@ -67,7 +67,7 @@ export async function handleCheckAvailableSlots(
 
     let searchDate: string | null = null;
 
-    // Handle explicit user date request
+    // Priority 1: Handle explicit user date request
     if (requestedDate) {
       console.log(`[CheckAvailableSlotsHandler] User provided a specific date: "${requestedDate}". Normalizing...`);
       searchDate = await normalizeDateWithAI(requestedDate, practice.timezone || 'America/Chicago');
@@ -81,9 +81,38 @@ export async function handleCheckAvailableSlots(
         };
       }
       console.log(`[CheckAvailableSlotsHandler] Normalized date to: ${searchDate}`);
-    } else {
-      // Default to today for immediate check
-      console.log(`[CheckAvailableSlotsHandler] No date provided. Using today for immediate slot check.`);
+    } 
+    // Priority 2: Handle preferred days of week
+    else if (preferredDaysOfWeek) {
+      try {
+        const preferredDays = JSON.parse(preferredDaysOfWeek);
+        if (Array.isArray(preferredDays) && preferredDays.length > 0) {
+          const dayName = preferredDays[0]; // Taking the first preferred day
+          const dayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(dayName.toLowerCase());
+          
+          if (dayIndex !== -1) {
+            let searchDateTime = DateTime.now().setZone(practice.timezone || 'America/Chicago');
+            
+            // Find the next occurrence of the preferred day
+            // If today is the preferred day, we'll still look for next occurrence to avoid booking too last minute
+            do {
+              searchDateTime = searchDateTime.plus({ days: 1 });
+            } while (searchDateTime.weekday % 7 !== dayIndex);
+            
+            searchDate = searchDateTime.toFormat('yyyy-MM-dd');
+            console.log(`[CheckAvailableSlotsHandler] Calculated next ${dayName} as: ${searchDate}`);
+          } else {
+            console.error(`[CheckAvailableSlotsHandler] Invalid day name: ${dayName}`);
+          }
+        }
+      } catch (e) {
+        console.error("[CheckAvailableSlotsHandler] Could not parse preferredDaysOfWeek", e);
+      }
+    }
+
+    // Priority 3: Default to today if no date or preference provided
+    if (!searchDate) {
+      console.log(`[CheckAvailableSlotsHandler] No date or day preference provided. Using today for immediate slot check.`);
       searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
     }
 
@@ -134,20 +163,48 @@ export async function handleCheckAvailableSlots(
       console.log(`[CheckAvailableSlotsHandler] Filtered from ${searchResult.foundSlots.length} to ${filteredSlots.length} slots for ${timeBucket} preference`);
     }
 
-    // Generate response with filtered slots
-    const modifiedSearchResult = {
-      foundSlots: filteredSlots,
-      nextAvailableDate: searchResult.nextAvailableDate
-    };
+    // NEW TIME BUCKET LOGIC: Instead of presenting specific slots, identify available time buckets
+    const availableBuckets: string[] = [];
+    const primaryBuckets = ['Morning', 'Afternoon', 'Evening'] as const;
+    
+    for (const bucket of primaryBuckets) {
+      const bucketRange = TIME_BUCKETS[bucket];
+      const [startHour, startMinute] = bucketRange.start.split(':').map(Number);
+      const [endHour, endMinute] = bucketRange.end.split(':').map(Number);
+      
+      const hasSlotInBucket = filteredSlots.some(slot => {
+        const slotTime = DateTime.fromISO(slot.time);
+        const slotHour = slotTime.hour;
+        const slotMinute = slotTime.minute;
+        
+        const slotTimeInMinutes = slotHour * 60 + slotMinute;
+        const startTimeInMinutes = startHour * 60 + startMinute;
+        const endTimeInMinutes = endHour * 60 + endMinute;
+        
+        return slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
+      });
+      
+      if (hasSlotInBucket) {
+        availableBuckets.push(bucket);
+      }
+    }
 
+    console.log(`[CheckAvailableSlotsHandler] Found slots in time buckets: ${availableBuckets.join(', ')}`);
+
+    // Generate the day of week for the response
+    const searchDateTime = DateTime.fromISO(searchDate, { zone: practice.timezone || 'America/Chicago' });
+    const dayOfWeek = searchDateTime.toFormat('cccc'); // e.g., "Thursday"
+    
     const spokenName = currentState.appointmentBooking.spokenName || currentState.appointmentBooking.typeName || 'appointment';
-    const aiResponse = await generateSlotResponse(
-      modifiedSearchResult,
-      spokenName,
-      practice.timezone || 'America/Chicago'
+    
+    // Use the new time bucket response generator
+    const aiResponse = await generateTimeBucketResponse(
+      availableBuckets,
+      dayOfWeek,
+      spokenName
     );
 
-    // Update conversation state
+    // Update conversation state - CRUCIAL: Store ALL found slots for later use
     const newState: ConversationState = {
       ...currentState,
       currentStage: 'PRESENTING_SLOTS',
@@ -168,7 +225,7 @@ export async function handleCheckAvailableSlots(
       result: aiResponse
     };
 
-    console.log(`[CheckAvailableSlotsHandler] Successfully found ${filteredSlots.length} slots with ${timeBucket || 'no'} time preference`);
+    console.log(`[CheckAvailableSlotsHandler] Successfully presented ${availableBuckets.length} time bucket options for ${filteredSlots.length} total slots`);
 
     return {
       toolResponse,
