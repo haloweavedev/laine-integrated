@@ -71,37 +71,7 @@ export async function handleConfirmBooking(
 
       console.log(`[ConfirmBookingHandler] Successfully matched slot: ${matchedSlot.time}`);
 
-      // TRANSCRIPT RETRY MECHANISM: Implement simple but effective retry
-      console.log(`[ConfirmBookingHandler] Fetching call transcript for appointment note`);
-      let transcript = '';
-      
-      try {
-        let callLog = await prisma.callLog.findUnique({
-          where: { vapiCallId: currentState.callId },
-          select: { transcriptText: true }
-        });
-        
-        transcript = callLog?.transcriptText || '';
-        
-        // If transcript is empty, wait 1.5 seconds and try once more
-        if (!transcript) {
-          console.log(`[ConfirmBookingHandler] Transcript empty, waiting 1.5s for webhook to complete`);
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          
-          callLog = await prisma.callLog.findUnique({
-            where: { vapiCallId: currentState.callId },
-            select: { transcriptText: true }
-          });
-          
-          transcript = callLog?.transcriptText || '';
-          console.log(`[ConfirmBookingHandler] After retry, transcript length: ${transcript.length}`);
-        }
-      } catch (transcriptError) {
-        console.warn(`[ConfirmBookingHandler] Error fetching transcript:`, transcriptError);
-        // Continue with empty transcript rather than failing the booking
-      }
-      
-      const appointmentNote = await generateAppointmentNote(currentState, transcript);
+      const appointmentNote = await generateAppointmentNote(currentState);
       
       // Log the generated note
       await prisma.toolLog.updateMany({
