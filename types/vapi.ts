@@ -37,6 +37,7 @@ export interface ConversationState {
     nextAvailableDate?: string | null;
     lastTimePreference?: 'Morning' | 'Afternoon' | 'Evening' | 'Any';
     isUrgent?: boolean;
+    isImmediateBooking?: boolean;
   };
 
   patientDetails: {

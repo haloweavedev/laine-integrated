@@ -66,8 +66,9 @@ export async function handleCheckAvailableSlots(
     }
 
     // Check if this is an urgent appointment request
-    if (currentState.appointmentBooking.isUrgent) {
-      console.log('[CheckAvailableSlotsHandler] Urgent flow activated.');
+    const { isUrgent, isImmediateBooking } = currentState.appointmentBooking;
+    if (isUrgent || isImmediateBooking) {
+      console.log(`[CheckAvailableSlotsHandler] Urgent/Immediate flow activated. isUrgent: ${isUrgent}, isImmediateBooking: ${isImmediateBooking}`);
 
       // For urgent cases, search starting today with a 7-day window
       const searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');

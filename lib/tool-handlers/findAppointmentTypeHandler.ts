@@ -145,7 +145,8 @@ export async function handleFindAppointmentType(
         spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
         duration: matchedAppointmentType.duration,
         patientRequest: patientRequest,
-        isUrgent: isUrgent
+        isUrgent: isUrgent,
+        isImmediateBooking: matchedAppointmentType.check_immediate_next_available
       }
     };
 
