@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { handleFindAppointmentType } from "@/lib/tool-handlers/findAppointmentTypeHandler";
 import { handleCheckAvailableSlots } from "@/lib/tool-handlers/checkAvailableSlotsHandler";
-import { handlePresentSpecificSlots } from "@/lib/tool-handlers/presentSpecificSlotsHandler";
 import { handleConfirmBooking } from "@/lib/tool-handlers/confirmBookingHandler";
 import type { 
   ServerMessageToolCallsPayload, 
@@ -119,17 +118,6 @@ export async function POST(request: NextRequest) {
         const result = await handleCheckAvailableSlots(
           state,
           toolArguments as { preferredDaysOfWeek?: string; timeBucket?: string; requestedDate?: string },
-          toolId
-        );
-        toolResponse = result.toolResponse;
-        state = result.newState;
-        break;
-      }
-
-      case "presentSpecificSlots": {
-        const result = await handlePresentSpecificSlots(
-          state,
-          toolArguments as { timeBucket: string },
           toolId
         );
         toolResponse = result.toolResponse;

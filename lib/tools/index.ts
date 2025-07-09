@@ -1,7 +1,6 @@
 import type { VapiTool } from '@/types/vapi';
 import { getFindAppointmentTypeTool } from './definitions/findAppointmentTypeTool';
 import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
-import { getPresentSpecificSlotsTool } from './definitions/presentSpecificSlotsTool';
 import { getConfirmBookingTool } from './definitions/confirmBookingTool';
 // import { getAnotherTool } from './definitions/anotherTool'; // Future tool
 
@@ -14,7 +13,6 @@ export function getAllTools(appBaseUrl: string): VapiTool[] {
   const tools: VapiTool[] = [
     getFindAppointmentTypeTool(appBaseUrl),
     getCheckAvailableSlotsTool(appBaseUrl),
-    getPresentSpecificSlotsTool(appBaseUrl),
     getConfirmBookingTool(appBaseUrl),
     // getAnotherTool(appBaseUrl), // Future tool
   ];

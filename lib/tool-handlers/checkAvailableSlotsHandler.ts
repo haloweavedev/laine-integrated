@@ -149,45 +149,39 @@ export async function handleCheckAvailableSlots(
     const spokenName = currentState.appointmentBooking.spokenName || currentState.appointmentBooking.typeName || 'appointment';
 
     // 4. DECIDE HOW TO RESPOND BASED ON FLOW TYPE
-    if (isUrgent || isImmediateBooking) {
-      console.log(`[CheckAvailableSlotsHandler] Urgent/Immediate flow activated. isUrgent: ${isUrgent}, isImmediateBooking: ${isImmediateBooking}`);
+    
+    // Decide whether to present specific slots or time buckets
+    const shouldPresentSpecificSlots = (isUrgent || isImmediateBooking) || timeBucket;
 
-      // URGENT/IMMEDIATE: Generate response with specific times from filteredSlots
+    if (shouldPresentSpecificSlots) {
+      console.log(`[CheckAvailableSlotsHandler] Presenting specific slots. isUrgent: ${isUrgent}, isImmediateBooking: ${isImmediateBooking}, timeBucket provided: ${!!timeBucket}`);
+
       const aiResponse = await generateSlotResponse(
-        { ...searchResult, foundSlots: filteredSlots },
+        searchResult, // searchResult already contains the pre-filtered slots
         spokenName,
         practice.timezone || 'America/Chicago'
       );
 
-      // Update conversation state to present specific slots for confirmation
       const newState: ConversationState = {
         ...currentState,
         currentStage: 'AWAITING_SLOT_CONFIRMATION',
         appointmentBooking: {
           ...currentState.appointmentBooking,
-          presentedSlots: filteredSlots.map(slot => ({
-            time: slot.time,
-            operatory_id: slot.operatory_id,
-            providerId: slot.providerId
-          })),
-          nextAvailableDate: searchResult.nextAvailableDate || null
+          presentedSlots: searchResult.foundSlots, // Save the *actually presented* slots
+          nextAvailableDate: searchResult.nextAvailableDate || null,
         }
       };
 
-      const toolResponse: VapiToolResult = {
-        toolCallId: toolId,
-        result: aiResponse
-      };
-
-      console.log(`[CheckAvailableSlotsHandler] Urgent flow completed, presented ${filteredSlots.length} slots`);
-
       return {
-        toolResponse,
+        toolResponse: { toolCallId: toolId, result: aiResponse },
         newState
       };
 
     } else {
-      // STANDARD: Generate response with time buckets based on filteredSlots
+      // STANDARD FLOW - First pass, present time buckets
+      console.log('[CheckAvailableSlotsHandler] Presenting time buckets for standard flow.');
+      
+      // Generate response with time buckets based on filteredSlots
       const availableBuckets: string[] = [];
       const primaryBuckets = ['Morning', 'Afternoon', 'Evening'] as const;
       
