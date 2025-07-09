@@ -139,44 +139,16 @@ export async function handleCheckAvailableSlots(
         timezone: practice.timezone || 'America/Chicago'
       },
       searchDate,
-      searchDays
+      searchDays,
+      timeBucket as TimeBucket
     );
 
-    // 4. APPLY TIME BUCKET FILTER (respects user time preferences in all flows)
-    let filteredSlots = searchResult.foundSlots;
-
-    if (timeBucket && timeBucket !== 'AllDay' && TIME_BUCKETS[timeBucket as TimeBucket]) {
-      const timeBucketRange = TIME_BUCKETS[timeBucket as TimeBucket];
-      const [startHour, startMinute] = timeBucketRange.start.split(':').map(Number);
-      const [endHour, endMinute] = timeBucketRange.end.split(':').map(Number);
-      
-      console.log(`[CheckAvailableSlotsHandler] Filtering slots for ${timeBucket} preference (${timeBucketRange.start} - ${timeBucketRange.end})`);
-      
-      filteredSlots = searchResult.foundSlots.filter(slot => {
-        const slotTime = DateTime.fromISO(slot.time);
-        const slotHour = slotTime.hour;
-        const slotMinute = slotTime.minute;
-        
-        // Check if slot time falls within the time bucket
-        const slotTimeInMinutes = slotHour * 60 + slotMinute;
-        const startTimeInMinutes = startHour * 60 + startMinute;
-        const endTimeInMinutes = endHour * 60 + endMinute;
-        
-        const withinRange = slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
-        
-        if (!withinRange) {
-          console.log(`[CheckAvailableSlotsHandler] Filtered out slot ${slot.time} (${slotHour}:${slotMinute.toString().padStart(2, '0')}) - outside ${timeBucket} range`);
-        }
-        
-        return withinRange;
-      });
-      
-      console.log(`[CheckAvailableSlotsHandler] Filtered from ${searchResult.foundSlots.length} to ${filteredSlots.length} slots for ${timeBucket} preference`);
-    }
+    // 4. SLOTS ARE NOW PRE-FILTERED BY findAvailableSlots
+    const filteredSlots = searchResult.foundSlots;
 
     const spokenName = currentState.appointmentBooking.spokenName || currentState.appointmentBooking.typeName || 'appointment';
 
-    // 5. DECIDE HOW TO RESPOND BASED ON FLOW TYPE
+    // 4. DECIDE HOW TO RESPOND BASED ON FLOW TYPE
     if (isUrgent || isImmediateBooking) {
       console.log(`[CheckAvailableSlotsHandler] Urgent/Immediate flow activated. isUrgent: ${isUrgent}, isImmediateBooking: ${isImmediateBooking}`);
 

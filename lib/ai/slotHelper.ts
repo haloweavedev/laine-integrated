@@ -37,17 +37,25 @@ export async function normalizeDateWithAI(
     - The user is in the timezone: ${practiceTimezone}.
     
     Interpretation Rules:
-    1.  **Relative Dates:** Interpret "today", "tomorrow" based on the current date.
-    2.  **"Next" Keyword:** If the user says "next [day of week]" (e.g., "next Wednesday") and today is also a Wednesday, you MUST interpret this as the Wednesday of the *following* week (7 days from now). If today is a Monday and they say "next Wednesday", you mean the upcoming Wednesday of the same week.
-    3.  **Ambiguity:** If a query is ambiguous (e.g., "the 10th" without a month), or not a date, you MUST return 'INVALID_DATE'.
+    1.  **Assume Current Year:** If no year is specified (e.g., "July 11"), assume the current year (${now.year}). If that date has already passed, assume the following year.
+    2.  **Relative Dates:** Interpret "today", "tomorrow", "day after tomorrow" based on the current date.
+    3.  **"Next" Keyword (CRITICAL):**
+        - If today is Wednesday (weekday 3) and the user says "next Tuesday" (weekday 2), they mean the upcoming Tuesday of the *next* week.
+        - If today is Monday (weekday 1) and the user says "next Wednesday" (weekday 3), they mean the upcoming Wednesday of the *same* week.
+        - "This Friday" always means the Friday of the current week.
+    4.  **Ambiguity:** If a query is truly ambiguous (e.g., "the 10th" without a month) or not a date, you MUST return 'INVALID_DATE'.
     
-    Examples (Assuming today is Wednesday, 2025-07-02):
-    - "tomorrow" -> "2025-07-03"
-    - "next Wednesday" -> "2025-07-09"
-    - "this Friday" -> "2025-07-04"
+    Examples (Assuming today is Wednesday, 2025-07-09):
+    - "tomorrow" -> "2025-07-10"
+    - "July 11" -> "2025-07-11"
+    - "this Friday" -> "2025-07-11"
+    - "next Wednesday" -> "2025-07-16"
+    - "next Tuesday" -> "2025-07-15"
+    - "a week from today" -> "2025-07-16"
     - "July 10th" -> "2025-07-10"
-    - "a week from today" -> "2025-07-09"
-    - "the day after tomorrow" -> "2025-07-04"
+    - "the day after tomorrow" -> "2025-07-11"
+    - "December 25" -> "2025-12-25"
+    - "March 1" -> "2026-03-01" (if we're past March 1, 2025)
     
     Output Format (CRITICAL):
     - Your entire response MUST be ONLY the 'YYYY-MM-DD' string.
@@ -312,7 +320,8 @@ export async function findAvailableSlots(
     timezone: string;
   },
   startDate: string,
-  searchDays: number
+  searchDays: number,
+  timeBucket?: TimeBucket
 ): Promise<{ foundSlots: SlotData[]; nextAvailableDate: string | null }> {
   const { fetchNexhealthAPI } = await import("@/lib/nexhealth");
   
@@ -450,8 +459,39 @@ export async function findAvailableSlots(
 
         console.log(`[Lunch Filter] Filtered ${daySlots.length} slots to ${filteredDaySlots.length} slots after removing lunch conflicts on ${searchDate}`);
 
-        foundSlots.push(...filteredDaySlots);
-        console.log(`[Slot Search] Found ${filteredDaySlots.length} slots on ${searchDate} (after lunch filtering), total so far: ${foundSlots.length}`);
+        // Apply time bucket filter if specified
+        let finalDaySlots = filteredDaySlots;
+        if (timeBucket && timeBucket !== 'AllDay' && TIME_BUCKETS[timeBucket]) {
+          const timeBucketRange = TIME_BUCKETS[timeBucket];
+          const [startHour, startMinute] = timeBucketRange.start.split(':').map(Number);
+          const [endHour, endMinute] = timeBucketRange.end.split(':').map(Number);
+          
+          console.log(`[Time Bucket Filter] Filtering slots for ${timeBucket} preference (${timeBucketRange.start} - ${timeBucketRange.end}) on ${searchDate}`);
+          
+          finalDaySlots = filteredDaySlots.filter(slot => {
+            const slotTime = DateTime.fromISO(slot.time);
+            const slotHour = slotTime.hour;
+            const slotMinute = slotTime.minute;
+            
+            // Check if slot time falls within the time bucket
+            const slotTimeInMinutes = slotHour * 60 + slotMinute;
+            const startTimeInMinutes = startHour * 60 + startMinute;
+            const endTimeInMinutes = endHour * 60 + endMinute;
+            
+            const withinRange = slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
+            
+            if (!withinRange) {
+              console.log(`[Time Bucket Filter] Filtered out slot ${slot.time} (${slotHour}:${slotMinute.toString().padStart(2, '0')}) - outside ${timeBucket} range`);
+            }
+            
+            return withinRange;
+          });
+          
+          console.log(`[Time Bucket Filter] Filtered from ${filteredDaySlots.length} to ${finalDaySlots.length} slots for ${timeBucket} preference on ${searchDate}`);
+        }
+
+        foundSlots.push(...finalDaySlots);
+        console.log(`[Slot Search] Found ${finalDaySlots.length} slots on ${searchDate} (after all filtering), total so far: ${foundSlots.length}`);
 
         // If we have 2 or more slots, we can break early
         if (foundSlots.length >= 2) {
