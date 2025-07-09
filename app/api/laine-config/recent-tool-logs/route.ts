@@ -55,6 +55,15 @@ export async function GET() {
       let parsedArguments = null;
       let parsedResult = null;
 
+      // Helper function to check if a string looks like JSON
+      const looksLikeJSON = (str: string): boolean => {
+        if (!str) return false;
+        const trimmed = str.trim();
+        return (trimmed.startsWith('{') && trimmed.endsWith('}')) || 
+               (trimmed.startsWith('[') && trimmed.endsWith(']'));
+      };
+
+      // Parse arguments (these should typically be JSON objects)
       try {
         parsedArguments = log.arguments ? JSON.parse(log.arguments) : null;
       } catch (error) {
@@ -62,10 +71,18 @@ export async function GET() {
         parsedArguments = log.arguments;
       }
 
-      try {
-        parsedResult = log.result ? JSON.parse(log.result) : null;
-      } catch (error) {
-        console.warn(`Failed to parse result for tool log ${log.id}:`, error);
+      // Parse result more intelligently - many results are plain text responses
+      if (!log.result) {
+        parsedResult = null;
+      } else if (looksLikeJSON(log.result)) {
+        try {
+          parsedResult = JSON.parse(log.result);
+        } catch (error) {
+          console.warn(`Failed to parse result for tool log ${log.id} (looked like JSON):`, error);
+          parsedResult = log.result;
+        }
+      } else {
+        // Result is likely a plain text response, keep as string
         parsedResult = log.result;
       }
 
