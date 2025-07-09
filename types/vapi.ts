@@ -35,6 +35,7 @@ export interface ConversationState {
     presentedSlots?: SlotData[];
     nextAvailableDate?: string | null;
     lastTimePreference?: 'Morning' | 'Afternoon' | 'Evening' | 'Any';
+    isUrgent?: boolean;
   };
 
   patientDetails: {

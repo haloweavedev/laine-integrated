@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage } from "@/lib/ai/appointmentMatcher";
+import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage, generateUrgentAppointmentConfirmationMessage } from "@/lib/ai/appointmentMatcher";
 import type { ConversationState, VapiToolResult } from "@/types/vapi";
 
 interface FindAppointmentTypeArgs {
@@ -115,13 +115,24 @@ export async function handleFindAppointmentType(
       };
     }
 
+    // Detect urgency based on keywords in patient request
+    const URGENT_KEYWORDS = ['pain', 'toothache', 'emergency', 'hurts', 'broken', 'urgent', 'abscess', 'swelling', 'infection'];
+    const isUrgent = URGENT_KEYWORDS.some(keyword => patientRequest.toLowerCase().includes(keyword));
+
     // Generate natural confirmation message
-    const generatedMessage = await generateAppointmentConfirmationMessage(
-      patientRequest,
-      matchedAppointmentType.name, // Official Name
-      matchedAppointmentType.spokenName || matchedAppointmentType.name, // Spoken Name (fallback to official if null)
-      matchedAppointmentType.duration
-    );
+    const generatedMessage = isUrgent
+      ? await generateUrgentAppointmentConfirmationMessage(
+          patientRequest,
+          matchedAppointmentType.name, // Official Name
+          matchedAppointmentType.spokenName || matchedAppointmentType.name, // Spoken Name (fallback to official if null)
+          matchedAppointmentType.duration
+        )
+      : await generateAppointmentConfirmationMessage(
+          patientRequest,
+          matchedAppointmentType.name, // Official Name
+          matchedAppointmentType.spokenName || matchedAppointmentType.name, // Spoken Name (fallback to official if null)
+          matchedAppointmentType.duration
+        );
 
     // Update state with the matched appointment type
     const newState: ConversationState = {
@@ -133,7 +144,8 @@ export async function handleFindAppointmentType(
         typeName: matchedAppointmentType.name,
         spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
         duration: matchedAppointmentType.duration,
-        patientRequest: patientRequest
+        patientRequest: patientRequest,
+        isUrgent: isUrgent
       }
     };
 
