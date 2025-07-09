@@ -469,7 +469,7 @@ export async function findAvailableSlots(
           console.log(`[Time Bucket Filter] Filtering slots for ${timeBucket} preference (${timeBucketRange.start} - ${timeBucketRange.end}) on ${searchDate}`);
           
           finalDaySlots = filteredDaySlots.filter(slot => {
-            const slotTime = DateTime.fromISO(slot.time);
+            const slotTime = DateTime.fromISO(slot.time, { zone: timezone });
             const slotHour = slotTime.hour;
             const slotMinute = slotTime.minute;
             
