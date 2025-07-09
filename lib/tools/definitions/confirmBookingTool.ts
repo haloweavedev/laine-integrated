@@ -1,11 +1,11 @@
 import type { VapiTool } from "@/types/vapi";
 
-export function getBookAppointmentTool(appBaseUrl: string): VapiTool {
+export function getConfirmBookingTool(appBaseUrl: string): VapiTool {
   return {
     type: "function",
     function: {
-      name: "bookAppointment",
-      description: "Finalizes and books the appointment after the user verbally agrees to one of the offered time slots. Use this as the final step.",
+      name: "confirmBooking",
+      description: "Books the appointment. Call this **only** after the user has verbally agreed to a *specific time slot* (e.g., 'Yes, 9 AM works'). This is the final action to secure the appointment.",
       parameters: {
         type: "object" as const,
         properties: {

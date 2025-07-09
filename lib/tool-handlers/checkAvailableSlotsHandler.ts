@@ -262,21 +262,21 @@ export async function handleCheckAvailableSlots(
         spokenName
       );
 
-      // Update conversation state - CRUCIAL: Store ALL found slots for later use
-      const newState: ConversationState = {
-        ...currentState,
-        currentStage: 'PRESENTING_SLOTS',
-        appointmentBooking: {
-          ...currentState.appointmentBooking,
-          presentedSlots: filteredSlots.map(slot => ({
-            time: slot.time,
-            operatory_id: slot.operatory_id,
-            providerId: slot.providerId
-          })),
-          nextAvailableDate: searchResult.nextAvailableDate || null,
-          lastTimePreference: timeBucket as 'Morning' | 'Afternoon' | 'Evening' | 'Any' || 'Any'
-        }
-      };
+             // Update conversation state - CRUCIAL: Store ALL found slots for later use
+       const newState: ConversationState = {
+         ...currentState,
+         currentStage: 'AWAITING_TIME_BUCKET_SELECTION',
+         appointmentBooking: {
+           ...currentState.appointmentBooking,
+           presentedSlots: filteredSlots.map(slot => ({
+             time: slot.time,
+             operatory_id: slot.operatory_id,
+             providerId: slot.providerId
+           })),
+           nextAvailableDate: searchResult.nextAvailableDate || null,
+           lastTimePreference: timeBucket as 'Morning' | 'Afternoon' | 'Evening' | 'Any' || 'Any'
+         }
+       };
 
       const toolResponse: VapiToolResult = {
         toolCallId: toolId,

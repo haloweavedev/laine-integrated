@@ -17,7 +17,7 @@ export async function matchUserSelectionToSlot(
 
     // Create a simplified, numbered list of slots for the AI to parse.
     const formattedSlotsForAI = presentedSlots.map((slot, index) => {
-      const time = DateTime.fromISO(slot.time, { zone: practiceTimezone }).toFormat("h:mm a");
+      const time = DateTime.fromISO(slot.time, { zone: practiceTimezone }).toFormat("cccc 'at' h:mm a");
       return `${index + 1}. ${time}`;
     }).join("\n");
 
@@ -35,9 +35,10 @@ ${formattedSlotsForAI}
 The user then said: "${userSelection}"
 
 **EXAMPLES:**
-- If options are "1. 2:00 PM\n2. 2:40 PM" and user says "The first one," you return "1".
-- If options are "1. 7:00 AM\n2. 7:40 AM" and user says "The 7 40 one," you return "2".
-- If options are "1. 9:00 AM\n2. 10:00 AM" and user says "Let's do the later one," you return "2".
+- If options are "1. Wednesday at 2:00 PM\n2. Wednesday at 2:40 PM" and user says "The first one," you return "1".
+- If options are "1. Wednesday at 9:00 AM\n2. Wednesday at 10:00 AM" and user says "Let's do the 10 AM one," you return "2".
+- If options are "1. Thursday at 7:00 AM\n2. Thursday at 7:40 AM" and user says "The 7 40 one," you return "2".
+- If options are "1. Friday at 9:00 AM\n2. Friday at 10:00 AM" and user says "Let's do the later one," you return "2".
 - If user says "None of those work," you return "NO_MATCH".
 
 Which option number did the user select? (Return ONLY the number or "NO_MATCH")`;

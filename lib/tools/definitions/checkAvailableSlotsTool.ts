@@ -9,7 +9,7 @@ export function getCheckAvailableSlotsTool(appBaseUrl: string): VapiTool {
     type: "function" as const,
     function: {
       name: "checkAvailableSlots",
-      description: "Finds the next 2 available appointment slots based on the user's preferred days and time of day. Use this AFTER an appointment type has been confirmed.",
+      description: "Finds available time *buckets* (e.g., 'Morning', 'Afternoon') for a standard, non-urgent appointment. Call this *after* the appointment type is known and the user has expressed a preference for a day or time.",
       parameters: {
         type: "object" as const,
         properties: {

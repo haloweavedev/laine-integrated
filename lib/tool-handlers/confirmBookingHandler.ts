@@ -2,7 +2,6 @@ import { prisma } from "@/lib/prisma";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { matchUserSelectionToSlot } from "@/lib/ai/slotMatcher";
 import { generateAppointmentNote } from "@/lib/ai/summaryHelper";
-import { generateSpecificSlotResponse } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
 import type { ConversationState, VapiToolResult } from "@/types/vapi";
 
@@ -15,15 +14,15 @@ interface HandlerResult {
   newState: ConversationState;
 }
 
-export async function handleBookAppointment(
+export async function handleConfirmBooking(
   currentState: ConversationState,
   toolArguments: BookAppointmentArgs,
   toolId: string
 ): Promise<HandlerResult> {
   const { userSelection } = toolArguments;
   
-  console.log(`[BookAppointmentHandler] Processing user selection: "${userSelection}"`);
-  console.log(`[BookAppointmentHandler] Current stage: ${currentState.currentStage}`);
+  console.log(`[ConfirmBookingHandler] Processing user selection: "${userSelection}"`);
+  console.log(`[ConfirmBookingHandler] Current stage: ${currentState.currentStage}`);
   
   try {
     // Get practice details for all operations
@@ -49,32 +48,9 @@ export async function handleBookAppointment(
     const practiceTimezone = practice.timezone || 'America/Chicago';
 
     // Handle different conversation stages
-    if (currentState.currentStage === 'PRESENTING_SLOTS') {
-      // Stage 1: User is selecting a time bucket (Morning, Afternoon, Evening)
-      console.log(`[BookAppointmentHandler] Stage 1: Processing time bucket selection`);
-      
-      const aiResponse = await generateSpecificSlotResponse(
-        currentState,
-        userSelection,
-        practiceTimezone
-      );
-      
-      const newState: ConversationState = {
-        ...currentState,
-        currentStage: 'AWAITING_SLOT_CONFIRMATION'
-      };
-      
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          result: aiResponse
-        },
-        newState
-      };
-      
-    } else if (currentState.currentStage === 'AWAITING_SLOT_CONFIRMATION') {
-      // Stage 2: User is confirming a specific time slot
-      console.log(`[BookAppointmentHandler] Stage 2: Processing slot confirmation`);
+    if (currentState.currentStage === 'AWAITING_SLOT_CONFIRMATION') {
+      // User is confirming a specific time slot
+      console.log(`[ConfirmBookingHandler] Processing slot confirmation`);
       
       const matchedSlot = await matchUserSelectionToSlot(
         userSelection,
@@ -83,7 +59,7 @@ export async function handleBookAppointment(
       );
 
       if (!matchedSlot) {
-        console.log(`[BookAppointmentHandler] No slot match found for user selection`);
+        console.log(`[ConfirmBookingHandler] No slot match found for user selection`);
         return {
           toolResponse: {
             toolCallId: toolId,
@@ -93,10 +69,10 @@ export async function handleBookAppointment(
         };
       }
 
-      console.log(`[BookAppointmentHandler] Successfully matched slot: ${matchedSlot.time}`);
+      console.log(`[ConfirmBookingHandler] Successfully matched slot: ${matchedSlot.time}`);
 
       // TRANSCRIPT RETRY MECHANISM: Implement simple but effective retry
-      console.log(`[BookAppointmentHandler] Fetching call transcript for appointment note`);
+      console.log(`[ConfirmBookingHandler] Fetching call transcript for appointment note`);
       let transcript = '';
       
       try {
@@ -109,7 +85,7 @@ export async function handleBookAppointment(
         
         // If transcript is empty, wait 1.5 seconds and try once more
         if (!transcript) {
-          console.log(`[BookAppointmentHandler] Transcript empty, waiting 1.5s for webhook to complete`);
+          console.log(`[ConfirmBookingHandler] Transcript empty, waiting 1.5s for webhook to complete`);
           await new Promise(resolve => setTimeout(resolve, 1500));
           
           callLog = await prisma.callLog.findUnique({
@@ -118,10 +94,10 @@ export async function handleBookAppointment(
           });
           
           transcript = callLog?.transcriptText || '';
-          console.log(`[BookAppointmentHandler] After retry, transcript length: ${transcript.length}`);
+          console.log(`[ConfirmBookingHandler] After retry, transcript length: ${transcript.length}`);
         }
       } catch (transcriptError) {
-        console.warn(`[BookAppointmentHandler] Error fetching transcript:`, transcriptError);
+        console.warn(`[ConfirmBookingHandler] Error fetching transcript:`, transcriptError);
         // Continue with empty transcript rather than failing the booking
       }
       
@@ -149,7 +125,7 @@ export async function handleBookAppointment(
         }
       };
 
-      console.log(`[BookAppointmentHandler] Constructed appointment payload:`, appointmentPayload);
+      console.log(`[ConfirmBookingHandler] Constructed appointment payload:`, appointmentPayload);
       
       // Log the payload for debugging
       await prisma.toolLog.updateMany({
@@ -160,7 +136,7 @@ export async function handleBookAppointment(
 
       // Make the API call
       try {
-        console.log(`[BookAppointmentHandler] Calling NexHealth API to create appointment`);
+        console.log(`[ConfirmBookingHandler] Calling NexHealth API to create appointment`);
         
         const apiResponse = await fetchNexhealthAPI(
           '/appointments',
@@ -170,7 +146,7 @@ export async function handleBookAppointment(
           appointmentPayload
         );
 
-        console.log(`[BookAppointmentHandler] Successfully created appointment:`, apiResponse);
+        console.log(`[ConfirmBookingHandler] Successfully created appointment:`, apiResponse);
 
         // Success - Return final confirmation
         const finalState: ConversationState = {
@@ -193,7 +169,7 @@ export async function handleBookAppointment(
 
         const confirmationMessage = `You're all set! I've booked your ${appointmentType} for ${dayName}, ${date} at ${time}. You should receive a confirmation shortly. Is there anything else I can help you with today?`;
 
-        console.log(`[BookAppointmentHandler] Booking confirmed successfully`);
+        console.log(`[ConfirmBookingHandler] Booking confirmed successfully`);
 
         return {
           toolResponse: {
@@ -205,7 +181,7 @@ export async function handleBookAppointment(
 
       } catch (apiError) {
         // Handle API failure
-        console.error(`[BookAppointmentHandler] Failed to create appointment:`, apiError);
+        console.error(`[ConfirmBookingHandler] Failed to create appointment:`, apiError);
         
         // Check if the error indicates the slot is already booked
         const errorMessageText = apiError instanceof Error ? apiError.message.toLowerCase() : '';

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { handleFindAppointmentType } from "@/lib/tool-handlers/findAppointmentTypeHandler";
 import { handleCheckAvailableSlots } from "@/lib/tool-handlers/checkAvailableSlotsHandler";
-import { handleBookAppointment } from "@/lib/tool-handlers/bookAppointmentHandler";
+import { handlePresentSpecificSlots } from "@/lib/tool-handlers/presentSpecificSlotsHandler";
+import { handleConfirmBooking } from "@/lib/tool-handlers/confirmBookingHandler";
 import type { 
   ServerMessageToolCallsPayload, 
   VapiToolResult,
@@ -125,8 +126,19 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      case "bookAppointment": {
-        const result = await handleBookAppointment(
+      case "presentSpecificSlots": {
+        const result = await handlePresentSpecificSlots(
+          state,
+          toolArguments as { timeBucket: string },
+          toolId
+        );
+        toolResponse = result.toolResponse;
+        state = result.newState;
+        break;
+      }
+
+      case "confirmBooking": {
+        const result = await handleConfirmBooking(
           state,
           toolArguments as { userSelection: string },
           toolId

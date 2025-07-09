@@ -9,7 +9,7 @@ export function getFindAppointmentTypeTool(appBaseUrl: string): VapiTool {
     type: "function" as const,
     function: {
       name: "findAppointmentType",
-      description: "Identifies the most suitable dental appointment type based on the patient's stated needs, symptoms, or request. Use this to understand what kind of appointment the patient is looking for before checking availability or booking.",
+      description: "Identifies the patient's need (e.g., 'toothache', 'cleaning') and determines the correct appointment type. **This is always the first tool to call in a conversation.**",
       parameters: {
         type: "object" as const,
         properties: {
