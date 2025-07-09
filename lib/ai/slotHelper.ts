@@ -503,7 +503,17 @@ export async function generateSlotResponse(
   const { openai } = await import("@ai-sdk/openai");
 
   if (searchResult.foundSlots.length > 0) {
-    const formattedSlots = searchResult.foundSlots.slice(0, 2).map(slot => {
+    // De-duplicate slots to ensure only unique time strings are presented to users
+    const uniqueSlots = searchResult.foundSlots.filter(
+      (slot, index, self) =>
+        index ===
+        self.findIndex((s) => 
+          DateTime.fromISO(s.time).setZone(practiceTimezone).toFormat("cccc, MMMM d 'at' h:mm a") === 
+          DateTime.fromISO(slot.time).setZone(practiceTimezone).toFormat("cccc, MMMM d 'at' h:mm a")
+        )
+    );
+    
+    const formattedSlots = uniqueSlots.slice(0, 2).map(slot => {
         const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
         // Create a full, friendly string: "Wednesday, July 9th at 7:00 AM"
         return slotDateTime.toFormat("cccc, MMMM d 'at' h:mm a");
