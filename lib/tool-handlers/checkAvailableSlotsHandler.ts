@@ -1,17 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
-import type { ConversationState, VapiToolResult } from "@/types/vapi";
+import type { ConversationState, VapiToolResult, HandlerResult } from "@/types/vapi";
 
 interface CheckAvailableSlotsArgs {
   preferredDaysOfWeek?: string;
   timeBucket?: string;
   requestedDate?: string;
-}
-
-interface HandlerResult {
-  toolResponse: VapiToolResult;
-  newState: ConversationState;
 }
 
 export async function handleCheckAvailableSlots(
@@ -164,7 +159,7 @@ export async function handleCheckAvailableSlots(
 
       const newState: ConversationState = {
         ...currentState,
-        currentStage: 'AWAITING_SLOT_CONFIRMATION',
+        currentStage: 'AWAITING_FINAL_CONFIRMATION',
         appointmentBooking: {
           ...currentState.appointmentBooking,
           presentedSlots: searchResult.foundSlots, // Save the *actually presented* slots

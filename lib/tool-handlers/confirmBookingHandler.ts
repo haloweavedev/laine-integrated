@@ -3,15 +3,10 @@ import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { matchUserSelectionToSlot } from "@/lib/ai/slotMatcher";
 import { generateAppointmentNote } from "@/lib/ai/summaryHelper";
 import { DateTime } from "luxon";
-import type { ConversationState, VapiToolResult } from "@/types/vapi";
+import type { ConversationState, HandlerResult } from "@/types/vapi";
 
 interface BookAppointmentArgs {
   userSelection: string;
-}
-
-interface HandlerResult {
-  toolResponse: VapiToolResult;
-  newState: ConversationState;
 }
 
 export async function handleConfirmBooking(
@@ -49,8 +44,8 @@ export async function handleConfirmBooking(
 
     // Handle different conversation stages
     if (currentState.currentStage === 'AWAITING_SLOT_CONFIRMATION') {
-      // User is confirming a specific time slot
-      console.log(`[ConfirmBookingHandler] Processing slot confirmation`);
+      // First-time slot selection - do NOT book yet, just confirm the choice
+      console.log(`[ConfirmBookingHandler] Processing initial slot selection`);
       
       const matchedSlot = await matchUserSelectionToSlot(
         userSelection,
@@ -71,6 +66,98 @@ export async function handleConfirmBooking(
 
       console.log(`[ConfirmBookingHandler] Successfully matched slot: ${matchedSlot.time}`);
 
+      // Format the confirmation time
+      const confirmationTime = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone });
+      const dayName = confirmationTime.toFormat('cccc');
+      const time = confirmationTime.toFormat('h:mm a');
+      const date = confirmationTime.toFormat('MMMM d');
+
+      // Update state with selected slot and move to final confirmation stage
+      const newState: ConversationState = {
+        ...currentState,
+        currentStage: 'AWAITING_FINAL_CONFIRMATION',
+        appointmentBooking: {
+          ...currentState.appointmentBooking,
+          selectedSlot: matchedSlot
+        }
+      };
+
+      const confirmationMessage = `Okay, I have you down for ${dayName}, ${date} at ${time}. Is that correct?`;
+
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: confirmationMessage
+        },
+        newState
+      };
+
+    } else if (currentState.currentStage === 'AWAITING_FINAL_CONFIRMATION') {
+      // Final confirmation - either book the appointment or handle change of mind
+      console.log(`[ConfirmBookingHandler] Processing final confirmation`);
+
+      // Check if user is confirming or wants to change
+      const confirmationKeywords = ['yes', 'correct', 'right', 'that\'s right', 'perfect', 'good', 'yep', 'yeah', 'sounds good'];
+      const changeKeywords = ['no', 'actually', 'wait', 'different', 'change', 'another', 'morning', 'afternoon', 'evening', 'earlier', 'later'];
+      
+      const userSelectionLower = userSelection.toLowerCase();
+      const isConfirming = confirmationKeywords.some(keyword => userSelectionLower.includes(keyword));
+      const isChanging = changeKeywords.some(keyword => userSelectionLower.includes(keyword));
+
+      if (isChanging && !isConfirming) {
+        // User wants to change their mind - revert to slot selection stage
+        console.log(`[ConfirmBookingHandler] User wants to change selection, reverting to slot presentation`);
+        
+        const revertedState: ConversationState = {
+          ...currentState,
+          currentStage: 'AWAITING_SLOT_CONFIRMATION',
+          appointmentBooking: {
+            ...currentState.appointmentBooking,
+            selectedSlot: undefined // Clear the selected slot
+          }
+        };
+
+        // Check if they mentioned a specific time preference
+        if (userSelectionLower.includes('morning') || userSelectionLower.includes('afternoon') || userSelectionLower.includes('evening')) {
+          return {
+            toolResponse: {
+              toolCallId: toolId,
+              result: "No problem! Let me check for other available times."
+            },
+            newState: revertedState,
+            nextTool: {
+              toolName: 'checkAvailableSlots',
+              toolArguments: { 
+                timeBucket: userSelectionLower.includes('morning') ? 'Morning' : 
+                           userSelectionLower.includes('afternoon') ? 'Afternoon' : 'Evening'
+              }
+            }
+          };
+        } else {
+          return {
+            toolResponse: {
+              toolCallId: toolId,
+              result: "No problem! Would you like me to check for other available times?"
+            },
+            newState: revertedState
+          };
+        }
+      }
+
+      // User is confirming - proceed with actual booking
+      if (!currentState.appointmentBooking.selectedSlot) {
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: "No slot selected for booking."
+          },
+          newState: currentState
+        };
+      }
+
+      const selectedSlot = currentState.appointmentBooking.selectedSlot;
+      console.log(`[ConfirmBookingHandler] User confirmed, proceeding with booking for slot: ${selectedSlot.time}`);
+
       const appointmentNote = await generateAppointmentNote(currentState);
       
       // Log the generated note
@@ -81,14 +168,14 @@ export async function handleConfirmBooking(
       console.log(`[DB Log] Logged generated appointment note for tool call ${toolId}.`);
 
       // Construct NexHealth payload
-      const startTimeLocal = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone });
+      const startTimeLocal = DateTime.fromISO(selectedSlot.time, { zone: practiceTimezone });
       const endTimeLocal = startTimeLocal.plus({ minutes: currentState.appointmentBooking.duration || 30 });
 
       const appointmentPayload = {
         appt: {
           patient_id: currentState.patientDetails.nexhealthPatientId,
-          provider_id: matchedSlot.providerId,
-          operatory_id: matchedSlot.operatory_id || 0,
+          provider_id: selectedSlot.providerId,
+          operatory_id: selectedSlot.operatory_id || 0,
           start_time: startTimeLocal.toFormat("yyyy-MM-dd'T'HH:mm:ssZZ"),
           end_time: endTimeLocal.toFormat("yyyy-MM-dd'T'HH:mm:ssZZ"),
           note: appointmentNote
@@ -121,15 +208,11 @@ export async function handleConfirmBooking(
         // Success - Return final confirmation
         const finalState: ConversationState = {
           ...currentState,
-          currentStage: 'BOOKING_CONFIRMED',
-          appointmentBooking: {
-            ...currentState.appointmentBooking,
-            selectedSlot: matchedSlot
-          }
+          currentStage: 'BOOKING_CONFIRMED'
         };
 
         // Format the confirmation message
-        const confirmationTime = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone });
+        const confirmationTime = DateTime.fromISO(selectedSlot.time, { zone: practiceTimezone });
         const dayName = confirmationTime.toFormat('cccc');
         const time = confirmationTime.toFormat('h:mm a');
         const date = confirmationTime.toFormat('MMMM d');
@@ -158,7 +241,11 @@ export async function handleConfirmBooking(
         if (errorMessageText.includes('slot is not available') || errorMessageText.includes('already booked')) {
           const revertedState: ConversationState = {
             ...currentState,
-            currentStage: 'AWAITING_SLOT_CONFIRMATION'
+            currentStage: 'AWAITING_SLOT_CONFIRMATION',
+            appointmentBooking: {
+              ...currentState.appointmentBooking,
+              selectedSlot: undefined
+            }
           };
           
           return {
@@ -187,7 +274,7 @@ export async function handleConfirmBooking(
       
     } else {
       // Invalid stage
-      console.error(`[BookAppointmentHandler] Invalid stage: ${currentState.currentStage}`);
+      console.error(`[ConfirmBookingHandler] Invalid stage: ${currentState.currentStage}`);
       return {
         toolResponse: {
           toolCallId: toolId,
@@ -198,7 +285,7 @@ export async function handleConfirmBooking(
     }
 
   } catch (error) {
-    console.error(`[BookAppointmentHandler] Unexpected error in booking handler:`, error);
+    console.error(`[ConfirmBookingHandler] Unexpected error in booking handler:`, error);
     return {
       toolResponse: {
         toolCallId: toolId,

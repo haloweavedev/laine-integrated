@@ -1,15 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage, generateUrgentAppointmentConfirmationMessage } from "@/lib/ai/appointmentMatcher";
-import type { ConversationState, VapiToolResult } from "@/types/vapi";
+import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage, generateUrgentAppointmentConfirmationMessage, generateWelcomeAppointmentConfirmationMessage } from "@/lib/ai/appointmentMatcher";
+import type { ConversationState, VapiToolResult, HandlerResult } from "@/types/vapi";
 
 interface FindAppointmentTypeArgs {
   patientRequest: string;
   patientStatus?: string;
-}
-
-interface HandlerResult {
-  toolResponse: VapiToolResult;
-  newState: ConversationState;
 }
 
 export async function handleFindAppointmentType(
@@ -44,10 +39,11 @@ export async function handleFindAppointmentType(
 
     console.log(`[FindAppointmentTypeHandler] Using practice: ${currentState.practiceId}`);
 
-    // Fetch appointment types with keywords for this practice
+    // Fetch appointment types with keywords for this practice (only bookable online)
     const dbAppointmentTypes = await prisma.appointmentType.findMany({
       where: {
         practiceId: currentState.practiceId,
+        bookableOnline: true, // Only include appointment types that are active for online booking
         AND: [
           { keywords: { not: null } },
           { keywords: { not: "" } }
@@ -115,29 +111,44 @@ export async function handleFindAppointmentType(
       };
     }
 
-    // Detect urgency based on keywords in patient request
+    // Detect sentiment and urgency based on keywords in patient request
     const URGENT_KEYWORDS = ['pain', 'toothache', 'emergency', 'hurts', 'broken', 'urgent', 'abscess', 'swelling', 'infection'];
-    const isUrgent = URGENT_KEYWORDS.some(keyword => patientRequest.toLowerCase().includes(keyword));
+    const POSITIVE_KEYWORDS = ['new patient', 'just moved', 'recommendation', 'referred', 'first time', 'new to the area', 'someone recommended'];
+    
+    const requestLower = patientRequest.toLowerCase();
+    const isUrgent = URGENT_KEYWORDS.some(keyword => requestLower.includes(keyword));
+    const isNewPatientOrPositive = POSITIVE_KEYWORDS.some(keyword => requestLower.includes(keyword));
 
-    // Generate natural confirmation message
-    const generatedMessage = isUrgent
-      ? await generateUrgentAppointmentConfirmationMessage(
-          patientRequest,
-          matchedAppointmentType.name, // Official Name
-          matchedAppointmentType.spokenName || matchedAppointmentType.name, // Spoken Name (fallback to official if null)
-          matchedAppointmentType.duration
-        )
-      : await generateAppointmentConfirmationMessage(
-          patientRequest,
-          matchedAppointmentType.name, // Official Name
-          matchedAppointmentType.spokenName || matchedAppointmentType.name, // Spoken Name (fallback to official if null)
-          matchedAppointmentType.duration
-        );
+    // Generate natural confirmation message based on detected sentiment
+    let generatedMessage: string;
+    
+    if (isUrgent) {
+      generatedMessage = await generateUrgentAppointmentConfirmationMessage(
+        patientRequest,
+        matchedAppointmentType.name,
+        matchedAppointmentType.spokenName || matchedAppointmentType.name,
+        matchedAppointmentType.duration
+      );
+    } else if (isNewPatientOrPositive) {
+      generatedMessage = await generateWelcomeAppointmentConfirmationMessage(
+        patientRequest,
+        matchedAppointmentType.name,
+        matchedAppointmentType.spokenName || matchedAppointmentType.name,
+        matchedAppointmentType.duration
+      );
+    } else {
+      generatedMessage = await generateAppointmentConfirmationMessage(
+        patientRequest,
+        matchedAppointmentType.name,
+        matchedAppointmentType.spokenName || matchedAppointmentType.name,
+        matchedAppointmentType.duration
+      );
+    }
 
     // Update state with the matched appointment type
     const newState: ConversationState = {
       ...currentState,
-      currentStage: 'CONFIRMING_APPOINTMENT_TYPE',
+      currentStage: 'AWAITING_PATIENT_IDENTIFICATION',
       appointmentBooking: {
         ...currentState.appointmentBooking,
         typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
@@ -156,6 +167,19 @@ export async function handleFindAppointmentType(
     };
 
     console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
+
+    // For urgent appointments, immediately chain to checkAvailableSlots
+    if (isUrgent) {
+      console.log(`[FindAppointmentTypeHandler] Urgent appointment detected, chaining to checkAvailableSlots`);
+      return {
+        toolResponse,
+        newState,
+        nextTool: {
+          toolName: 'checkAvailableSlots',
+          toolArguments: {} // No specific arguments needed for urgent flow
+        }
+      };
+    }
 
     return {
       toolResponse,

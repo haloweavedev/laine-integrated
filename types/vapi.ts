@@ -1,24 +1,41 @@
 // Core VAPI TypeScript type definitions for type safety
 // These types are based on VAPI API documentation and webhook specifications
 
+export type PatientIdentificationStatus = 'UNKNOWN' | 'IDENTIFICATION_NEEDED' | 'INFO_GATHERING' | 'SEARCHING' | 'CREATING' | 'IDENTIFIED' | 'FAILED_MULTIPLE_MATCHES' | 'FAILED_CREATION' | 'ABORTED';
+
 export type ConversationStage = 
   | 'GREETING'
   | 'IDENTIFYING_APPOINTMENT_TYPE'
   | 'CONFIRMING_APPOINTMENT_TYPE'
+  | 'AWAITING_PATIENT_IDENTIFICATION'
   | 'GATHERING_AVAILABILITY_PREFERENCES'
   | 'PRESENTING_SLOTS'
   | 'AWAITING_TIME_BUCKET_SELECTION'
   | 'AWAITING_SLOT_CONFIRMATION'
+  | 'AWAITING_FINAL_CONFIRMATION'
   | 'GATHERING_PATIENT_DETAILS'
   | 'READY_FOR_BOOKING'
   | 'BOOKING_CONFIRMED'
   | 'ENDED_NO_BOOKING';
+
+// Interface for tool chaining directive
+export interface NextTool {
+  toolName: string;
+  toolArguments: Record<string, any>;
+}
 
 // Interface for individual slot data
 export interface SlotData {
   time: string; // ISO format
   operatory_id?: number;
   providerId: number;
+}
+
+// Updated HandlerResult interface to support tool chaining
+export interface HandlerResult {
+  toolResponse: VapiToolResult;
+  newState: ConversationState;
+  nextTool?: NextTool; // Optional field for autonomous tool chaining
 }
 
 export interface ConversationState {
@@ -41,10 +58,16 @@ export interface ConversationState {
   };
 
   patientDetails: {
-    // Hardcoding demo ID for now, to be replaced in a future phase
-    nexhealthPatientId: number; 
+    status: PatientIdentificationStatus;
+    nexhealthPatientId?: number;
     firstName?: string;
     lastName?: string;
+    dob?: string; // Stored as YYYY-MM-DD
+    phone?: string;
+    email?: string;
+    insuranceProvider?: string;
+    insuranceMemberId?: string;
+    infoToAskNext: 'fullName' | 'dob' | 'phone' | 'email' | 'confirmName' | 'confirmPhone' | 'confirmEmail' | 'insurance' | 'insuranceProvider' | 'insuranceMemberId' | null;
   };
 }
 

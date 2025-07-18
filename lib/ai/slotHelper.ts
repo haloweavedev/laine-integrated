@@ -324,6 +324,7 @@ export async function findAvailableSlots(
   timeBucket?: TimeBucket
 ): Promise<{ foundSlots: SlotData[]; nextAvailableDate: string | null }> {
   const { fetchNexhealthAPI } = await import("@/lib/nexhealth");
+  const { prisma } = await import("@/lib/prisma");
   
   // Get slot search parameters
   const { duration, providerIds, operatoryIds } = await getSlotSearchParams(
@@ -333,8 +334,22 @@ export async function findAvailableSlots(
 
   console.log(`[Slot Search] Searching for ${duration}-minute slots with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
 
+  // Fetch practice-specific scheduling rules
+  const practiceSettings = await prisma.practice.findUnique({
+    where: { id: practice.id },
+    select: {
+      lunchBreakStart: true,
+      lunchBreakEnd: true,
+      minBookingBufferMinutes: true,
+      timezone: true
+    }
+  });
+
   // Use practice timezone, default to America/Chicago if not set
   const timezone = practice.timezone || 'America/Chicago';
+  const lunchBreakStart = practiceSettings?.lunchBreakStart;
+  const lunchBreakEnd = practiceSettings?.lunchBreakEnd;
+  const bookingBufferMinutes = practiceSettings?.minBookingBufferMinutes || 60;
   
   // Generate search dates based on startDate and searchDays
   const searchDates: string[] = [];
@@ -416,37 +431,43 @@ export async function findAvailableSlots(
           return [];
         });
 
-        // Filter out slots that overlap with lunch break (1:00 PM - 2:00 PM)
+        // Filter out slots that overlap with configurable lunch break
         const filteredDaySlots = daySlots.filter((slot) => {
           try {
             // Parse the slot time to get the start time
             const slotStartTime = DateTime.fromISO(slot.time).setZone(timezone);
-            const slotStartHour = slotStartTime.hour;
-            const slotStartMinute = slotStartTime.minute;
             
             // Calculate the slot end time by adding duration
             const slotEndTime = slotStartTime.plus({ minutes: duration });
-            const slotEndHour = slotEndTime.hour;
-            const slotEndMinute = slotEndTime.minute;
             
-            // Define lunch break: 1:00 PM (13:00) to 2:00 PM (14:00)
-            const lunchStartHour = 13;
-            const lunchEndHour = 14;
-            
-            // Check if slot overlaps with lunch break
-            const slotStartsInLunch = (slotStartHour === lunchStartHour && slotStartMinute >= 0) || 
-                                     (slotStartHour > lunchStartHour && slotStartHour < lunchEndHour);
-            
-            const slotEndsInLunch = (slotEndHour === lunchStartHour && slotEndMinute > 0) || 
-                                   (slotEndHour > lunchStartHour && slotEndHour <= lunchEndHour);
-            
-            const slotSpansLunch = slotStartHour < lunchStartHour && slotEndHour > lunchEndHour;
-            
-            const isLunchConflict = slotStartsInLunch || slotEndsInLunch || slotSpansLunch;
-            
-            if (isLunchConflict) {
-              console.log(`[Lunch Filter] Discarded slot at ${slot.time} - conflicts with lunch break (${slotStartTime.toFormat('h:mm a')} - ${slotEndTime.toFormat('h:mm a')})`);
-              return false;
+            // Check for lunch break conflicts only if lunch break is configured
+            if (lunchBreakStart && lunchBreakEnd) {
+              const [lunchStartHour, lunchStartMinute] = lunchBreakStart.split(':').map(Number);
+              const [lunchEndHour, lunchEndMinute] = lunchBreakEnd.split(':').map(Number);
+              
+              const slotStartHour = slotStartTime.hour;
+              const slotStartMinute = slotStartTime.minute;
+              const slotEndHour = slotEndTime.hour;
+              const slotEndMinute = slotEndTime.minute;
+              
+              // Check if slot overlaps with lunch break
+              const slotStartsInLunch = (slotStartHour === lunchStartHour && slotStartMinute >= lunchStartMinute) || 
+                                       (slotStartHour > lunchStartHour && slotStartHour < lunchEndHour) ||
+                                       (slotStartHour === lunchEndHour && slotStartMinute < lunchEndMinute);
+              
+              const slotEndsInLunch = (slotEndHour === lunchStartHour && slotEndMinute > lunchStartMinute) || 
+                                     (slotEndHour > lunchStartHour && slotEndHour < lunchEndHour) ||
+                                     (slotEndHour === lunchEndHour && slotEndMinute <= lunchEndMinute);
+              
+              const slotSpansLunch = (slotStartHour < lunchStartHour || (slotStartHour === lunchStartHour && slotStartMinute <= lunchStartMinute)) && 
+                                   (slotEndHour > lunchEndHour || (slotEndHour === lunchEndHour && slotEndMinute >= lunchEndMinute));
+              
+              const isLunchConflict = slotStartsInLunch || slotEndsInLunch || slotSpansLunch;
+              
+              if (isLunchConflict) {
+                console.log(`[Lunch Filter] Discarded slot at ${slot.time} - conflicts with lunch break (${lunchBreakStart} - ${lunchBreakEnd})`);
+                return false;
+              }
             }
             
             return true;
@@ -512,12 +533,28 @@ export async function findAvailableSlots(
     }
   }
 
+  // Apply booking buffer filter - remove slots that are too soon from now
+  const now = DateTime.now().setZone(timezone);
+  const bookingBufferSlots = foundSlots.filter(slot => {
+    const slotStartTime = DateTime.fromISO(slot.time, { zone: timezone });
+    const minutesFromNow = slotStartTime.diff(now, 'minutes').minutes;
+    
+    if (minutesFromNow < bookingBufferMinutes) {
+      console.log(`[Booking Buffer] Discarded slot at ${slot.time} - too soon (${Math.round(minutesFromNow)} minutes from now, minimum required: ${bookingBufferMinutes})`);
+      return false;
+    }
+    
+    return true;
+  });
+
+  console.log(`[Booking Buffer] Filtered from ${foundSlots.length} to ${bookingBufferSlots.length} slots after applying ${bookingBufferMinutes}-minute booking buffer`);
+
   // Sort slots chronologically to ensure earliest times are offered first
-  foundSlots.sort((a, b) => a.time.localeCompare(b.time));
+  bookingBufferSlots.sort((a, b) => a.time.localeCompare(b.time));
   console.log('[Slot Search] Sorted slots chronologically.');
 
   // Limit to first 2-3 slots for response
-  const limitedSlots = foundSlots.slice(0, 3);
+  const limitedSlots = bookingBufferSlots.slice(0, 3);
   
   console.log(`[Slot Search] Final result: ${limitedSlots.length} slots found, next available: ${nextAvailableDate}`);
 

@@ -141,6 +141,71 @@ Your turn. Generate the single, fluid, spoken response for Laine:`
   }
 }
 
+export async function generateWelcomeAppointmentConfirmationMessage(
+  patientQuery: string,
+  officialName: string,
+  spokenName: string,
+  matchedAppointmentDuration: number
+): Promise<string> {
+  try {
+    console.log(`[AI Responder] Generating welcome confirmation for: ${officialName} (spoken: ${spokenName})`);
+
+    // Check if OpenAI API key is available
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("[AI Responder] OPENAI_API_KEY not found in environment variables");
+      return `That's wonderful, we love seeing new patients! For ${spokenName}, that will take about ${matchedAppointmentDuration} minutes. Does that sound right?`;
+    }
+
+    // Construct messages for the generateText call
+    const messages: CoreMessage[] = [
+      {
+        role: "system",
+        content: `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine that shows warmth and welcome to new patients.
+
+**CRITICAL RULES:**
+1.  **WARM AND WELCOMING:** Express genuine excitement about new patients or referrals
+2.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'
+3.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence
+4.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment"
+
+**Examples:**
+- "That's wonderful, we love seeing new patients! I can certainly help you schedule your first cleaning."
+- "We're so glad you were referred to us! Let's get you set up for that check-up."
+- "How exciting that you just moved here! For a new patient exam, that will take about 60 minutes. Does that sound right?"`
+      },
+      {
+        role: "user",
+        content: `Patient's original request: "${patientQuery}"
+Identified appointment:
+- Official Name: "${officialName}"
+- Spoken Name: "${spokenName}"
+- Duration: ${matchedAppointmentDuration} minutes
+
+The patient appears to be new or was referred. Generate a warm, welcoming response for Laine:`
+      }
+    ];
+
+    // Call OpenAI with the messages
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages,
+      temperature: 0.7,
+      maxTokens: 150
+    });
+
+    console.log(`[AI Responder] Generated welcome message: "${text}"`);
+
+    // Process the response: trim and ensure single line
+    const processedResponse = text.trim().replace(/\n/g, " ");
+    return processedResponse;
+
+  } catch (error) {
+    console.error("[AI Responder] Error during AI call:", error);
+    // Provide fallback response with warmth
+    return `That's wonderful, we love seeing new patients! For ${spokenName}, that will take about ${matchedAppointmentDuration} minutes. Does that sound right?`;
+  }
+}
+
 export async function generateUrgentAppointmentConfirmationMessage(
   patientQuery: string,
   officialName: string,

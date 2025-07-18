@@ -34,6 +34,11 @@ model Practice {
   serviceCostEstimates String? // Service cost estimates string
   timezone             String? // Practice timezone for accurate lunch break filtering (e.g., 'America/Chicago')
 
+  // Phase 2: Practice-specific scheduling rules
+  lunchBreakStart      String? // e.g., "12:00" in 24-hour format
+  lunchBreakEnd        String? // e.g., "13:00" in 24-hour format
+  minBookingBufferMinutes Int?    @default(60) // Minimum minutes from now an appointment can be booked
+
   // VAPI Assistant relationship - moved to separate config table for better modularity
   assistantConfig               PracticeAssistantConfig? // One-to-one relation
   nexhealthWebhookSubscriptions NexhealthWebhookSubscription[] // One-to-many

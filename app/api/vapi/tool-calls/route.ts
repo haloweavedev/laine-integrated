@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { handleFindAppointmentType } from "@/lib/tool-handlers/findAppointmentTypeHandler";
+import { handleIdentifyOrCreatePatient } from "@/lib/tool-handlers/identifyOrCreatePatientHandler";
 import { handleCheckAvailableSlots } from "@/lib/tool-handlers/checkAvailableSlotsHandler";
 import { handleConfirmBooking } from "@/lib/tool-handlers/confirmBookingHandler";
 import type { 
@@ -8,7 +9,8 @@ import type {
   VapiToolResult,
   ServerMessageToolCallItem,
   ConversationState,
-  ConversationStage
+  ConversationStage,
+  NextTool
 } from "@/types/vapi";
 import { Prisma } from "@prisma/client";
 
@@ -35,6 +37,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ results: [{ toolCallId: "unknown", error: "Malformed tool call payload from VAPI." }] }, { status: 200 });
     }
 
+    // Initial tool call setup
     toolId = toolCallItem.id;
     toolName = toolCallItem.function.name;
     toolArguments = toolCallItem.function.arguments;
@@ -96,54 +99,120 @@ export async function POST(request: NextRequest) {
         callId: callId,
         practiceId: practiceId || "unknown",
         appointmentBooking: {},
-        patientDetails: { nexhealthPatientId: 379724872 } // Demo Patient ID
+        patientDetails: {
+          status: 'IDENTIFICATION_NEEDED',
+          infoToAskNext: 'fullName'
+        }
       };
       console.log(`[State Management] Initialized new state for call: ${callId}`);
     }
 
-    // Process tool calls based on tool name
-    switch (toolName) {
-      case "findAppointmentType": {
-        const result = await handleFindAppointmentType(
-          state, 
-          toolArguments as { patientRequest: string; patientStatus?: string },
-          toolId
-        );
-        toolResponse = result.toolResponse;
-        state = result.newState;
-        break;
+    // Variables to track tool chaining
+    const combinedResults: string[] = [];
+    let currentToolName = toolName;
+    let currentToolArguments = toolArguments;
+    let currentToolId = toolId;
+
+    // Tool chaining loop - continue until no nextTool directive
+    do {
+      console.log(`[Tool Chaining] Processing tool: ${currentToolName} (ID: ${currentToolId})`);
+
+      // Process tool calls based on tool name
+      let handlerResult: { toolResponse: VapiToolResult; newState: ConversationState; nextTool?: NextTool };
+      switch (currentToolName) {
+        case "findAppointmentType": {
+          handlerResult = await handleFindAppointmentType(
+            state, 
+            currentToolArguments as { patientRequest: string; patientStatus?: string },
+            currentToolId
+          );
+          break;
+        }
+
+        case "identifyOrCreatePatient": {
+          handlerResult = await handleIdentifyOrCreatePatient(
+            state,
+            currentToolArguments as { fullName?: string; dob?: string; phone?: string; email?: string },
+            currentToolId
+          );
+          break;
+        }
+
+        case "checkAvailableSlots": {
+          handlerResult = await handleCheckAvailableSlots(
+            state,
+            currentToolArguments as { preferredDaysOfWeek?: string; timeBucket?: string; requestedDate?: string },
+            currentToolId
+          );
+          break;
+        }
+
+        case "confirmBooking": {
+          handlerResult = await handleConfirmBooking(
+            state,
+            currentToolArguments as { userSelection: string },
+            currentToolId
+          );
+          break;
+        }
+        
+        default: {
+          console.error(`[VAPI Tool Handler] Unknown tool: ${currentToolName}`);
+          handlerResult = {
+            toolResponse: {
+              toolCallId: currentToolId,
+              error: `Unknown tool: ${currentToolName}`
+            },
+            newState: state
+          };
+          break;
+        }
       }
 
-      case "checkAvailableSlots": {
-        const result = await handleCheckAvailableSlots(
-          state,
-          toolArguments as { preferredDaysOfWeek?: string; timeBucket?: string; requestedDate?: string },
-          toolId
-        );
-        toolResponse = result.toolResponse;
-        state = result.newState;
-        break;
-      }
-
-      case "confirmBooking": {
-        const result = await handleConfirmBooking(
-          state,
-          toolArguments as { userSelection: string },
-          toolId
-        );
-        toolResponse = result.toolResponse;
-        state = result.newState;
-        break;
-      }
+      // Update state and collect result
+      state = handlerResult.newState;
       
-      default: {
-        console.error(`[VAPI Tool Handler] Unknown tool: ${toolName}`);
-        toolResponse = {
-          toolCallId: toolId!,
-          error: `Unknown tool: ${toolName}`
-        };
+      // Collect result if it exists and is not an error
+      if (handlerResult.toolResponse.result && !handlerResult.toolResponse.error) {
+        combinedResults.push(handlerResult.toolResponse.result);
+      }
+
+      // Check for tool chaining
+      if (handlerResult.nextTool) {
+        console.log(`[Tool Chaining] Chaining to next tool: ${handlerResult.nextTool.toolName}`);
+        currentToolName = handlerResult.nextTool.toolName;
+        currentToolArguments = handlerResult.nextTool.toolArguments;
+        // Generate a new tool ID for the chained call
+        currentToolId = `chained-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Log the chained tool call
+        await prisma.toolLog.create({
+          data: {
+            practiceId: practiceId || "unknown",
+            vapiCallId: callId,
+            toolName: currentToolName,
+            toolCallId: currentToolId,
+            arguments: JSON.stringify(currentToolArguments),
+            success: false, // Will be updated later
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }
+        });
+      } else {
+        // No more tools to chain, set final response
+        toolResponse = handlerResult.toolResponse;
         break;
       }
+    } while (true);
+
+    // If we chained tools and have multiple results, combine them intelligently
+    if (combinedResults.length > 1) {
+      const combinedMessage = combinedResults.join(' ');
+      toolResponse = {
+        toolCallId: toolId!, // Use original toolId for final response
+        result: combinedMessage
+      };
+      console.log(`[Tool Chaining] Combined ${combinedResults.length} tool results into final response`);
     }
 
     // === STATE PERSISTENCE LOGIC (REFACTORED & TYPE-SAFE) ===
