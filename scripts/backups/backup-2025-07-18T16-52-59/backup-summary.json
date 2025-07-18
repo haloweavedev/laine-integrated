@@ -1,0 +1,28 @@
+{
+  "backupCreatedAt": "2025-07-18T16:53:11.422Z",
+  "practiceId": "cmd8zk6810000ky0445f078j6",
+  "practiceName": "Royal Oak Family Dental",
+  "dataExported": {
+    "practiceConfig": 1,
+    "appointmentTypes": 10,
+    "providers": 13,
+    "savedProviders": 1,
+    "operatories": 12,
+    "webhookSubscriptions": 6,
+    "assistantConfig": 1,
+    "callLogs": 2,
+    "toolLogs": 4
+  },
+  "files": [
+    "practice-config.json",
+    "appointment-types.json",
+    "providers.json",
+    "saved-providers.json",
+    "operatories.json",
+    "webhook-config.json",
+    "assistant-config.json",
+    "call-logs.json",
+    "tool-logs.json",
+    "backup-summary.json"
+  ]
+}

@@ -1,0 +1,46 @@
+[
+  {
+    "id": "cmd91ko0b002pjs04994a3m90",
+    "vapiCallId": "ae8426f6-0f3b-4999-a39c-554644721cf2",
+    "toolName": "checkAvailableSlots",
+    "toolCallId": "chained-1752856619914-y5qaa5cg7",
+    "success": false,
+    "error": null,
+    "executionTimeMs": null,
+    "createdAt": "2025-07-18T16:36:59.914Z",
+    "updatedAt": "2025-07-18T16:36:59.914Z"
+  },
+  {
+    "id": "cmd91km0u002hjs04rqu9iexr",
+    "vapiCallId": "ae8426f6-0f3b-4999-a39c-554644721cf2",
+    "toolName": "findAppointmentType",
+    "toolCallId": "call_lnhJyY5PHnCwbMGlQlkeSTJw",
+    "success": true,
+    "error": null,
+    "executionTimeMs": 7281,
+    "createdAt": "2025-07-18T16:36:57.312Z",
+    "updatedAt": "2025-07-18T16:37:04.594Z"
+  },
+  {
+    "id": "cmd91izb6000njs04rj8wr9d6",
+    "vapiCallId": "8aae168c-407f-4045-aebe-faa6f286d202",
+    "toolName": "checkAvailableSlots",
+    "toolCallId": "chained-1752856541249-nen4602ix",
+    "success": false,
+    "error": null,
+    "executionTimeMs": null,
+    "createdAt": "2025-07-18T16:35:41.249Z",
+    "updatedAt": "2025-07-18T16:35:41.249Z"
+  },
+  {
+    "id": "cmd91ix7f000djs04rdwvixsr",
+    "vapiCallId": "8aae168c-407f-4045-aebe-faa6f286d202",
+    "toolName": "findAppointmentType",
+    "toolCallId": "call_xvdRNgx9KHjAO84yeTc5Qquh",
+    "success": true,
+    "error": null,
+    "executionTimeMs": 5757,
+    "createdAt": "2025-07-18T16:35:38.493Z",
+    "updatedAt": "2025-07-18T16:35:44.251Z"
+  }
+]

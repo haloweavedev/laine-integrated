@@ -8,6 +8,7 @@ interface IdentifyOrCreatePatientArgs {
   dob?: string;
   phone?: string;
   email?: string;
+  userConfirmation?: string;
 }
 
 interface NexHealthPatient {
@@ -128,7 +129,7 @@ export async function handleIdentifyOrCreatePatient(
         
         if (infoToAskNext === 'confirmName') {
           // User confirmed or corrected name spelling
-          const userResponse = (toolArguments.fullName || '').toLowerCase();
+          const userResponse = (toolArguments.userConfirmation || '').toLowerCase();
           const confirmationWords = ['yes', 'correct', 'right', 'that\'s right', 'yep', 'yeah'];
           const isConfirmed = confirmationWords.some(word => userResponse.includes(word));
           
@@ -265,7 +266,7 @@ export async function handleIdentifyOrCreatePatient(
         }
         
         if (infoToAskNext === 'confirmPhone') {
-          const userResponse = (toolArguments.phone || '').toLowerCase();
+          const userResponse = (toolArguments.userConfirmation || '').toLowerCase();
           const confirmationWords = ['yes', 'correct', 'right', 'that\'s right', 'yep', 'yeah'];
           const isConfirmed = confirmationWords.some(word => userResponse.includes(word));
           
@@ -323,7 +324,7 @@ export async function handleIdentifyOrCreatePatient(
         }
         
         if (infoToAskNext === 'confirmEmail') {
-          const userResponse = (toolArguments.email || '').toLowerCase();
+          const userResponse = (toolArguments.userConfirmation || '').toLowerCase();
           const confirmationWords = ['yes', 'correct', 'right', 'that\'s right', 'yep', 'yeah'];
           const isConfirmed = confirmationWords.some(word => userResponse.includes(word));
           
@@ -424,7 +425,7 @@ export async function handleIdentifyOrCreatePatient(
         
         // Handle insurance collection
         if (infoToAskNext === 'insurance') {
-          const userResponse = (toolArguments.fullName || toolArguments.phone || toolArguments.email || '').toLowerCase();
+          const userResponse = (toolArguments.userConfirmation || toolArguments.fullName || toolArguments.phone || toolArguments.email || '').toLowerCase();
           const hasInsuranceKeywords = ['yes', 'yeah', 'yep', 'i do', 'i have', 'sure'];
           const noInsuranceKeywords = ['no', 'nope', 'don\'t have', 'no insurance', 'not right now'];
           

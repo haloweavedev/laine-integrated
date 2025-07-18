@@ -1,0 +1,38 @@
+[
+  {
+    "id": "cmd91kdc4001vjs048zowfmjj",
+    "vapiCallId": "ae8426f6-0f3b-4999-a39c-554644721cf2",
+    "callTimestampStart": null,
+    "callStatus": "ENDED",
+    "summary": "The user called the dental office to book an urgent appointment for a severe toothache. The AI attempted to schedule a focused exam with X-rays but found no immediate availability. The call ended with the AI informing the user that a staff member would call back shortly to find a suitable time.",
+    "detectedIntent": null,
+    "nexhealthPatientId": null,
+    "bookedAppointmentNexhealthId": null,
+    "patientStatus": null,
+    "originalPatientRequestForType": null,
+    "assistantId": "6820f09a-806c-4df7-8b41-0010fa9cc8b0",
+    "endedReason": null,
+    "callDurationSeconds": null,
+    "cost": null,
+    "createdAt": "2025-07-18T16:36:46.084Z",
+    "updatedAt": "2025-07-18T16:37:29.405Z"
+  },
+  {
+    "id": "cmd91io4e003tky04nw9sfbxf",
+    "vapiCallId": "8aae168c-407f-4045-aebe-faa6f286d202",
+    "callTimestampStart": null,
+    "callStatus": "ENDED",
+    "summary": "A user called their dental office to book an urgent appointment for a severe toothache. The AI informed them that the office was fully booked for the necessary focused exam with x-rays. A staff member will call the user back shortly to find a suitable appointment time.",
+    "detectedIntent": null,
+    "nexhealthPatientId": null,
+    "bookedAppointmentNexhealthId": null,
+    "patientStatus": null,
+    "originalPatientRequestForType": null,
+    "assistantId": "6820f09a-806c-4df7-8b41-0010fa9cc8b0",
+    "endedReason": null,
+    "callDurationSeconds": null,
+    "cost": null,
+    "createdAt": "2025-07-18T16:35:26.750Z",
+    "updatedAt": "2025-07-18T16:36:07.735Z"
+  }
+]

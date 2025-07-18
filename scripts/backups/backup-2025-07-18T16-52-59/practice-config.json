@@ -1,0 +1,19 @@
+{
+  "id": "cmd8zk6810000ky0445f078j6",
+  "clerkUserId": "user_2yKTSzqIq9w0isdwpDZreVoAazr",
+  "name": "Royal Oak Family Dental",
+  "nexhealthSubdomain": "xyz",
+  "nexhealthLocationId": "318534",
+  "address": "Seventy one oh one NW 150th St, Ste 100 Oklahoma City, OK 73142 United States",
+  "acceptedInsurances": "Cigna, Delta Dental",
+  "serviceCostEstimates": "Cleaning: $120, Exam: $80",
+  "timezone": null,
+  "lunchBreakStart": null,
+  "lunchBreakEnd": null,
+  "minBookingBufferMinutes": 60,
+  "webhookLastSyncAt": "2025-07-18T15:40:37.632Z",
+  "webhookLastSuccessfulSyncAt": "2025-07-18T15:58:18.739Z",
+  "webhookSyncErrorMsg": null,
+  "createdAt": "2025-07-18T15:40:37.633Z",
+  "updatedAt": "2025-07-18T15:58:18.741Z"
+}

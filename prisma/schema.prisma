@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
@@ -15,285 +9,210 @@ datasource db {
 }
 
 model Practice {
-  id          String  @id @default(cuid())
-  clerkUserId String  @unique // Links to Clerk User ID
-  name        String? // Optional practice name entered by user
-
-  // NexHealth specific identifiers for this practice instance
-  nexhealthSubdomain  String? // User-provided NexHealth subdomain
-  nexhealthLocationId String? // User-provided NexHealth Location ID
-
-  // Webhook synchronization tracking
-  webhookLastSyncAt           DateTime? // Last time webhooks were synchronized (attempt)
-  webhookLastSuccessfulSyncAt DateTime? // Last time webhooks were successfully synchronized
-  webhookSyncErrorMsg         String? // Error message from last sync attempt if failed
-
-  // New fields for additional practice information
-  address              String? // Practice physical address
-  acceptedInsurances   String? // Comma-separated list of accepted insurances
-  serviceCostEstimates String? // Service cost estimates string
-  timezone             String? // Practice timezone for accurate lunch break filtering (e.g., 'America/Chicago')
-
-  // Phase 2: Practice-specific scheduling rules
-  lunchBreakStart      String? // e.g., "12:00" in 24-hour format
-  lunchBreakEnd        String? // e.g., "13:00" in 24-hour format
-  minBookingBufferMinutes Int?    @default(60) // Minimum minutes from now an appointment can be booked
-
-  // VAPI Assistant relationship - moved to separate config table for better modularity
-  assistantConfig               PracticeAssistantConfig? // One-to-one relation
-  nexhealthWebhookSubscriptions NexhealthWebhookSubscription[] // One-to-many
-
-  appointmentTypes AppointmentType[]
-  providers        Provider[]
-  callLogs         CallLog[] // For VAPI call logging
-  toolLogs         ToolLog[] // For tool execution logging
-
-  // Add new relationships for scheduling preferences
-  savedProviders   SavedProvider[]
-  savedOperatories SavedOperatory[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // A practice is uniquely identified by its Clerk user for our app's purposes.
-  // Subdomain + LocationID identify it for NexHealth API calls.
-  // If a user could manage multiple NexHealth locations, this model would need adjustment.
-  // For now, one Clerk user maps to one set of NexHealth subdomain/locationId.
+  id                            String                         @id @default(cuid())
+  clerkUserId                   String                         @unique
+  name                          String?
+  nexhealthSubdomain            String?
+  nexhealthLocationId           String?
+  webhookLastSyncAt             DateTime?
+  webhookLastSuccessfulSyncAt   DateTime?
+  webhookSyncErrorMsg           String?
+  address                       String?
+  acceptedInsurances            String?
+  serviceCostEstimates          String?
+  timezone                      String?
+  lunchBreakStart               String?
+  lunchBreakEnd                 String?
+  minBookingBufferMinutes       Int?                           @default(60)
+  createdAt                     DateTime                       @default(now())
+  updatedAt                     DateTime                       @updatedAt
+  appointmentTypes              AppointmentType[]
+  callLogs                      CallLog[]
+  nexhealthWebhookSubscriptions NexhealthWebhookSubscription[]
+  assistantConfig               PracticeAssistantConfig?
+  providers                     Provider[]
+  toolLogs                      ToolLog[]
+  savedOperatories              SavedOperatory[]
+  savedProviders                SavedProvider[]
 }
 
 model SavedProvider {
-  id         String   @id @default(cuid())
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
-
-  providerId String // References Provider.id from our synced data
-  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-
-  isActive Boolean @default(true) // Allow enabling/disabling
-
-  // Relationship to accepted appointment types
+  id                       String                            @id @default(cuid())
+  practiceId               String
+  providerId               String
+  isActive                 Boolean                           @default(true)
+  createdAt                DateTime                          @default(now())
+  updatedAt                DateTime                          @updatedAt
   acceptedAppointmentTypes ProviderAcceptedAppointmentType[]
+  assignedOperatories      ProviderOperatoryAssignment[]
+  practice                 Practice                          @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  provider                 Provider                          @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
-  // Relationship to assigned operatories (many-to-many)
-  assignedOperatories ProviderOperatoryAssignment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([practiceId, providerId]) // Prevent duplicate saves
+  @@unique([practiceId, providerId])
   @@map("saved_providers")
 }
 
-// Join model for many-to-many relationship between SavedProvider and AppointmentType
 model ProviderAcceptedAppointmentType {
-  id              String        @id @default(cuid())
-  savedProviderId String
-  savedProvider   SavedProvider @relation(fields: [savedProviderId], references: [id], onDelete: Cascade)
-
-  appointmentTypeId String // References AppointmentType.id
+  id                String          @id @default(cuid())
+  savedProviderId   String
+  appointmentTypeId String
+  createdAt         DateTime        @default(now())
   appointmentType   AppointmentType @relation("ProviderAcceptedTypes", fields: [appointmentTypeId], references: [id], onDelete: Cascade)
+  savedProvider     SavedProvider   @relation(fields: [savedProviderId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now())
-
-  @@unique([savedProviderId, appointmentTypeId]) // Prevent duplicate associations
+  @@unique([savedProviderId, appointmentTypeId])
   @@map("provider_accepted_appointment_types")
 }
 
-// Join model for many-to-many relationship between SavedProvider and SavedOperatory
 model ProviderOperatoryAssignment {
-  id              String        @id @default(cuid())
-  savedProviderId String
-  savedProvider   SavedProvider @relation(fields: [savedProviderId], references: [id], onDelete: Cascade)
-
+  id               String         @id @default(cuid())
+  savedProviderId  String
   savedOperatoryId String
+  createdAt        DateTime       @default(now())
   savedOperatory   SavedOperatory @relation(fields: [savedOperatoryId], references: [id], onDelete: Cascade)
+  savedProvider    SavedProvider  @relation(fields: [savedProviderId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now())
-
-  @@unique([savedProviderId, savedOperatoryId]) // Prevent duplicate assignments
+  @@unique([savedProviderId, savedOperatoryId])
   @@map("provider_operatory_assignments")
 }
 
 model SavedOperatory {
-  id         String   @id @default(cuid())
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  id                   String                        @id @default(cuid())
+  practiceId           String
+  nexhealthOperatoryId String
+  name                 String
+  isActive             Boolean                       @default(true)
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+  assignedToProviders  ProviderOperatoryAssignment[]
+  practice             Practice                      @relation(fields: [practiceId], references: [id], onDelete: Cascade)
 
-  nexhealthOperatoryId String // NexHealth operatory ID
-  name                 String // Display name for operatory
-  isActive             Boolean @default(true) // Allow enabling/disabling
-
-  // Reverse relation for provider assignments
-  assignedToProviders ProviderOperatoryAssignment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([practiceId, nexhealthOperatoryId]) // Prevent duplicate saves
+  @@unique([practiceId, nexhealthOperatoryId])
   @@map("saved_operatories")
 }
 
 model PracticeAssistantConfig {
-  id         String   @id @default(cuid())
-  practiceId String   @unique
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
-
-  vapiAssistantId String? @unique // The ID of the assistant on VAPI's platform
-
-  // Customizable fields by practice
-  voiceProvider String @default("11labs") // e.g., "11labs", "openai", "playht"
-  voiceId       String @default("burt") // e.g., "burt" for 11labs, "alloy" for openai
-  // voiceModel is often tied to provider/voiceId, can be added if needed
-
-  systemPrompt String @default("You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient.")
-  firstMessage String @default("Hello! This is Laine from your dental office. How can I help you today?")
-
-  // Potentially store other VAPI settings if customization is expanded
-  // serverUrl for tool calls will be derived from NEXT_PUBLIC_APP_URL
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(cuid())
+  practiceId      String   @unique
+  vapiAssistantId String?  @unique
+  voiceProvider   String   @default("11labs")
+  voiceId         String   @default("burt")
+  systemPrompt    String   @default("You are a helpful AI assistant for a dental practice. Your primary goal is to assist patients. Be polite and efficient.")
+  firstMessage    String   @default("Hello! This is Laine from your dental office. How can I help you today?")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  practice        Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
 }
 
-// For storing details about the global NexHealth webhook endpoint managed by the SaaS
 model GlobalNexhealthWebhookEndpoint {
-  id                  String   @id @default("singleton") // Ensures only one record
-  nexhealthEndpointId String   @unique // The ID from NexHealth API after creating the endpoint
-  secretKey           String // The secret key provided by NexHealth for this endpoint
-  targetUrl           String // The URL registered with NexHealth (e.g., https://laine-integrated.vercel.app/api/nexhealth-webhook)
+  id                  String   @id @default("singleton")
+  nexhealthEndpointId String   @unique
+  secretKey           String
+  targetUrl           String
   isEnabled           Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 }
 
-// For tracking which practices are subscribed to which NexHealth events
 model NexhealthWebhookSubscription {
-  id         String   @id @default(cuid())
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  id                         String   @id @default(cuid())
+  practiceId                 String
+  nexhealthWebhookEndpointId String
+  nexhealthSubscriptionId    String   @unique
+  resourceType               String
+  eventName                  String
+  isActive                   Boolean  @default(true)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  practice                   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
 
-  nexhealthWebhookEndpointId String // Foreign key to the global endpoint ID from NexHealth
-  nexhealthSubscriptionId    String  @unique // The ID of this specific subscription from NexHealth API
-  resourceType               String // e.g., "Appointment", "Patient"
-  eventName                  String // e.g., "appointment_insertion.complete", "patient_created"
-  isActive                   Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([practiceId, resourceType, eventName]) // A practice should only have one active sub for a specific event
+  @@unique([practiceId, resourceType, eventName])
 }
 
-// For VAPI call logging, as per blueprint
 model CallLog {
-  id         String   @id @default(cuid()) // Or use vapi_call_id as PK if always present early
-  vapiCallId String   @unique // From VAPI
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
-
-  callTimestampStart DateTime?
-  callStatus         String? // e.g., INITIATED, IN_PROGRESS, FORWARDING, ENDED
-  transcriptText     String?   @db.Text
-  summary            String?   @db.Text // End of call report summary
-  vapiTranscriptUrl  String? // URL to audio recording
-
-  // Fields for tracking tool usage and outcomes within a call
-  detectedIntent               String?
-  nexhealthPatientId           String? // If patient identified/created
-  bookedAppointmentNexhealthId String? // If appointment booked
-  
-  // Centralized conversation state management
-  conversationState Json?
-
-  // Enhanced conversation tracking fields
-  patientStatus                 String? // Status of the patient (new, existing, unknown)
-  originalPatientRequestForType String? // The original patient request that led to appointment type identification
-
-  // Enhanced fields as per refactoring plan
-  assistantId         String? // VAPI assistant ID
-  endedReason         String? // From end-of-call-report
-  callDurationSeconds Int? // Duration in seconds
-  cost                Decimal? // Call cost if available
-
-  toolLogs ToolLog[] // One-to-many relationship
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                            String    @id @default(cuid())
+  vapiCallId                    String    @unique
+  practiceId                    String
+  callTimestampStart            DateTime?
+  callStatus                    String?
+  transcriptText                String?
+  summary                       String?
+  vapiTranscriptUrl             String?
+  detectedIntent                String?
+  nexhealthPatientId            String?
+  bookedAppointmentNexhealthId  String?
+  conversationState             Json?
+  patientStatus                 String?
+  originalPatientRequestForType String?
+  assistantId                   String?
+  endedReason                   String?
+  callDurationSeconds           Int?
+  cost                          Decimal?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
+  practice                      Practice  @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  toolLogs                      ToolLog[]
 }
 
-// New model for tracking individual tool executions
 model ToolLog {
-  id         String   @id @default(cuid())
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
-
-  vapiCallId String? // Optional - tools might be called outside of calls
-  callLog    CallLog? @relation(fields: [vapiCallId], references: [vapiCallId], onDelete: Cascade)
-
-  toolName        String // Name of the tool executed
-  toolCallId      String // VAPI tool call ID
-  arguments       String? @db.Text // JSON string of (redacted) arguments
-  result          String? @db.Text // JSON string of result
-  success         Boolean // Whether execution succeeded
-  error           String? // Error message if failed
-  executionTimeMs Int? // Execution time in milliseconds
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(cuid())
+  practiceId      String
+  vapiCallId      String?
+  toolName        String
+  toolCallId      String
+  arguments       String?
+  result          String?
+  success         Boolean
+  error           String?
+  executionTimeMs Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  practice        Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  callLog         CallLog? @relation(fields: [vapiCallId], references: [vapiCallId], onDelete: Cascade)
 
   @@index([practiceId, toolName])
   @@index([vapiCallId])
 }
 
 model AppointmentType {
-  id         String   @id @default(cuid())
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
-
-  nexhealthAppointmentTypeId String // ID from NexHealth
-  name                       String
-  duration                   Int // Duration in minutes (maps to NexHealth 'minutes')
-  bookableOnline             Boolean? // Added field for online booking status
-  spokenName                 String? // A more natural name for the AI to use in conversation
-  check_immediate_next_available Boolean @default(false) // Flag to immediately find the next available slot
-  keywords                   String? // Comma-separated keywords for AI mapping
-
-  // Optional: Enhanced tracking fields
-  parentType    String? // "Institution" or "Location"
-  parentId      String? // ID of the parent
-  lastSyncError String? // Error tracking for sync operations
-
-  // Reverse relations for provider configuration
-  acceptedByProviders ProviderAcceptedAppointmentType[] @relation("ProviderAcceptedTypes")
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                             String                            @id @default(cuid())
+  practiceId                     String
+  nexhealthAppointmentTypeId     String
+  name                           String
+  duration                       Int
+  bookableOnline                 Boolean?
+  spokenName                     String?
+  check_immediate_next_available Boolean                           @default(false)
+  keywords                       String?
+  parentType                     String?
+  parentId                       String?
+  lastSyncError                  String?
+  createdAt                      DateTime                          @default(now())
+  updatedAt                      DateTime                          @updatedAt
+  practice                       Practice                          @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  acceptedByProviders            ProviderAcceptedAppointmentType[] @relation("ProviderAcceptedTypes")
 
   @@unique([practiceId, nexhealthAppointmentTypeId])
 }
 
 model Provider {
-  id         String   @id @default(cuid())
-  practiceId String
-  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
-
-  nexhealthProviderId String // ID from NexHealth
+  id                  String          @id @default(cuid())
+  practiceId          String
+  nexhealthProviderId String
   firstName           String?
   lastName            String
-
-  // Add new relationship
-  savedByPractices SavedProvider[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  practice            Practice        @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  savedByPractices    SavedProvider[]
 
   @@unique([practiceId, nexhealthProviderId])
 }
 
 model NexhealthTokenCache {
-  id          String   @id @default("singleton") // Fixed ID for single token entry
-  accessToken String   @db.Text // The bearer token can be long
-  expiresAt   DateTime // Timestamp when the token expires
+  id          String   @id @default("singleton")
+  accessToken String
+  expiresAt   DateTime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

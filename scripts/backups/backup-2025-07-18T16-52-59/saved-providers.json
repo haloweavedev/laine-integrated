@@ -1,0 +1,65 @@
+[
+  {
+    "id": "cmd9149do002qky04p1wsqhii",
+    "providerId": "cmd8zkec0000gky04kksc5ig7",
+    "isActive": true,
+    "provider": {
+      "nexhealthProviderId": "377851148",
+      "firstName": "Deren",
+      "lastName": "Flesher"
+    },
+    "acceptedAppointmentTypes": [
+      {
+        "appointmentTypeId": "cmd90akho001gky049r54nhna",
+        "appointmentTypeName": "New Patient Exam & Cleaning (Adult, Age 13+)",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      },
+      {
+        "appointmentTypeId": "cmd90kqtt001sky04vjhbrb86",
+        "appointmentTypeName": "Post-Op or Treatment Follow-Up (Recent Visit)",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      },
+      {
+        "appointmentTypeId": "cmd90immi001qky0455helsf8",
+        "appointmentTypeName": "Limited Exam with X-rays (Problem-Focused)",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      },
+      {
+        "appointmentTypeId": "cmd90lpzx001uky04y5v4el8j",
+        "appointmentTypeName": "Implant Consultation",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      },
+      {
+        "appointmentTypeId": "cmd90mvkw001wky0448gk04o4",
+        "appointmentTypeName": "Cosmetic Consultation",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      },
+      {
+        "appointmentTypeId": "cmd90fomn001mky04a6h5nwov",
+        "appointmentTypeName": "Returning Patient Exam & Cleaning (Adult, Age 13+)",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      },
+      {
+        "appointmentTypeId": "cmd9143a6002oky0426oratu8",
+        "appointmentTypeName": "Full Mouth Reconstruction / All-on-X Consultation",
+        "createdAt": "2025-07-18T16:31:43.733Z"
+      }
+    ],
+    "assignedOperatories": [
+      {
+        "savedOperatoryId": "cmd8zkeei0018ky0414w3x2m0",
+        "operatoryName": "Karim 6",
+        "nexhealthOperatoryId": "159816",
+        "createdAt": "2025-07-18T16:31:43.755Z"
+      },
+      {
+        "savedOperatoryId": "cmd8zkee70012ky04a2fq9xxc",
+        "operatoryName": "Karim 5",
+        "nexhealthOperatoryId": "159813",
+        "createdAt": "2025-07-18T16:31:43.755Z"
+      }
+    ],
+    "createdAt": "2025-07-18T16:24:14.461Z",
+    "updatedAt": "2025-07-18T16:31:43.717Z"
+  }
+]

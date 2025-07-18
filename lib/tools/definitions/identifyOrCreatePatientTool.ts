@@ -28,6 +28,10 @@ export function getIdentifyOrCreatePatientTool(appBaseUrl: string): VapiTool {
           email: {
             type: "string" as const,
             description: "The patient's email address. For example, 'john.smith@email.com'."
+          },
+          userConfirmation: {
+            type: "string" as const,
+            description: "The user's confirmation response when asked to confirm information. Use this for responses like 'yes', 'correct', 'no', 'that's right', 'wrong', etc."
           }
         },
         required: []

@@ -1,0 +1,98 @@
+[
+  {
+    "id": "cmd8zkedq000sky04oq59n20q",
+    "nexhealthOperatoryId": "159815",
+    "name": "Amy 2",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.167Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkedr000uky04yi8zqb33",
+    "nexhealthOperatoryId": "159807",
+    "name": "Hadlee 3",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.167Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkee3000wky04as9a37we",
+    "nexhealthOperatoryId": "159812",
+    "name": "Communication",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.184Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkee5000zky04hmfmkf3k",
+    "nexhealthOperatoryId": "159817",
+    "name": "Kandar 8",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.189Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkee50010ky04ppwwni8p",
+    "nexhealthOperatoryId": "159814",
+    "name": "Holly 1",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.189Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkee70012ky04a2fq9xxc",
+    "nexhealthOperatoryId": "159813",
+    "name": "Karim 5",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.193Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkeeg0014ky0436we93oq",
+    "nexhealthOperatoryId": "159818",
+    "name": "Kandar 7",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.195Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkeei0018ky0414w3x2m0",
+    "nexhealthOperatoryId": "159816",
+    "name": "Karim 6",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.200Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkeeh0016ky04gzr63jq6",
+    "nexhealthOperatoryId": "159810",
+    "name": "Stephanie 4",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.199Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkeej001aky04yqb6amjw",
+    "nexhealthOperatoryId": "159811",
+    "name": "Overflow Hyg",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.200Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkeeo001cky04ui5aor6z",
+    "nexhealthOperatoryId": "159809",
+    "name": "Overflow/Unconfirmed",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.209Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  },
+  {
+    "id": "cmd8zkeer001eky04krpcyrax",
+    "nexhealthOperatoryId": "159808",
+    "name": "Unconfirmed",
+    "isActive": true,
+    "createdAt": "2025-07-18T15:40:48.209Z",
+    "updatedAt": "2025-07-18T16:27:16.094Z"
+  }
+]

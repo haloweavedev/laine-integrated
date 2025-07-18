@@ -113,7 +113,7 @@ export async function handleFindAppointmentType(
 
     // Detect sentiment and urgency based on keywords in patient request
     const URGENT_KEYWORDS = ['pain', 'toothache', 'emergency', 'hurts', 'broken', 'urgent', 'abscess', 'swelling', 'infection'];
-    const POSITIVE_KEYWORDS = ['new patient', 'just moved', 'recommendation', 'referred', 'first time', 'new to the area', 'someone recommended'];
+    const POSITIVE_KEYWORDS = ['new patient', 'just moved', 'recommendation', 'referred', 'first time', 'new to the area', 'someone recommended', 'new in town'];
     
     const requestLower = patientRequest.toLowerCase();
     const isUrgent = URGENT_KEYWORDS.some(keyword => requestLower.includes(keyword));

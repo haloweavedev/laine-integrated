@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getProviders, getOperatories } from "@/lib/nexhealth";
+import { getProviders, getOperatories, syncPracticeAppointmentTypes } from "@/lib/nexhealth";
 
 interface NexHealthProvider {
   id: number;
@@ -47,13 +47,27 @@ export async function POST() {
 
     console.log(`Starting sync for practice ${practice.id} with NexHealth subdomain: ${practice.nexhealthSubdomain}, location: ${practice.nexhealthLocationId}`);
 
-    // Fetch data from NexHealth (excluding appointment types - now managed directly in Laine)
+    // Fetch data from NexHealth (including appointment types)
     const [providers, operatories] = await Promise.all([
       getProviders(practice.nexhealthSubdomain, practice.nexhealthLocationId),
       getOperatories(practice.nexhealthSubdomain, practice.nexhealthLocationId),
     ]);
 
     console.log(`Fetched ${providers.length} providers and ${operatories.length} operatories from NexHealth`);
+
+    // Sync appointment types from NexHealth
+    console.log('Syncing appointment types from NexHealth...');
+    try {
+      await syncPracticeAppointmentTypes(
+        practice.id,
+        practice.nexhealthSubdomain,
+        practice.nexhealthLocationId
+      );
+      console.log('✅ Appointment types sync completed');
+    } catch (appointmentTypesError) {
+      console.error('❌ Error syncing appointment types:', appointmentTypesError);
+      // Continue with other syncing even if appointment types fail
+    }
 
     // Track sync results
     let providersCreated = 0;
@@ -141,12 +155,18 @@ export async function POST() {
 
     console.log(`Sync completed: ${providersCreated} providers created, ${providersUpdated} providers updated, ${operatoriesCreated} operatories created, ${operatoriesUpdated} operatories updated`);
 
+    // Get final appointment types count
+    const finalAppointmentTypesCount = await prisma.appointmentType.count({
+      where: { practiceId: practice.id }
+    });
+
     return NextResponse.json({
       success: true,
-      message: `Successfully synced ${providers.length} providers and ${operatories.length} operatories. Note: Appointment types are now managed directly in Laine.`,
+      message: `Successfully synced ${providers.length} providers, ${operatories.length} operatories, and appointment types from NexHealth.`,
       data: {
         providersCount: providers.length,
         operatoriesCount: operatories.length,
+        appointmentTypesCount: finalAppointmentTypesCount,
         details: {
           providers: {
             created: providersCreated,

@@ -1,0 +1,71 @@
+{
+  "subscriptions": [
+    {
+      "id": "cmd8zn7z100014vfg99nwwvat",
+      "nexhealthWebhookEndpointId": "13504",
+      "nexhealthSubscriptionId": "35146",
+      "resourceType": "Patient",
+      "eventName": "patient_created",
+      "isActive": true,
+      "createdAt": "2025-07-18T15:42:59.868Z",
+      "updatedAt": "2025-07-18T15:42:59.868Z"
+    },
+    {
+      "id": "cmd8znatc00034vfg5bxzv1q6",
+      "nexhealthWebhookEndpointId": "13504",
+      "nexhealthSubscriptionId": "35147",
+      "resourceType": "Patient",
+      "eventName": "patient_updated",
+      "isActive": true,
+      "createdAt": "2025-07-18T15:43:03.552Z",
+      "updatedAt": "2025-07-18T15:43:03.552Z"
+    },
+    {
+      "id": "cmd8zndk900054vfgxdlvilfs",
+      "nexhealthWebhookEndpointId": "13504",
+      "nexhealthSubscriptionId": "35148",
+      "resourceType": "Appointment",
+      "eventName": "appointment_created",
+      "isActive": true,
+      "createdAt": "2025-07-18T15:43:07.113Z",
+      "updatedAt": "2025-07-18T15:43:07.113Z"
+    },
+    {
+      "id": "cmd8zngli00074vfg8vnam8yg",
+      "nexhealthWebhookEndpointId": "13504",
+      "nexhealthSubscriptionId": "35149",
+      "resourceType": "Appointment",
+      "eventName": "appointment_updated",
+      "isActive": true,
+      "createdAt": "2025-07-18T15:43:10.827Z",
+      "updatedAt": "2025-07-18T15:43:10.827Z"
+    },
+    {
+      "id": "cmd8znjfx00094vfg4zx91j9e",
+      "nexhealthWebhookEndpointId": "13504",
+      "nexhealthSubscriptionId": "35150",
+      "resourceType": "SyncStatus",
+      "eventName": "sync_status_read_change",
+      "isActive": true,
+      "createdAt": "2025-07-18T15:43:14.733Z",
+      "updatedAt": "2025-07-18T15:43:14.733Z"
+    },
+    {
+      "id": "cmd8znlxf000b4vfgpvq72lhp",
+      "nexhealthWebhookEndpointId": "13504",
+      "nexhealthSubscriptionId": "35151",
+      "resourceType": "SyncStatus",
+      "eventName": "sync_status_write_change",
+      "isActive": true,
+      "createdAt": "2025-07-18T15:43:17.955Z",
+      "updatedAt": "2025-07-18T15:43:17.955Z"
+    }
+  ],
+  "globalEndpoint": {
+    "nexhealthEndpointId": "13504",
+    "targetUrl": "https://laine-integrated.vercel.app/api/nexhealth-webhook",
+    "isEnabled": true,
+    "createdAt": "2025-07-18T15:42:43.297Z",
+    "updatedAt": "2025-07-18T15:42:43.297Z"
+  }
+}
