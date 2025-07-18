@@ -252,17 +252,38 @@ export async function handleIdentifyOrCreatePatient(
         
         // Handle phone number collection and confirmation
         if (infoToAskNext === 'phone' && toolArguments.phone) {
-          newState.patientDetails.phone = toolArguments.phone;
-          newState.patientDetails.infoToAskNext = 'confirmPhone';
+          // Accumulate phone digits to handle fragmented input
+          const currentPartial = newState.patientDetails.partialPhone || '';
+          const newDigits = toolArguments.phone.replace(/\D/g, ''); // Extract only digits
+          const accumulatedPhone = currentPartial + newDigits;
           
-          const formattedPhone = formatPhoneNumberForReadback(toolArguments.phone);
-          return {
-            toolResponse: {
-              toolCallId: toolId,
-              result: `Okay, I have ${formattedPhone}. Is that correct?`
-            },
-            newState
-          };
+          newState.patientDetails.partialPhone = accumulatedPhone;
+          
+          // Check if we have a complete 10-digit phone number
+          if (accumulatedPhone.length >= 10) {
+            const fullPhone = accumulatedPhone.slice(0, 10); // Take first 10 digits
+            newState.patientDetails.phone = fullPhone;
+            newState.patientDetails.partialPhone = undefined; // Clear partial data
+            newState.patientDetails.infoToAskNext = 'confirmPhone';
+            
+            const formattedPhone = formatPhoneNumberForReadback(fullPhone);
+            return {
+              toolResponse: {
+                toolCallId: toolId,
+                result: `Okay, I have ${formattedPhone}. Is that correct?`
+              },
+              newState
+            };
+          } else {
+            // Still need more digits, continue listening
+            return {
+              toolResponse: {
+                toolCallId: toolId,
+                result: "I got that. Please continue with the rest of your phone number."
+              },
+              newState
+            };
+          }
         }
         
         if (infoToAskNext === 'confirmPhone') {
@@ -336,12 +357,17 @@ export async function handleIdentifyOrCreatePatient(
                 console.log('[IdentifyOrCreatePatientHandler] Creating patient in NexHealth');
                 
                 const createPatientBody = {
+                  provider: { 
+                    provider_id: 377851148 
+                  },
                   patient: {
+                    bio: {
+                      date_of_birth: newState.patientDetails.dob || '',
+                      phone_number: newState.patientDetails.phone || ''
+                    },
                     first_name: newState.patientDetails.firstName,
                     last_name: newState.patientDetails.lastName,
-                    email: newState.patientDetails.email,
-                    phone: newState.patientDetails.phone,
-                    location_id: practice.nexhealthLocationId
+                    email: newState.patientDetails.email
                   }
                 };
 
@@ -404,13 +430,25 @@ export async function handleIdentifyOrCreatePatient(
         
         // Handle cases where we need to ask for missing information
         if (infoToAskNext === 'phone' && !toolArguments.phone) {
-          return {
-            toolResponse: {
-              toolCallId: toolId,
-              result: "What's the best phone number to reach you?"
-            },
-            newState
-          };
+          // Check if we have partial phone data accumulated
+          const currentPartial = newState.patientDetails.partialPhone || '';
+          if (currentPartial.length > 0) {
+            return {
+              toolResponse: {
+                toolCallId: toolId,
+                result: `I have ${currentPartial.length} digits so far. Please continue with the rest of your phone number.`
+              },
+              newState
+            };
+          } else {
+            return {
+              toolResponse: {
+                toolCallId: toolId,
+                result: "What's the best phone number to reach you?"
+              },
+              newState
+            };
+          }
         }
         
         if (infoToAskNext === 'email' && !toolArguments.email) {

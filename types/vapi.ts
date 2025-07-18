@@ -67,6 +67,7 @@ export interface ConversationState {
     email?: string;
     insuranceProvider?: string;
     insuranceMemberId?: string;
+    partialPhone?: string; // For accumulating fragmented phone input
     infoToAskNext: 'fullName' | 'dob' | 'phone' | 'email' | 'confirmName' | 'confirmPhone' | 'confirmEmail' | 'insurance' | 'insuranceProvider' | 'insuranceMemberId' | null;
   };
 }
