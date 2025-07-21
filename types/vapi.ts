@@ -1,7 +1,14 @@
 // Core VAPI TypeScript type definitions for type safety
 // These types are based on VAPI API documentation and webhook specifications
 
-export type PatientIdentificationStatus = 'UNKNOWN' | 'IDENTIFICATION_NEEDED' | 'INFO_GATHERING' | 'SEARCHING' | 'CREATING' | 'IDENTIFIED' | 'FAILED_MULTIPLE_MATCHES' | 'FAILED_CREATION' | 'ABORTED';
+export type PatientRecordStatus = 
+  | 'AWAITING_IDENTIFIER'
+  | 'COLLECTING_NEW_PATIENT_INFO'
+  | 'CONFIRMING_COLLECTED_INFO'
+  | 'SEARCHING_EHR'
+  | 'CREATING_IN_EHR'
+  | 'IDENTIFIED'
+  | 'FAILED';
 
 export type ConversationStage = 
   | 'GREETING'
@@ -58,17 +65,21 @@ export interface ConversationState {
   };
 
   patientDetails: {
-    status: PatientIdentificationStatus;
+    status: PatientRecordStatus;
     nexhealthPatientId?: number;
-    firstName?: string;
-    lastName?: string;
-    dob?: string; // Stored as YYYY-MM-DD
-    phone?: string;
-    email?: string;
+    // The "form" we are trying to fill
+    collectedInfo: {
+      firstName?: string;
+      lastName?: string;
+      dob?: string; // Stored as YYYY-MM-DD
+      phone?: string;
+      email?: string;
+    };
+    // What piece of info is the primary focus of the *next* question?
+    nextInfoToCollect: 'name' | 'confirmName' | 'dob' | 'phone' | 'confirmPhone' | 'email' | 'confirmEmail' | null;
+    // Optional fields for potential future use
     insuranceProvider?: string;
     insuranceMemberId?: string;
-    partialPhone?: string; // For accumulating fragmented phone input
-    infoToAskNext: 'fullName' | 'dob' | 'phone' | 'email' | 'confirmName' | 'confirmPhone' | 'confirmEmail' | 'insurance' | 'insuranceProvider' | 'insuranceMemberId' | null;
   };
 }
 

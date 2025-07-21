@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { handleFindAppointmentType } from "@/lib/tool-handlers/findAppointmentTypeHandler";
-import { handleIdentifyOrCreatePatient } from "@/lib/tool-handlers/identifyOrCreatePatientHandler";
+import { handleManagePatientRecord } from "@/lib/tool-handlers/handleManagePatientRecord";
 import { handleCheckAvailableSlots } from "@/lib/tool-handlers/checkAvailableSlotsHandler";
 import { handleConfirmBooking } from "@/lib/tool-handlers/confirmBookingHandler";
 import type { 
@@ -100,8 +100,9 @@ export async function POST(request: NextRequest) {
         practiceId: practiceId || "unknown",
         appointmentBooking: {},
         patientDetails: {
-          status: 'IDENTIFICATION_NEEDED',
-          infoToAskNext: 'fullName'
+          status: 'AWAITING_IDENTIFIER',
+          collectedInfo: {},
+          nextInfoToCollect: 'name'
         }
       };
       console.log(`[State Management] Initialized new state for call: ${callId}`);
@@ -129,10 +130,10 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        case "identifyOrCreatePatient": {
-          handlerResult = await handleIdentifyOrCreatePatient(
+        case "managePatientRecord": {
+          handlerResult = await handleManagePatientRecord(
             state,
-            currentToolArguments as { fullName?: string; dob?: string; phone?: string; email?: string },
+            currentToolArguments as Record<string, unknown>, // Using generic type temporarily
             currentToolId
           );
           break;
