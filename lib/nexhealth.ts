@@ -29,6 +29,14 @@ interface NexHealthOperatory {
   active: boolean;
 }
 
+export interface CreatePatientArgs {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  phoneNumber: string;
+  email: string;
+}
+
 const NEXHEALTH_API_BASE_URL = process.env.NEXHEALTH_API_BASE_URL!;
 const MASTER_NEXHEALTH_API_KEY = process.env.NEXHEALTH_API_KEY!; // The master key
 
@@ -652,4 +660,27 @@ export async function syncPracticeAppointmentTypes(
     console.error(`Error syncing appointment types for practice ${practiceId}:`, error);
     throw error;
   }
+} 
+
+export async function createPatient(patientData: CreatePatientArgs, subdomain: string, locationId: number, providerId: number): Promise<{ data: { user: { id: number } } }> {
+  const body = {
+    provider: { provider_id: providerId },
+    patient: {
+      bio: {
+        date_of_birth: patientData.dateOfBirth,
+        phone_number: patientData.phoneNumber
+      },
+      first_name: patientData.firstName,
+      last_name: patientData.lastName,
+      email: patientData.email
+    }
+  };
+
+  return await fetchNexhealthAPI(
+    '/patients',
+    subdomain,
+    { location_id: locationId },
+    'POST',
+    body
+  );
 } 
