@@ -82,29 +82,32 @@ export async function generateAppointmentConfirmationMessage(
   matchedAppointmentDuration: number
 ): Promise<string> {
   try {
-    console.log(`[AI Responder] Generating confirmation for: ${officialName} (spoken: ${spokenName})`);
+    console.log(`[AI Responder] Generating look-ahead confirmation for: ${officialName} (spoken: ${spokenName})`);
 
     // Check if OpenAI API key is available
     if (!process.env.OPENAI_API_KEY) {
       console.error("[AI Responder] OPENAI_API_KEY not found in environment variables");
-      return `Okay, we can schedule a ${spokenName} which is ${matchedAppointmentDuration} minutes. Is that correct?`;
+      return `Okay, for ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?`;
     }
 
     // Construct messages for the generateText call
     const messages: CoreMessage[] = [
       {
         role: "system",
-        content: `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+        content: `You are an AI response generator. Your task is to generate a single, fluid, two-part response for a voice assistant named Laine.
 
 **CRITICAL RULES:**
-1.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'.
-2.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence. Do not break it up.
-3.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+1.  **TWO-PART STRUCTURE:** Create a complete sentence with two parts:
+    - Part 1: Acknowledge the appointment type 
+    - Part 2: Ask for their first and last name to begin patient identification
+2.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'.
+3.  **TRANSITIONAL FLOW:** The sentence must flow naturally from confirmation to action.
+4.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single, flowing sentence.
+5.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
 
-**Example:**
-- Input: Spoken Name: "a full check-up with x-rays", Duration: 60
-- Correct Output: "Okay, for a full check-up with x-rays, that will take about 60 minutes. Does that sound right?"
-- Incorrect Output: "Okay. For a full check-up... that's 60 minutes. Sound good?"`
+**Example Output:** "Okay, for ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?"
+
+**FORBIDDEN:** Do NOT ask confirmation questions about the appointment type. Do NOT mention duration.`
       },
       {
         role: "user",
@@ -114,9 +117,7 @@ Identified appointment:
 - Spoken Name: "${spokenName}"
 - Duration: ${matchedAppointmentDuration} minutes.
 
-Example Output: "Okay, for ${spokenName}, that will take about ${matchedAppointmentDuration} minutes. Does that sound right?"
-
-Your turn. Generate the single, fluid, spoken response for Laine:`
+Your turn. Generate the single, fluid, two-part spoken response for Laine that acknowledges the appointment AND asks for their name:`
       }
     ];
 
@@ -128,7 +129,7 @@ Your turn. Generate the single, fluid, spoken response for Laine:`
       maxTokens: 150
     });
 
-    console.log(`[AI Responder] Generated message: "${text}"`);
+    console.log(`[AI Responder] Generated look-ahead message: "${text}"`);
 
     // Process the response: trim and ensure single line
     const processedResponse = text.trim().replace(/\n/g, " ");
@@ -137,7 +138,7 @@ Your turn. Generate the single, fluid, spoken response for Laine:`
   } catch (error) {
     console.error("[AI Responder] Error during AI call:", error);
     // Provide fallback response using spokenName
-    return `Okay, we can schedule ${spokenName} which is ${matchedAppointmentDuration} minutes. Is that correct?`;
+    return `Okay, for ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?`;
   }
 }
 
@@ -148,30 +149,33 @@ export async function generateWelcomeAppointmentConfirmationMessage(
   matchedAppointmentDuration: number
 ): Promise<string> {
   try {
-    console.log(`[AI Responder] Generating welcome confirmation for: ${officialName} (spoken: ${spokenName})`);
+    console.log(`[AI Responder] Generating welcome look-ahead confirmation for: ${officialName} (spoken: ${spokenName})`);
 
     // Check if OpenAI API key is available
     if (!process.env.OPENAI_API_KEY) {
       console.error("[AI Responder] OPENAI_API_KEY not found in environment variables");
-      return `That's wonderful, we love seeing new patients! For ${spokenName}, that will take about ${matchedAppointmentDuration} minutes. Does that sound right?`;
+      return `That's wonderful, we love seeing new patients! For ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?`;
     }
 
     // Construct messages for the generateText call
     const messages: CoreMessage[] = [
       {
         role: "system",
-        content: `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine that shows warmth and welcome to new patients.
+        content: `You are an AI response generator. Your task is to generate a single, fluid, two-part response for a voice assistant named Laine that shows warmth and welcome to new patients.
 
 **CRITICAL RULES:**
-1.  **WARM AND WELCOMING:** Express genuine excitement about new patients or referrals
-2.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'
-3.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence
-4.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment"
+1.  **TWO-PART STRUCTURE:** Create a complete sentence with two parts:
+    - Part 1: Express genuine warmth and excitement about new patients
+    - Part 2: Ask for their first and last name to begin patient identification
+2.  **WARM AND WELCOMING:** Express genuine excitement about new patients or referrals
+3.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'
+4.  **TRANSITIONAL FLOW:** The sentence must flow naturally from welcome to action.
+5.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single, flowing sentence
+6.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment"
 
-**Examples:**
-- "That's wonderful, we love seeing new patients! I can certainly help you schedule your first cleaning."
-- "We're so glad you were referred to us! Let's get you set up for that check-up."
-- "How exciting that you just moved here! For a new patient exam, that will take about 60 minutes. Does that sound right?"`
+**Example Output:** "That's wonderful, we love seeing new patients! For ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?"
+
+**FORBIDDEN:** Do NOT ask confirmation questions about the appointment type. Do NOT mention duration.`
       },
       {
         role: "user",
@@ -181,7 +185,7 @@ Identified appointment:
 - Spoken Name: "${spokenName}"
 - Duration: ${matchedAppointmentDuration} minutes
 
-The patient appears to be new or was referred. Generate a warm, welcoming response for Laine:`
+The patient appears to be new or was referred. Generate a warm, welcoming, two-part response for Laine that expresses excitement AND asks for their name:`
       }
     ];
 
@@ -193,7 +197,7 @@ The patient appears to be new or was referred. Generate a warm, welcoming respon
       maxTokens: 150
     });
 
-    console.log(`[AI Responder] Generated welcome message: "${text}"`);
+    console.log(`[AI Responder] Generated welcome look-ahead message: "${text}"`);
 
     // Process the response: trim and ensure single line
     const processedResponse = text.trim().replace(/\n/g, " ");
@@ -202,7 +206,7 @@ The patient appears to be new or was referred. Generate a warm, welcoming respon
   } catch (error) {
     console.error("[AI Responder] Error during AI call:", error);
     // Provide fallback response with warmth
-    return `That's wonderful, we love seeing new patients! For ${spokenName}, that will take about ${matchedAppointmentDuration} minutes. Does that sound right?`;
+    return `That's wonderful, we love seeing new patients! For ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?`;
   }
 }
 
@@ -213,31 +217,33 @@ export async function generateUrgentAppointmentConfirmationMessage(
   matchedAppointmentDuration: number
 ): Promise<string> {
   try {
-    console.log(`[AI Responder] Generating urgent confirmation for: ${officialName} (spoken: ${spokenName})`);
+    console.log(`[AI Responder] Generating urgent look-ahead confirmation for: ${officialName} (spoken: ${spokenName})`);
 
     // Check if OpenAI API key is available
     if (!process.env.OPENAI_API_KEY) {
       console.error("[AI Responder] OPENAI_API_KEY not found in environment variables");
-      return `I'm so sorry to hear you're in pain. For ${spokenName}, we'll need about ${matchedAppointmentDuration} minutes, so let's find the absolute soonest time we can get you in.`;
+      return `I'm so sorry to hear you're in pain. For ${spokenName}, we can definitely get you seen. To get started, could I get your first and last name, please?`;
     }
 
     // Construct messages for the generateText call
     const messages: CoreMessage[] = [
       {
         role: "system",
-        content: `You are an AI response generator for urgent dental situations. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+        content: `You are an AI response generator for urgent dental situations. Your task is to generate a single, fluid, two-part response for a voice assistant named Laine.
 
 **CRITICAL RULES:**
-1.  **BE EMPATHETIC:** Acknowledge the patient's pain/problem (e.g., "I'm so sorry to hear you're in pain").
-2.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'.
-3.  **STATE DURATION:** Mention the appointment duration.
-4.  **TRANSITION TO FINDING TIME:** End by transitioning directly to finding a time. NEVER ask for confirmation like "Does that sound right?".
-5.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+1.  **TWO-PART STRUCTURE:** Create a complete sentence with two parts:
+    - Part 1: Empathetic acknowledgment of the patient's pain/urgency
+    - Part 2: Ask for their first and last name to begin patient identification
+2.  **BE EMPATHETIC:** Acknowledge the patient's pain/problem (e.g., "I'm so sorry to hear you're in pain").
+3.  **USE THE SPOKEN NAME:** The user must hear the 'Spoken Name', not the 'Official Name'.
+4.  **TRANSITIONAL FLOW:** The sentence must flow naturally from empathy to action.
+5.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single, flowing sentence.
 6.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
 
-**Example Output:** "I'm so sorry to hear you're in pain. For a Limited Exam and X-rays, we'll need about 40 minutes, so let's find the absolute soonest time we can get you in."
+**Example Output:** "I'm so sorry to hear you're in pain, for ${spokenName} we can definitely get you seen. To get started, could I get your first and last name, please?"
 
-**FORBIDDEN:** Do NOT ask confirmation questions like "Does that sound right?" or "Is that correct?"`
+**FORBIDDEN:** Do NOT ask confirmation questions about the appointment type. Do NOT transition to scheduling yet.`
       },
       {
         role: "user",
@@ -247,7 +253,7 @@ Identified appointment:
 - Spoken Name: "${spokenName}"
 - Duration: ${matchedAppointmentDuration} minutes.
 
-Your turn. Generate the single, empathetic, spoken response for Laine that acknowledges their problem, states the appointment details, and transitions directly to finding a time:`
+Your turn. Generate the single, empathetic, two-part spoken response for Laine that acknowledges their problem AND asks for their name:`
       }
     ];
 
@@ -259,7 +265,7 @@ Your turn. Generate the single, empathetic, spoken response for Laine that ackno
       maxTokens: 150
     });
 
-    console.log(`[AI Responder] Generated urgent message: "${text}"`);
+    console.log(`[AI Responder] Generated urgent look-ahead message: "${text}"`);
 
     // Process the response: trim and ensure single line
     const processedResponse = text.trim().replace(/\n/g, " ");
@@ -268,6 +274,6 @@ Your turn. Generate the single, empathetic, spoken response for Laine that ackno
   } catch (error) {
     console.error("[AI Responder] Error during AI call for urgent message:", error);
     // Provide fallback response using spokenName
-    return `I'm so sorry to hear you're in pain. For ${spokenName}, we'll need about ${matchedAppointmentDuration} minutes, so let's find the absolute soonest time we can get you in.`;
+    return `I'm so sorry to hear you're in pain. For ${spokenName}, we can definitely get you seen. To get started, could I get your first and last name, please?`;
   }
 } 

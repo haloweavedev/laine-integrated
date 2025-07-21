@@ -145,7 +145,7 @@ export async function handleFindAppointmentType(
       );
     }
 
-    // Update state with the matched appointment type
+    // Update state with the matched appointment type and transition to patient identification
     const newState: ConversationState = {
       ...currentState,
       currentStage: 'AWAITING_PATIENT_IDENTIFICATION',
@@ -158,6 +158,11 @@ export async function handleFindAppointmentType(
         patientRequest: patientRequest,
         isUrgent: isUrgent,
         isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+      },
+      patientDetails: {
+        ...currentState.patientDetails,
+        status: 'COLLECTING_NEW_PATIENT_INFO',
+        nextInfoToCollect: 'name'
       }
     };
 
@@ -167,19 +172,6 @@ export async function handleFindAppointmentType(
     };
 
     console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
-
-    // For urgent appointments, immediately chain to checkAvailableSlots
-    if (isUrgent) {
-      console.log(`[FindAppointmentTypeHandler] Urgent appointment detected, chaining to checkAvailableSlots`);
-      return {
-        toolResponse,
-        newState,
-        nextTool: {
-          toolName: 'checkAvailableSlots',
-          toolArguments: {} // No specific arguments needed for urgent flow
-        }
-      };
-    }
 
     return {
       toolResponse,
