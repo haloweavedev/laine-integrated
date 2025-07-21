@@ -105,7 +105,7 @@ export async function generateAppointmentConfirmationMessage(
 4.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single, flowing sentence.
 5.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
 
-**Example Output:** "Okay, for ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?"
+**Example Output:** "Okay, for ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?<user_response_awaited>"
 
 **FORBIDDEN:** Do NOT ask confirmation questions about the appointment type. Do NOT mention duration.`
       },
@@ -173,7 +173,7 @@ export async function generateWelcomeAppointmentConfirmationMessage(
 5.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single, flowing sentence
 6.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment"
 
-**Example Output:** "That's wonderful, we love seeing new patients! For ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?"
+**Example Output:** "That's wonderful, we love seeing new patients! For ${spokenName}, we can get you scheduled. To get started, could I get your first and last name, please?<user_response_awaited>"
 
 **FORBIDDEN:** Do NOT ask confirmation questions about the appointment type. Do NOT mention duration.`
       },
@@ -241,7 +241,7 @@ export async function generateUrgentAppointmentConfirmationMessage(
 5.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single, flowing sentence.
 6.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
 
-**Example Output:** "I'm so sorry to hear you're in pain, for ${spokenName} we can definitely get you seen. To get started, could I get your first and last name, please?"
+**Example Output:** "I'm so sorry to hear you're in pain, for ${spokenName} we can definitely get you seen. To get started, could I get your first and last name, please?<user_response_awaited>"
 
 **FORBIDDEN:** Do NOT ask confirmation questions about the appointment type. Do NOT transition to scheduling yet.`
       },

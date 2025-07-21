@@ -49,7 +49,7 @@ export async function handleManagePatientRecord(
       return {
         toolResponse: {
           toolCallId: toolId,
-          result: "To get started, could I get your first and last name, please?"
+          result: "To get started, could I get your first and last name, please?<user_response_awaited>"
         },
         newState
       };
@@ -64,7 +64,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: "I didn't catch that. Could you please provide your first and last name?"
+              result: "I didn't catch that. Could you please provide your first and last name?<user_response_awaited>"
             },
             newState: currentState // Return original state
           };
@@ -75,7 +75,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: "I need both a first and last name. Could you please provide your full name?"
+              result: "I need both a first and last name. Could you please provide your full name?<user_response_awaited>"
             },
             newState: currentState // Return original state
           };
@@ -88,7 +88,7 @@ export async function handleManagePatientRecord(
         return {
           toolResponse: {
             toolCallId: toolId,
-            result: `Got it. To confirm the spelling, I have ${spellOut(parsedName.firstName)}... ${spellOut(parsedName.lastName)}. Is that correct?`
+            result: `Got it. To confirm the spelling, I have ${spellOut(parsedName.firstName)}... ${spellOut(parsedName.lastName)}. Is that correct?<user_response_awaited>`
           },
           newState
         };
@@ -103,7 +103,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: await generateNextQuestion(newState)
+              result: `${await generateNextQuestion(newState)}<user_response_awaited>`
             },
             newState
           };
@@ -115,7 +115,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: "My apologies. Could you please tell me your first and last name again?"
+              result: "My apologies. Could you please tell me your first and last name again?<user_response_awaited>"
             },
             newState
           };
@@ -125,7 +125,7 @@ export async function handleManagePatientRecord(
       if (newState.patientDetails.nextInfoToCollect === 'dob') {
         if (!toolArguments.dob) {
           return {
-            toolResponse: { toolCallId: toolId, result: "I didn't catch that. What is your date of birth?" },
+            toolResponse: { toolCallId: toolId, result: "I didn't catch that. What is your date of birth?<user_response_awaited>" },
             newState: currentState
           };
         }
@@ -136,7 +136,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: { 
               toolCallId: toolId, 
-              result: "I'm sorry, I didn't understand that date format. Could you please provide your date of birth again, like 'June 1st, 1990'?" 
+              result: "I'm sorry, I didn't understand that date format. Could you please provide your date of birth again, like 'June 1st, 1990'?<user_response_awaited>" 
             },
             newState: currentState
           };
@@ -147,7 +147,7 @@ export async function handleManagePatientRecord(
         return {
           toolResponse: {
             toolCallId: toolId,
-            result: await generateNextQuestion(newState)
+            result: `${await generateNextQuestion(newState)}<user_response_awaited>`
           },
           newState
         };
@@ -156,7 +156,7 @@ export async function handleManagePatientRecord(
       if (newState.patientDetails.nextInfoToCollect === 'phone') {
         if (!toolArguments.phone) {
           return {
-            toolResponse: { toolCallId: toolId, result: "I didn't catch that. What is your phone number?" },
+            toolResponse: { toolCallId: toolId, result: "I didn't catch that. What is your phone number?<user_response_awaited>" },
             newState: currentState
           };
         }
@@ -165,7 +165,7 @@ export async function handleManagePatientRecord(
         return {
           toolResponse: {
             toolCallId: toolId,
-            result: `Okay, I have ${formatPhoneNumberForReadback(toolArguments.phone)}. Is that correct?`
+            result: `Okay, I have ${formatPhoneNumberForReadback(toolArguments.phone)}. Is that correct?<user_response_awaited>`
           },
           newState
         };
@@ -180,7 +180,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: await generateNextQuestion(newState)
+              result: `${await generateNextQuestion(newState)}<user_response_awaited>`
             },
             newState
           };
@@ -190,7 +190,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: "No problem. What is the correct phone number?"
+              result: "No problem. What is the correct phone number?<user_response_awaited>"
             },
             newState
           };
@@ -200,7 +200,7 @@ export async function handleManagePatientRecord(
       if (newState.patientDetails.nextInfoToCollect === 'email') {
         if (!toolArguments.email) {
           return {
-            toolResponse: { toolCallId: toolId, result: "I didn't catch that. What is your email address?" },
+            toolResponse: { toolCallId: toolId, result: "I didn't catch that. What is your email address?<user_response_awaited>" },
             newState: currentState
           };
         }
@@ -215,7 +215,7 @@ export async function handleManagePatientRecord(
         return {
           toolResponse: {
             toolCallId: toolId,
-            result: `Got it. To make sure I have it right, that's ${spellOut(username)} at ${domain}. Is that correct?`
+            result: `Got it. To make sure I have it right, that's ${spellOut(username)} at ${domain}. Is that correct?<user_response_awaited>`
           },
           newState
         };
@@ -237,7 +237,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: "My apologies. What is the correct email address?"
+              result: "My apologies. What is the correct email address?<user_response_awaited>"
             },
             newState
           };
@@ -273,7 +273,7 @@ export async function handleManagePatientRecord(
           return {
             toolResponse: {
               toolCallId: toolId,
-              result: "I'm sorry to hear that. Let's start over to make sure we get it right. Could you please tell me your first and last name again?"
+              result: "I'm sorry to hear that. Let's start over to make sure we get it right. Could you please tell me your first and last name again?<user_response_awaited>"
             },
             newState
           };
@@ -283,7 +283,7 @@ export async function handleManagePatientRecord(
         return {
           toolResponse: {
             toolCallId: toolId,
-            result: await generateConfirmationSummary(newState)
+            result: `${await generateConfirmationSummary(newState)}<user_response_awaited>`
           },
           newState
         };
