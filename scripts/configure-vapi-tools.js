@@ -160,10 +160,15 @@ async function updateAssistantTools(assistantId, assistantName) {
     const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
     const tools = getAllTools(appBaseUrl);
     
-    // Set empty messages array for each tool to disable filler
+    // Set explicit empty request-start message for each tool to force-disable filler
     const toolsWithNoFiller = tools.map(tool => ({
       ...tool,
-      messages: [] // This disables all filler messages
+      messages: [
+        {
+          "type": "request-start",
+          "content": "" // Explicitly set content to an empty string
+        }
+      ]
     }));
 
     // Update the assistant with tools that have no filler messages
@@ -190,7 +195,7 @@ async function updateAssistantTools(assistantId, assistantName) {
     
     const updatedAssistant = await updateResponse.json();
     console.log(`  ✅ Successfully updated assistant: "${assistantName}"`);
-    console.log(`     Tools configured with empty messages arrays to disable filler`);
+    console.log(`     Tools configured with explicit empty request-start messages to force-disable filler`);
     console.log(`     Updated ${updatedAssistant.model?.tools?.length || 0} tools`);
   } catch (error) {
     console.error(`  ❌ Error updating assistant "${assistantName}":`, error.message);
