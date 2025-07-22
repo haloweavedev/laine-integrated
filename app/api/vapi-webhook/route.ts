@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { handleCreatePatientRecord } from '@/lib/tool-handlers/createPatientRecordHandler';
+import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
+import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
+import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
 import type { 
   ServerMessageToolCallsPayload, 
   ConversationState,
-  PatientRecordStatus
+  HandlerResult,
+  CheckSlotsResultData
 } from '@/types/vapi';
 import { Prisma } from '@prisma/client';
 
@@ -50,17 +54,14 @@ export async function POST(request: Request) {
 
     if (callLog.conversationState && typeof callLog.conversationState === 'object' && callLog.conversationState !== null) {
       state = callLog.conversationState as unknown as ConversationState;
-      console.log(`[State Management] Retrieved state for call: ${callId}, stage: ${state.currentStage}`);
+      console.log(`[State Management] Retrieved state for call: ${callId}`);
     } else {
       state = {
-        currentStage: 'GREETING',
         callId: callId,
         practiceId: practiceId,
         appointmentBooking: {},
         patientDetails: {
-          status: 'AWAITING_IDENTIFIER' as PatientRecordStatus,
-          collectedInfo: {},
-          nextInfoToCollect: null // We no longer manage this step-by-step
+          collectedInfo: {}
         }
       };
       console.log(`[State Management] Initialized new state for call: ${callId}`);
@@ -85,11 +86,71 @@ export async function POST(request: Request) {
     console.log(`[VAPI Webhook] Arguments:`, toolArguments);
 
     // Tool routing switch statement  
-    let handlerResponse: { result?: { nexhealthPatientId: number }; message?: { type: string; role: string; content: string } };
+    let handlerResult: HandlerResult;
 
     switch (toolName) {
+      case "findAppointmentType": {
+        handlerResult = await handleFindAppointmentType(
+          state,
+          toolArguments as { patientRequest: string; patientStatus?: string },
+          toolCall.id
+        );
+
+        // NEW LOGIC: Update state from the structured result
+        const resultData = handlerResult.toolResponse.result;
+        if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
+          const appointmentData = resultData as {
+            appointmentTypeId?: string;
+            appointmentTypeName?: string;
+            spokenName?: string;
+            duration?: number;
+            isUrgent?: boolean;
+            isImmediateBooking?: boolean;
+          };
+          
+          handlerResult.newState.appointmentBooking = {
+            ...handlerResult.newState.appointmentBooking,
+            typeId: appointmentData.appointmentTypeId,
+            typeName: appointmentData.appointmentTypeName,
+            spokenName: appointmentData.spokenName,
+            duration: appointmentData.duration,
+            patientRequest: (toolArguments as { patientRequest: string }).patientRequest,
+            isUrgent: appointmentData.isUrgent,
+            isImmediateBooking: appointmentData.isImmediateBooking
+          };
+        }
+        break;
+      }
+
+      case "checkAvailableSlots": {
+        handlerResult = await handleCheckAvailableSlots(
+          state,
+          toolArguments as { preferredDaysOfWeek?: string; timeBucket?: string; requestedDate?: string },
+          toolCall.id
+        );
+
+        // NEW LOGIC: Update state from the structured result
+        const resultData = handlerResult.toolResponse.result as CheckSlotsResultData | undefined;
+        if (resultData) {
+          handlerResult.newState.appointmentBooking = {
+            ...handlerResult.newState.appointmentBooking,
+            presentedSlots: resultData.foundSlots,
+            nextAvailableDate: resultData.nextAvailableDate
+          };
+        }
+        break;
+      }
+
+      case "confirmBooking": {
+        handlerResult = await handleConfirmBooking(
+          state,
+          toolArguments as { userSelection: string },
+          toolCall.id
+        );
+        break;
+      }
+
       case "create_patient_record": {
-        // Cast toolArguments to the expected interface shape
         const createPatientArgs = toolArguments as {
           firstName: string;
           lastName: string;
@@ -97,45 +158,52 @@ export async function POST(request: Request) {
           phoneNumber: string;
           email: string;
         };
-        handlerResponse = await handleCreatePatientRecord(createPatientArgs, toolCall.id);
+        const response = await handleCreatePatientRecord(createPatientArgs, toolCall.id);
         
-        // Critical state update: save the patient ID if successful
-        if (handlerResponse.result?.nexhealthPatientId) {
-          state.patientDetails.nexhealthPatientId = handlerResponse.result.nexhealthPatientId;
-          state.patientDetails.status = 'IDENTIFIED' as PatientRecordStatus;
-          console.log(`[State Management] Saved patient ID: ${handlerResponse.result.nexhealthPatientId} to state`);
+        // Adapt the response to the HandlerResult structure
+        handlerResult = {
+          toolResponse: {
+            toolCallId: toolCall.id,
+            result: response.result ? { nexhealthPatientId: response.result.nexhealthPatientId } : undefined,
+            message: response.message,
+            error: response.message?.type === "request-failed" ? response.message.content : undefined
+          },
+          newState: { ...state } // Create a copy of the current state
+        };
+
+        // Update the state based on the result
+        if (response.result?.nexhealthPatientId) {
+          handlerResult.newState.patientDetails.nexhealthPatientId = response.result.nexhealthPatientId;
         }
         break;
       }
 
       default: {
         console.error(`[VAPI Webhook] Unknown tool: ${toolName}`);
-        handlerResponse = {
-          message: {
-            type: "request-failed",
-            role: "assistant", 
-            content: `I'm sorry, I don't know how to handle the "${toolName}" tool. Please try again.`
-          }
+        handlerResult = {
+          toolResponse: {
+            toolCallId: toolCall.id,
+            error: `I'm sorry, I don't know how to handle the "${toolName}" tool. Please try again.`
+          },
+          newState: state
         };
         break;
       }
     }
 
-    // State persistence: save the updated state back to the database
+    // After the switch statement
+    state = handlerResult.newState;
+
+    // State persistence
     await prisma.callLog.update({
       where: { vapiCallId: callId },
       data: { conversationState: state as unknown as Prisma.InputJsonValue }
     });
-    console.log(`[State Management] Persisted state for call: ${callId}, stage: ${state.currentStage}`);
+    console.log(`[State Management] Persisted state for call: ${callId}`);
 
     // Construct and return the final response for VAPI
-    const finalResponse = {
-      toolCallId: toolCall.id,
-      ...handlerResponse
-    };
-
-    console.log(`[VAPI Webhook] Final response:`, finalResponse);
-    return NextResponse.json({ results: [finalResponse] });
+    console.log(`[VAPI Webhook] Final response:`, handlerResult.toolResponse);
+    return NextResponse.json({ results: [handlerResult.toolResponse] });
 
   } catch (error) {
     console.error('Error in VAPI webhook:', error);

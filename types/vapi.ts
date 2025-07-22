@@ -1,29 +1,7 @@
 // Core VAPI TypeScript type definitions for type safety
 // These types are based on VAPI API documentation and webhook specifications
 
-export type PatientRecordStatus = 
-  | 'AWAITING_IDENTIFIER'
-  | 'COLLECTING_NEW_PATIENT_INFO'
-  | 'CONFIRMING_COLLECTED_INFO'
-  | 'SEARCHING_EHR'
-  | 'CREATING_IN_EHR'
-  | 'IDENTIFIED'
-  | 'FAILED';
 
-export type ConversationStage = 
-  | 'GREETING'
-  | 'IDENTIFYING_APPOINTMENT_TYPE'
-  | 'CONFIRMING_APPOINTMENT_TYPE'
-  | 'AWAITING_PATIENT_IDENTIFICATION'
-  | 'GATHERING_AVAILABILITY_PREFERENCES'
-  | 'PRESENTING_SLOTS'
-  | 'AWAITING_TIME_BUCKET_SELECTION'
-  | 'AWAITING_SLOT_CONFIRMATION'
-  | 'AWAITING_FINAL_CONFIRMATION'
-  | 'GATHERING_PATIENT_DETAILS'
-  | 'READY_FOR_BOOKING'
-  | 'BOOKING_CONFIRMED'
-  | 'ENDED_NO_BOOKING';
 
 // Interface for tool chaining directive
 export interface NextTool {
@@ -38,6 +16,12 @@ export interface SlotData {
   providerId: number;
 }
 
+// Interface for checkAvailableSlots structured result data
+export interface CheckSlotsResultData {
+  foundSlots: SlotData[];
+  nextAvailableDate: string | null;
+}
+
 // Updated HandlerResult interface to support tool chaining
 export interface HandlerResult {
   toolResponse: VapiToolResult;
@@ -46,7 +30,6 @@ export interface HandlerResult {
 }
 
 export interface ConversationState {
-  currentStage: ConversationStage;
   practiceId: string;
   callId: string;
   
@@ -65,7 +48,6 @@ export interface ConversationState {
   };
 
   patientDetails: {
-    status: PatientRecordStatus;
     nexhealthPatientId?: number;
     // The "form" we are trying to fill
     collectedInfo: {
@@ -75,8 +57,6 @@ export interface ConversationState {
       phone?: string;
       email?: string;
     };
-    // What piece of info is the primary focus of the *next* question?
-    nextInfoToCollect: 'name' | 'confirmName' | 'dob' | 'phone' | 'confirmPhone' | 'email' | 'confirmEmail' | null;
     // Optional fields for potential future use
     insuranceProvider?: string;
     insuranceMemberId?: string;
@@ -159,8 +139,13 @@ export interface ServerMessageToolCallsPayload {
 
 export interface VapiToolResult {
   toolCallId: string;
-  result?: string;
+  result?: string | Record<string, any>;
   error?: string;
+  message?: {
+    type: string;
+    role: string;
+    content: string;
+  };
 }
 
 // === VAPI Webhook Message Types ===

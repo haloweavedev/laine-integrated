@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
-import type { ConversationState, VapiToolResult, HandlerResult } from "@/types/vapi";
+import type { ConversationState, HandlerResult } from "@/types/vapi";
 
 interface CheckAvailableSlotsArgs {
   preferredDaysOfWeek?: string;
@@ -157,19 +157,20 @@ export async function handleCheckAvailableSlots(
         practice.timezone || 'America/Chicago'
       );
 
-      const newState: ConversationState = {
-        ...currentState,
-        currentStage: 'AWAITING_FINAL_CONFIRMATION',
-        appointmentBooking: {
-          ...currentState.appointmentBooking,
-          presentedSlots: searchResult.foundSlots, // Save the *actually presented* slots
-          nextAvailableDate: searchResult.nextAvailableDate || null,
-        }
-      };
-
       return {
-        toolResponse: { toolCallId: toolId, result: aiResponse },
-        newState
+        newState: currentState, // Return the original, unmodified state
+        toolResponse: {
+          toolCallId: toolId,
+          result: { // Structured data payload
+            foundSlots: searchResult.foundSlots,
+            nextAvailableDate: searchResult.nextAvailableDate || null
+          },
+          message: { // High-fidelity message
+            type: "request-complete",
+            role: "assistant",
+            content: aiResponse // The AI-generated response from generateSlotResponse
+          }
+        }
       };
 
     } else {
@@ -215,32 +216,22 @@ export async function handleCheckAvailableSlots(
         spokenName
       );
 
-      // Update conversation state - Store ALL filtered slots for later use
-      const newState: ConversationState = {
-        ...currentState,
-        currentStage: 'AWAITING_TIME_BUCKET_SELECTION',
-        appointmentBooking: {
-          ...currentState.appointmentBooking,
-          presentedSlots: filteredSlots.map(slot => ({
-            time: slot.time,
-            operatory_id: slot.operatory_id,
-            providerId: slot.providerId
-          })),
-          nextAvailableDate: searchResult.nextAvailableDate || null,
-          lastTimePreference: timeBucket as 'Morning' | 'Afternoon' | 'Evening' | 'Any' || 'Any'
-        }
-      };
-
-      const toolResponse: VapiToolResult = {
-        toolCallId: toolId,
-        result: aiResponse
-      };
-
       console.log(`[CheckAvailableSlotsHandler] Successfully presented ${availableBuckets.length} time bucket options for ${filteredSlots.length} total slots`);
 
       return {
-        toolResponse,
-        newState
+        newState: currentState, // Return the original, unmodified state
+        toolResponse: {
+          toolCallId: toolId,
+          result: { // Structured data payload
+            foundSlots: filteredSlots, // Note: we return all filtered slots here
+            nextAvailableDate: searchResult.nextAvailableDate || null
+          },
+          message: { // High-fidelity message
+            type: "request-complete",
+            role: "assistant",
+            content: aiResponse // The AI-generated response from generateTimeBucketResponse
+          }
+        }
       };
     }
 

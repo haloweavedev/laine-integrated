@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { matchAppointmentTypeIntent, generateAppointmentConfirmationMessage, generateUrgentAppointmentConfirmationMessage, generateWelcomeAppointmentConfirmationMessage } from "@/lib/ai/appointmentMatcher";
-import type { ConversationState, VapiToolResult, HandlerResult } from "@/types/vapi";
+import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
+import type { ConversationState, HandlerResult } from "@/types/vapi";
 
 interface FindAppointmentTypeArgs {
   patientRequest: string;
@@ -87,12 +87,13 @@ export async function handleFindAppointmentType(
       return {
         toolResponse: {
           toolCallId: toolId,
-          result: "I understand you're looking for an appointment, but I couldn't determine the exact type of service you need. Could you please be more specific about what you'd like to schedule?"
+          message: {
+            type: "request-failed",
+            role: "assistant",
+            content: "I understand you're looking for an appointment, but I couldn't determine the exact type of service you need. Could you please be more specific?"
+          }
         },
-        newState: {
-          ...currentState,
-          currentStage: 'IDENTIFYING_APPOINTMENT_TYPE'
-        }
+        newState: currentState
       };
     }
 
@@ -113,69 +114,30 @@ export async function handleFindAppointmentType(
 
     // Detect sentiment and urgency based on keywords in patient request
     const URGENT_KEYWORDS = ['pain', 'toothache', 'emergency', 'hurts', 'broken', 'urgent', 'abscess', 'swelling', 'infection'];
-    const POSITIVE_KEYWORDS = ['new patient', 'just moved', 'recommendation', 'referred', 'first time', 'new to the area', 'someone recommended', 'new in town'];
     
     const requestLower = patientRequest.toLowerCase();
     const isUrgent = URGENT_KEYWORDS.some(keyword => requestLower.includes(keyword));
-    const isNewPatientOrPositive = POSITIVE_KEYWORDS.some(keyword => requestLower.includes(keyword));
-
-    // Generate natural confirmation message based on detected sentiment
-    let generatedMessage: string;
-    
-    if (isUrgent) {
-      generatedMessage = await generateUrgentAppointmentConfirmationMessage(
-        patientRequest,
-        matchedAppointmentType.name,
-        matchedAppointmentType.spokenName || matchedAppointmentType.name,
-        matchedAppointmentType.duration
-      );
-    } else if (isNewPatientOrPositive) {
-      generatedMessage = await generateWelcomeAppointmentConfirmationMessage(
-        patientRequest,
-        matchedAppointmentType.name,
-        matchedAppointmentType.spokenName || matchedAppointmentType.name,
-        matchedAppointmentType.duration
-      );
-    } else {
-      generatedMessage = await generateAppointmentConfirmationMessage(
-        patientRequest,
-        matchedAppointmentType.name,
-        matchedAppointmentType.spokenName || matchedAppointmentType.name,
-        matchedAppointmentType.duration
-      );
-    }
-
-    // Update state with the matched appointment type and transition to patient identification
-    const newState: ConversationState = {
-      ...currentState,
-      currentStage: 'AWAITING_PATIENT_IDENTIFICATION',
-      appointmentBooking: {
-        ...currentState.appointmentBooking,
-        typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
-        typeName: matchedAppointmentType.name,
-        spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
-        duration: matchedAppointmentType.duration,
-        patientRequest: patientRequest,
-        isUrgent: isUrgent,
-        isImmediateBooking: matchedAppointmentType.check_immediate_next_available
-      },
-      patientDetails: {
-        ...currentState.patientDetails,
-        status: 'COLLECTING_NEW_PATIENT_INFO',
-        nextInfoToCollect: 'name'
-      }
-    };
-
-    const toolResponse: VapiToolResult = {
-      toolCallId: toolId,
-      result: generatedMessage
-    };
 
     console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
 
     return {
-      toolResponse,
-      newState
+      toolResponse: {
+        toolCallId: toolId,
+        result: { // The new structured data payload
+          appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+          appointmentTypeName: matchedAppointmentType.name,
+          spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+          duration: matchedAppointmentType.duration,
+          isUrgent: isUrgent,
+          isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+        },
+        message: { // The new high-fidelity message
+          type: "request-complete",
+          role: "assistant",
+          content: `Okay, I've noted you're looking for a ${matchedAppointmentType.spokenName || matchedAppointmentType.name}.`
+        }
+      },
+      newState: currentState // We will update the state in the webhook, not here.
     };
 
   } catch (error) {

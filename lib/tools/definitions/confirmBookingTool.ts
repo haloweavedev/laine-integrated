@@ -18,7 +18,7 @@ export function getConfirmBookingTool(appBaseUrl: string): VapiTool {
       }
     },
     server: {
-      url: `${appBaseUrl}/api/vapi/tool-calls`,
+      url: `${appBaseUrl}/api/vapi-webhook`,
       timeoutSeconds: 10
     }
   };

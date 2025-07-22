@@ -22,7 +22,7 @@ export function getFindAppointmentTypeTool(appBaseUrl: string): VapiTool {
       }
     },
     server: {
-      url: `${appBaseUrl}/api/vapi/tool-calls`,
+      url: `${appBaseUrl}/api/vapi-webhook`,
     }
   };
 } 
