@@ -8,11 +8,16 @@ import type {
   ServerMessageToolCallsPayload, 
   ConversationState,
   HandlerResult,
-  CheckSlotsResultData
+  CheckSlotsResultData,
+  ServerMessageToolCallItem
 } from '@/types/vapi';
 import { Prisma } from '@prisma/client';
 
 export async function POST(request: Request) {
+  const startTime = Date.now();
+  let handlerResult: HandlerResult | undefined;
+  let toolCall: ServerMessageToolCallItem | undefined;
+
   try {
     const body: ServerMessageToolCallsPayload = await request.json();
     const message = body.message;
@@ -22,7 +27,7 @@ export async function POST(request: Request) {
     }
 
     // Extract the first tool call and call ID
-    const toolCall = message.toolCallList?.[0] || message.toolCalls?.[0];
+    toolCall = message.toolCallList?.[0] || message.toolCalls?.[0];
     const callId = message.call.id;
 
     if (!toolCall || !callId) {
@@ -85,9 +90,26 @@ export async function POST(request: Request) {
     console.log(`[VAPI Webhook] Processing tool: ${toolName} (ID: ${toolCall.id}) for Call: ${callId}`);
     console.log(`[VAPI Webhook] Arguments:`, toolArguments);
 
-    // Tool routing switch statement  
-    let handlerResult: HandlerResult;
+    // Create initial tool log entry
+    try {
+      await prisma.toolLog.create({
+        data: {
+          practiceId: practiceId,
+          vapiCallId: callId,
+          toolName: toolName,
+          toolCallId: toolCall.id,
+          arguments: JSON.stringify(toolArguments),
+          success: false, // Default to false, will be updated on success
+          createdAt: new Date(startTime),
+          updatedAt: new Date(startTime),
+        }
+      });
+      console.log(`[DB Log] Created initial ToolLog for ID: ${toolCall.id}`);
+    } catch (logError) {
+      console.error('[DB Log] Failed to create initial tool log:', logError);
+    }
 
+    // Tool routing switch statement  
     switch (toolName) {
       case "findAppointmentType": {
         handlerResult = await handleFindAppointmentType(
@@ -208,5 +230,26 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Error in VAPI webhook:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } finally {
+    if (toolCall?.id && startTime && handlerResult) {
+      const executionTimeMs = Date.now() - startTime;
+      const isSuccess = !!handlerResult.toolResponse?.message && handlerResult.toolResponse.message.type !== 'request-failed';
+
+      try {
+        await prisma.toolLog.updateMany({
+          where: { toolCallId: toolCall.id },
+          data: {
+            result: handlerResult.toolResponse?.result ? JSON.stringify(handlerResult.toolResponse.result) : undefined,
+            error: !isSuccess ? JSON.stringify(handlerResult.toolResponse) : undefined,
+            success: isSuccess,
+            executionTimeMs: executionTimeMs,
+            updatedAt: new Date(),
+          }
+        });
+        console.log(`[DB Log] Finalized ToolLog for ID: ${toolCall.id} with success: ${isSuccess}`);
+      } catch (logError) {
+        console.error('[DB Log] Failed to finalize tool log:', logError);
+      }
+    }
   }
 } 
