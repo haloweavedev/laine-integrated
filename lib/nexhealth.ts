@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { addSeconds } from 'date-fns';
+import type { ApiLog, ApiLogEntry } from '@/types/vapi';
 
 interface NexHealthAppointmentType {
   id: number;
@@ -142,8 +143,10 @@ export async function fetchNexhealthAPI(
   subdomain: string, // Practice-specific subdomain
   params?: Record<string, string | number | string[]>,
   method: string = 'GET',
-  body?: unknown
-) {
+  body?: unknown,
+  apiLog: ApiLog = []
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; apiLog: ApiLog }> {
   // Get valid bearer token
   const bearerToken = await getNexhealthBearerToken();
   
@@ -177,6 +180,22 @@ export async function fetchNexhealthAPI(
     options.body = JSON.stringify(body);
   }
 
+  // Create log entry for this API call
+  const logEntry: ApiLogEntry = {
+    timestamp: new Date().toISOString(),
+    method,
+    url: url.toString(),
+    body: body || null,
+    headers: {
+      'Accept': 'application/vnd.Nexhealth+json;version=2',
+      'Authorization': '[REDACTED]', // Don't log the actual token
+      'Content-Type': 'application/json'
+    }
+  };
+
+  // Add to log before making the call
+  apiLog.push(logEntry);
+
   // Log the request details
   const loggableBody = body ? JSON.stringify(body) : 'None';
   console.log(`[NexHealth API] Requesting: ${method} ${url.toString()}`);
@@ -189,6 +208,14 @@ export async function fetchNexhealthAPI(
       const errorText = await response.text();
       console.error(`NexHealth API error (${response.status}):`, errorText);
       
+      // Add error response to log entry
+      logEntry.response = {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+        success: false
+      };
+      
       // If we get 401, the token might be invalid - clear cache and retry once
       if (response.status === 401) {
         console.log("Got 401, clearing token cache and retrying...");
@@ -197,7 +224,7 @@ export async function fetchNexhealthAPI(
         });
         
         // Retry with fresh token (recursive call - but only once due to cache clear)
-        return fetchNexhealthAPI(path, subdomain, params, method, body);
+        return fetchNexhealthAPI(path, subdomain, params, method, body, apiLog);
       }
       
       throw new Error(`NexHealth API error (${response.status}): ${errorText}`);
@@ -205,10 +232,28 @@ export async function fetchNexhealthAPI(
 
     const data = await response.json();
     console.log(`[NexHealth API] Response Status: ${response.status}`);
+    
+    // Add successful response to log entry
+    logEntry.response = {
+      status: response.status,
+      statusText: response.statusText,
+      body: data,
+      success: true
+    };
+    
     // console.log(`[NexHealth API] Response Body:`, JSON.stringify(data, null, 2)); // Optional: uncomment for deep debugging
-    return data;
+    return { data, apiLog };
   } catch (error) {
     console.error('NexHealth API error:', error);
+    
+    // Add error to log entry if not already added
+    if (!logEntry.response) {
+      logEntry.response = {
+        error: error instanceof Error ? error.message : String(error),
+        success: false
+      };
+    }
+    
     throw error;
   }
 }
@@ -216,7 +261,7 @@ export async function fetchNexhealthAPI(
 export async function getAppointmentTypes(subdomain: string, locationId: string): Promise<NexHealthAppointmentType[]> {
   if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
   
-  const data = await fetchNexhealthAPI(
+  const { data } = await fetchNexhealthAPI(
     '/appointment_types',
     subdomain,
     { location_id: locationId }
@@ -243,7 +288,7 @@ export async function getAppointmentTypes(subdomain: string, locationId: string)
 export async function getProviders(subdomain: string, locationId: string): Promise<NexHealthProvider[]> {
   if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
   
-  const data = await fetchNexhealthAPI(
+  const { data } = await fetchNexhealthAPI(
     '/providers',
     subdomain,
     { location_id: locationId, inactive: 'false', page: '1', per_page: '300' }
@@ -270,7 +315,7 @@ export async function getProviders(subdomain: string, locationId: string): Promi
 export async function getOperatories(subdomain: string, locationId: string): Promise<NexHealthOperatory[]> {
   if (!subdomain || !locationId) throw new Error("Subdomain and Location ID are required.");
   
-  const data = await fetchNexhealthAPI(
+  const { data } = await fetchNexhealthAPI(
     '/operatories',
     subdomain,
     { location_id: locationId, page: '1', per_page: '300' }
@@ -355,7 +400,7 @@ export async function createNexhealthAvailability(
     throw new Error("Subdomain and Location ID are required.");
   }
 
-  const data = await fetchNexhealthAPI(
+  const { data } = await fetchNexhealthAPI(
     '/availabilities',
     subdomain,
     { location_id: locationId },
@@ -390,7 +435,7 @@ export async function updateNexhealthAvailability(
     throw new Error("Subdomain and availability ID are required.");
   }
 
-  const data = await fetchNexhealthAPI(
+  const { data } = await fetchNexhealthAPI(
     `/availabilities/${nexhealthAvailabilityId}`,
     subdomain,
     {},
@@ -420,7 +465,7 @@ export async function deleteNexhealthAvailability(
   subdomain: string,
   nexhealthAvailabilityId: string
 ): Promise<void> {
-  const response = await fetchNexhealthAPI(
+  const { data } = await fetchNexhealthAPI(
     `/availabilities/${nexhealthAvailabilityId}`,
     subdomain,
     undefined,
@@ -428,7 +473,7 @@ export async function deleteNexhealthAvailability(
   );
   
   // For DELETE operations, expect a 204 or successful response with no data
-  console.log(`Deleted NexHealth availability ${nexhealthAvailabilityId}:`, response);
+  console.log(`Deleted NexHealth availability ${nexhealthAvailabilityId}:`, data);
 }
 
 // Appointment Type CRUD Functions
@@ -470,7 +515,7 @@ export async function createNexhealthAppointmentType(
     }
   };
 
-  const response = await fetchNexhealthAPI(
+  const { data: response } = await fetchNexhealthAPI(
     '/appointment_types',
     subdomain,
     undefined,
@@ -502,7 +547,7 @@ export async function updateNexhealthAppointmentType(
     }
   };
 
-  const response = await fetchNexhealthAPI(
+  const { data: response } = await fetchNexhealthAPI(
     `/appointment_types/${nexhealthAppointmentTypeId}`,
     subdomain,
     undefined,
@@ -521,7 +566,7 @@ export async function deleteNexhealthAppointmentType(
 ): Promise<void> {
   const params = locationId ? { location_id: locationId } : undefined;
 
-  const response = await fetchNexhealthAPI(
+  const { data: response } = await fetchNexhealthAPI(
     `/appointment_types/${nexhealthAppointmentTypeId}`,
     subdomain,
     params,
@@ -571,7 +616,7 @@ export async function getNexhealthAvailableSlots(
     }
 
     // Call NexHealth API
-    const response = await fetchNexhealthAPI('/appointment_slots', subdomain, params);
+    const { data: response } = await fetchNexhealthAPI('/appointment_slots', subdomain, params);
     
     if (!response.data) {
       console.error('[NexHealth Slots] Invalid response structure:', response);
@@ -662,7 +707,13 @@ export async function syncPracticeAppointmentTypes(
   }
 } 
 
-export async function createPatient(patientData: CreatePatientArgs, subdomain: string, locationId: number, providerId: number): Promise<{ data: { user: { id: number } } }> {
+export async function createPatient(
+  patientData: CreatePatientArgs, 
+  subdomain: string, 
+  locationId: number, 
+  providerId: number,
+  apiLog: ApiLog = []
+): Promise<{ data: { user: { id: number } }; apiLog: ApiLog }> {
   const body = {
     provider: { provider_id: providerId },
     patient: {
@@ -676,11 +727,14 @@ export async function createPatient(patientData: CreatePatientArgs, subdomain: s
     }
   };
 
-  return await fetchNexhealthAPI(
+  const { data, apiLog: updatedApiLog } = await fetchNexhealthAPI(
     '/patients',
     subdomain,
     { location_id: locationId },
     'POST',
-    body
+    body,
+    apiLog
   );
+
+  return { data, apiLog: updatedApiLog };
 } 

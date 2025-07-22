@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
-import type { ConversationState, HandlerResult } from "@/types/vapi";
+import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
 
 interface FindAppointmentTypeArgs {
   patientRequest: string;
@@ -13,6 +13,9 @@ export async function handleFindAppointmentType(
   toolId: string
 ): Promise<HandlerResult> {
   const { patientRequest, patientStatus } = toolArguments;
+  
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
   
   console.log(`[FindAppointmentTypeHandler] Processing request: "${patientRequest}", patientStatus: "${patientStatus}"`);
   
@@ -87,6 +90,7 @@ export async function handleFindAppointmentType(
       return {
         toolResponse: {
           toolCallId: toolId,
+          result: { apiLog: apiLog },
           message: {
             type: "request-failed",
             role: "assistant",
@@ -129,7 +133,8 @@ export async function handleFindAppointmentType(
           spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
           duration: matchedAppointmentType.duration,
           isUrgent: isUrgent,
-          isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+          isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
+          apiLog: apiLog
         },
         message: { // The new high-fidelity message
           type: "request-complete",
@@ -145,6 +150,7 @@ export async function handleFindAppointmentType(
     return {
       toolResponse: {
         toolCallId: toolId,
+        result: { apiLog: apiLog },
         error: "Database error while fetching appointment types."
       },
       newState: currentState

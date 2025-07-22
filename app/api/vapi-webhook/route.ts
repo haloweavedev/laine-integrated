@@ -99,6 +99,7 @@ export async function POST(request: Request) {
           toolName: toolName,
           toolCallId: toolCall.id,
           arguments: JSON.stringify(toolArguments),
+          stateBefore: JSON.stringify(state),
           success: false, // Default to false, will be updated on success
           createdAt: new Date(startTime),
           updatedAt: new Date(startTime),
@@ -243,6 +244,7 @@ export async function POST(request: Request) {
             error: !isSuccess ? JSON.stringify(handlerResult.toolResponse) : undefined,
             success: isSuccess,
             executionTimeMs: executionTimeMs,
+            apiResponses: handlerResult.toolResponse?.result && typeof handlerResult.toolResponse.result === 'object' && 'apiLog' in handlerResult.toolResponse.result ? JSON.stringify(handlerResult.toolResponse.result.apiLog) : undefined,
             updatedAt: new Date(),
           }
         });

@@ -165,6 +165,8 @@ model ToolLog {
   success         Boolean
   error           String?
   executionTimeMs Int?
+  apiResponses    Json?    @db.Json
+  stateBefore     Json?    @db.Json
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   practice        Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)

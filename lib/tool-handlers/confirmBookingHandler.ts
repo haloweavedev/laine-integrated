@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { generateAppointmentNote } from "@/lib/ai/summaryHelper";
 import { DateTime } from "luxon";
-import type { ConversationState, HandlerResult } from "@/types/vapi";
+import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
 
 interface BookAppointmentArgs {
   userSelection: string;
@@ -14,6 +14,9 @@ export async function handleConfirmBooking(
   toolId: string
 ): Promise<HandlerResult> {
   const { userSelection } = toolArguments;
+  
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
   
   console.log(`[ConfirmBookingHandler] Processing final booking confirmation: "${userSelection}"`);
   
@@ -88,15 +91,16 @@ export async function handleConfirmBooking(
     });
     console.log(`[DB Log] Logged NexHealth request payload for tool call ${toolId}.`);
 
-    // Make the API call
+    // Make the API call with logging
     console.log(`[ConfirmBookingHandler] Calling NexHealth API to create appointment`);
     
-    const apiResponse = await fetchNexhealthAPI(
+    const { data: apiResponse, apiLog: updatedApiLog } = await fetchNexhealthAPI(
       '/appointments',
       practice.nexhealthSubdomain,
       { location_id: practice.nexhealthLocationId },
       'POST',
-      appointmentPayload
+      appointmentPayload,
+      apiLog
     );
 
     console.log(`[ConfirmBookingHandler] Successfully created appointment:`, apiResponse);
@@ -118,6 +122,7 @@ export async function handleConfirmBooking(
       newState: currentState,
       toolResponse: {
         toolCallId: toolId,
+        result: { apiLog: updatedApiLog },
         message: {
           type: "request-complete",
           role: "assistant",
@@ -135,6 +140,7 @@ export async function handleConfirmBooking(
       return {
         toolResponse: {
           toolCallId: toolId,
+          result: { apiLog: apiLog },
           message: {
             type: "request-failed",
             role: "assistant",
@@ -149,6 +155,7 @@ export async function handleConfirmBooking(
     return {
       toolResponse: {
         toolCallId: toolId,
+        result: { apiLog: apiLog },
         message: {
           type: "request-failed",
           role: "assistant",

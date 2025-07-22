@@ -1,4 +1,5 @@
 import { createPatient } from '@/lib/nexhealth';
+import type { ApiLog } from '@/types/vapi';
 
 interface CreatePatientToolArguments {
   firstName: string;
@@ -9,20 +10,24 @@ interface CreatePatientToolArguments {
 }
 
 export async function handleCreatePatientRecord(args: CreatePatientToolArguments, toolCallId: string) { // eslint-disable-line @typescript-eslint/no-unused-vars
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
+
   try {
-    // Call createPatient with hardcoded values from the webhook for now
-    const responseData = await createPatient(
+    // Call createPatient with the apiLog array
+    const { data: responseData, apiLog: updatedApiLog } = await createPatient(
       args,
       'xyz', // subdomain
       318534, // locationId  
-      377851148 // providerId
+      377851148, // providerId
+      apiLog
     );
 
     // Extract the patient ID from the successful response
-    const patientId = responseData.data.user.id;
+    const patientId = responseData.user.id;
 
     return {
-      result: { nexhealthPatientId: patientId },
+      result: { nexhealthPatientId: patientId, apiLog: updatedApiLog },
       message: {
         type: "request-complete",
         role: "assistant",
@@ -32,6 +37,7 @@ export async function handleCreatePatientRecord(args: CreatePatientToolArguments
   } catch (error) {
     console.error('Error creating patient record:', error);
     return {
+      result: { apiLog: apiLog }, // Return the API log even on error
       message: {
         type: "request-failed", 
         role: "assistant",

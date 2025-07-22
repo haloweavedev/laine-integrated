@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
-import type { ConversationState, HandlerResult } from "@/types/vapi";
+import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
 
 interface CheckAvailableSlotsArgs {
   preferredDaysOfWeek?: string;
@@ -15,6 +15,9 @@ export async function handleCheckAvailableSlots(
   toolId: string
 ): Promise<HandlerResult> {
   const { requestedDate, timeBucket, preferredDaysOfWeek } = toolArguments;
+  
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
   
   console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}", preferredDaysOfWeek: "${preferredDaysOfWeek}"`);
   
@@ -163,7 +166,8 @@ export async function handleCheckAvailableSlots(
           toolCallId: toolId,
           result: { // Structured data payload
             foundSlots: searchResult.foundSlots,
-            nextAvailableDate: searchResult.nextAvailableDate || null
+            nextAvailableDate: searchResult.nextAvailableDate || null,
+            apiLog: apiLog
           },
           message: { // High-fidelity message
             type: "request-complete",
@@ -224,7 +228,8 @@ export async function handleCheckAvailableSlots(
           toolCallId: toolId,
           result: { // Structured data payload
             foundSlots: filteredSlots, // Note: we return all filtered slots here
-            nextAvailableDate: searchResult.nextAvailableDate || null
+            nextAvailableDate: searchResult.nextAvailableDate || null,
+            apiLog: apiLog
           },
           message: { // High-fidelity message
             type: "request-complete",
@@ -240,6 +245,7 @@ export async function handleCheckAvailableSlots(
     return {
       toolResponse: {
         toolCallId: toolId,
+        result: { apiLog: apiLog },
         error: "Error checking available appointment slots."
       },
       newState: currentState

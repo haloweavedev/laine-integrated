@@ -235,3 +235,20 @@ export interface VapiWebhookPayload {
   message: VapiWebhookMessage;
   // Potentially other top-level fields from VAPI if any
 } 
+
+export interface ApiLogEntry {
+  timestamp: string;
+  method: string;
+  url: string;
+  body: unknown;
+  headers: Record<string, string>;
+  response?: {
+    status?: number;
+    statusText?: string;
+    body?: unknown;
+    success: boolean;
+    error?: string;
+  };
+}
+
+export type ApiLog = ApiLogEntry[]; 
