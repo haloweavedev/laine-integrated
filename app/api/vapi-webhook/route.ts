@@ -180,29 +180,37 @@ export async function POST(request: Request) {
       }
     }
 
-    // After the switch statement
-    console.log('[VAPI Webhook] Handler result after processing:', JSON.stringify(handlerResult, null, 2));
-    state = handlerResult.newState;
+    if (!handlerResult) {
+      // This case should ideally not be reached if all tools are handled.
+      console.error(`[VAPI Webhook] No handler result for tool: ${toolName}`);
+      return NextResponse.json({ 
+        results: [{ toolCallId: toolCall.id, error: "Internal error: tool handler did not produce a result." }] 
+      }, { status: 200 });
+    }
 
-    // State persistence
+    console.log('[VAPI Webhook] Handler result after processing:', JSON.stringify(handlerResult, null, 2));
+    
+    // Use the exact newState object from the handler's result for all subsequent operations.
+    const newState = handlerResult.newState;
+
+    // Atomically save the new, complete state to the database.
     await prisma.callLog.update({
       where: { vapiCallId: callId },
-      data: { conversationState: state as unknown as Prisma.InputJsonValue }
+      data: { conversationState: newState as unknown as Prisma.InputJsonValue }
     });
     console.log(`[State Management] Persisted state for call: ${callId}`);
 
-    // Render the system prompt with current state
+    // Render the system prompt using the guaranteed fresh state.
     try {
       const liquid = new Liquid();
       const promptPath = join(process.cwd(), 'lib/system-prompt/laine_system_prompt.md');
       const promptTemplate = readFileSync(promptPath, 'utf-8');
       
-      const renderedSystemPrompt = await liquid.parseAndRender(promptTemplate, state);
+      const renderedSystemPrompt = await liquid.parseAndRender(promptTemplate, newState);
       
-      console.log(`[State Injection] Successfully rendered system prompt with current state`);
+      console.log(`[State Injection] Successfully rendered system prompt with fresh state`);
 
-      // Construct and return the final response for VAPI with injected state
-      console.log(`[VAPI Webhook] Final response:`, handlerResult.toolResponse);
+      // Construct and return the final response for VAPI
       return NextResponse.json({ 
         results: [handlerResult.toolResponse],
         systemPrompt: renderedSystemPrompt
@@ -211,7 +219,6 @@ export async function POST(request: Request) {
       console.error('[State Injection] Error rendering system prompt:', promptError);
       
       // Fallback to original response without state injection
-      console.log(`[VAPI Webhook] Final response (fallback):`, handlerResult.toolResponse);
       return NextResponse.json({ results: [handlerResult.toolResponse] });
     }
 
