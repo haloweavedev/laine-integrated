@@ -1,5 +1,5 @@
 import { createPatient } from '@/lib/nexhealth';
-import type { ApiLog } from '@/types/vapi';
+import type { ApiLog, ConversationState, HandlerResult } from '@/types/vapi';
 
 interface CreatePatientToolArguments {
   firstName: string;
@@ -9,7 +9,11 @@ interface CreatePatientToolArguments {
   email: string;
 }
 
-export async function handleCreatePatientRecord(args: CreatePatientToolArguments, toolCallId: string) { // eslint-disable-line @typescript-eslint/no-unused-vars
+export async function handleCreatePatientRecord(
+  currentState: ConversationState,
+  args: CreatePatientToolArguments, 
+  toolCallId: string
+): Promise<HandlerResult> {
   // Initialize API log array to capture all external calls
   const apiLog: ApiLog = [];
 
@@ -28,23 +32,35 @@ export async function handleCreatePatientRecord(args: CreatePatientToolArguments
 
     console.log(`[Patient Creation] SUCCESS: Patient "${args.firstName} ${args.lastName}" created successfully in NexHealth with ID: ${patientId}`);
 
+    // Create new state with the patient ID
+    const newState = { ...currentState };
+    newState.patientDetails.nexhealthPatientId = patientId;
+
     return {
-      result: { nexhealthPatientId: patientId, apiLog: updatedApiLog },
-      message: {
-        type: "request-complete",
-        role: "assistant",
-        content: `Thank you! I've successfully created a record for ${args.firstName} ${args.lastName}. What can I help you with next?`
-      }
+      toolResponse: {
+        toolCallId,
+        result: { success: true, nexhealthPatientId: patientId, apiLog: updatedApiLog },
+        message: {
+          type: "request-complete",
+          role: "assistant",
+          content: `Thank you! I've successfully created a record for ${args.firstName} ${args.lastName}. What can I help you with next?`
+        }
+      },
+      newState
     };
   } catch (error) {
     console.error('Error creating patient record:', error);
     return {
-      result: { apiLog: apiLog }, // Return the API log even on error
-      message: {
-        type: "request-failed", 
-        role: "assistant",
-        content: "I'm sorry, I ran into a technical problem while saving your information. Could we please try again in a moment?"
-      }
+      toolResponse: {
+        toolCallId,
+        result: { success: false, apiLog: apiLog }, // Return the API log even on error
+        message: {
+          type: "request-failed", 
+          role: "assistant",
+          content: "I'm sorry, I ran into a technical problem while saving your information. Could we please try again in a moment?"
+        }
+      },
+      newState: currentState // Return original state on error
     };
   }
 } 

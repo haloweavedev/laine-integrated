@@ -14,10 +14,8 @@ export async function handleSlotSelectionHandler(
 ): Promise<HandlerResult> {
   console.log('[HandleSlotSelectionHandler] Processing user selection:', toolArguments.userSelection);
   
-  // Get the presented slots from current state
-  const presentedSlots = currentState.appointmentBooking?.presentedSlots || [];
-  
-  if (presentedSlots.length === 0) {
+  // Check if presentedSlots exists and is not empty
+  if (!currentState.appointmentBooking?.presentedSlots || currentState.appointmentBooking.presentedSlots.length === 0) {
     console.log('[HandleSlotSelectionHandler] ERROR: No presented slots available');
     return {
       toolResponse: {
@@ -27,6 +25,9 @@ export async function handleSlotSelectionHandler(
       newState: currentState
     };
   }
+
+  // Get the presented slots from current state
+  const presentedSlots = currentState.appointmentBooking.presentedSlots;
 
   console.log('[HandleSlotSelectionHandler] Matching selection against', presentedSlots.length, 'slots');
   
@@ -64,7 +65,7 @@ export async function handleSlotSelectionHandler(
   return {
     toolResponse: {
       toolCallId,
-      result: { selectedSlot: matchedSlot },
+      result: { success: true },
       message: {
         type: 'assistant-message',
         role: 'assistant',

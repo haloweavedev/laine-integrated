@@ -1,51 +1,41 @@
 import { prisma } from "@/lib/prisma";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { generateAppointmentNote } from "@/lib/ai/summaryHelper";
-import { matchUserSelectionToSlot } from '@/lib/ai/slotMatcher';
 import { DateTime } from "luxon";
 import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
 
-interface BookAppointmentArgs {
-  userSelection: string;
-}
-
 export async function handleConfirmBooking(
   currentState: ConversationState,
-  toolArguments: BookAppointmentArgs,
   toolId: string
 ): Promise<HandlerResult> {
-  const { userSelection } = toolArguments;
-  
-  console.log(`[ConfirmBookingHandler] Attempting to book with user selection: "${userSelection}" and presented slots from state:`, currentState.appointmentBooking.presentedSlots);
+  console.log(`[ConfirmBookingHandler] Attempting to book appointment with current state`);
   
   // Initialize API log array to capture all external calls
   const apiLog: ApiLog = [];
   
-  console.log(`[ConfirmBookingHandler] Processing final booking confirmation: "${userSelection}"`);
-  
   try {
-    let selectedSlot = currentState.appointmentBooking.selectedSlot;
-
-    // NEW SAFEGUARD: If no slot is pre-selected in the state,
-    // try to match it now using the user's utterance.
-    if (!selectedSlot) {
-      console.log('[ConfirmBookingHandler] No pre-selected slot found in state. Attempting to match now...');
-      const practice = await prisma.practice.findUnique({ where: { id: currentState.practiceId } });
-      const practiceTimezone = practice?.timezone || 'America/Chicago';
-
-      const matchedSlot = await matchUserSelectionToSlot(
-        toolArguments.userSelection,
-        currentState.appointmentBooking.presentedSlots || [],
-        practiceTimezone
-      );
-
-      // If a match is found, update the state for this transaction
-      if (matchedSlot) {
-        selectedSlot = matchedSlot;
-        currentState.appointmentBooking.selectedSlot = matchedSlot;
-        console.log(`[ConfirmBookingHandler] Matched and selected slot: ${matchedSlot.time}`);
-      }
+    // Validate required state before proceeding
+    if (!currentState.patientDetails.nexhealthPatientId) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Patient record must be created before booking an appointment."
+        },
+        newState: currentState
+      };
     }
+
+    if (!currentState.appointmentBooking.selectedSlot) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "No time slot has been selected. Please choose a time slot first."
+        },
+        newState: currentState
+      };
+    }
+
+    const selectedSlot = currentState.appointmentBooking.selectedSlot;
 
     // Get practice details
     const practice = await prisma.practice.findUnique({
@@ -68,17 +58,6 @@ export async function handleConfirmBooking(
     }
 
     const practiceTimezone = practice.timezone || 'America/Chicago';
-
-    // Ensure we have a selected slot
-    if (!selectedSlot) {
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          error: "No slot selected for booking."
-        },
-        newState: currentState
-      };
-    }
 
     console.log(`[ConfirmBookingHandler] Proceeding with booking for slot: ${selectedSlot.time}`);
 
@@ -147,7 +126,7 @@ export async function handleConfirmBooking(
       newState: currentState,
       toolResponse: {
         toolCallId: toolId,
-        result: { apiLog: updatedApiLog },
+        result: { success: true, nexhealthResponse: apiResponse, apiLog: updatedApiLog },
         message: {
           type: "request-complete",
           role: "assistant",
@@ -165,7 +144,7 @@ export async function handleConfirmBooking(
       return {
         toolResponse: {
           toolCallId: toolId,
-          result: { apiLog: apiLog },
+          result: { success: false, apiLog: apiLog },
           message: {
             type: "request-failed",
             role: "assistant",
@@ -180,7 +159,7 @@ export async function handleConfirmBooking(
     return {
       toolResponse: {
         toolCallId: toolId,
-        result: { apiLog: apiLog },
+        result: { success: false, apiLog: apiLog },
         message: {
           type: "request-failed",
           role: "assistant",

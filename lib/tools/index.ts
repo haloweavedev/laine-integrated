@@ -1,8 +1,21 @@
 import type { VapiTool } from '@/types/vapi';
 import { getFindAppointmentTypeTool } from './definitions/findAppointmentTypeTool';
+import { getCreatePatientRecordTool } from './definitions/createPatientRecordTool';
 import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
+import { getHandleSlotSelectionTool } from './definitions/handleSlotSelectionTool';
 import { getConfirmBookingTool } from './definitions/confirmBookingTool';
-// import { getAnotherTool } from './definitions/anotherTool'; // Future tool
+
+/**
+ * Central map of all tool definitions
+ * Keys are tool names, values are tool-getter functions
+ */
+export const toolDefinitionMap = {
+  findAppointmentType: getFindAppointmentTypeTool,
+  create_patient_record: getCreatePatientRecordTool,
+  checkAvailableSlots: getCheckAvailableSlotsTool,
+  handleSlotSelection: getHandleSlotSelectionTool,
+  confirmBooking: getConfirmBookingTool,
+};
 
 /**
  * Aggregate all individual tool definitions for use when updating the VAPI assistant
@@ -10,17 +23,6 @@ import { getConfirmBookingTool } from './definitions/confirmBookingTool';
  * @returns Array of all available VAPI tool definitions
  */
 export function getAllTools(appBaseUrl: string): VapiTool[] {
-  const tools: VapiTool[] = [
-    getFindAppointmentTypeTool(appBaseUrl),
-    getCheckAvailableSlotsTool(appBaseUrl),
-    getConfirmBookingTool(appBaseUrl),
-    // getAnotherTool(appBaseUrl), // Future tool
-  ];
+  const tools: VapiTool[] = Object.values(toolDefinitionMap).map(getToolFn => getToolFn(appBaseUrl));
   return tools;
-}
-
-// Legacy function name for backward compatibility - will be removed in future
-export function buildVapiTools(appBaseUrl: string): VapiTool[] {
-  console.warn('[DEPRECATION] buildVapiTools is deprecated, use getAllTools instead');
-  return getAllTools(appBaseUrl);
 } 

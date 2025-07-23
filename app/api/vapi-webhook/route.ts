@@ -12,7 +12,6 @@ import type {
   ServerMessageToolCallsPayload, 
   ConversationState,
   HandlerResult,
-  CheckSlotsResultData,
   ServerMessageToolCallItem
 } from '@/types/vapi';
 import { Prisma } from '@prisma/client';
@@ -124,30 +123,6 @@ export async function POST(request: Request) {
           toolArguments as { patientRequest: string; patientStatus?: string },
           toolCall.id
         );
-
-        // NEW LOGIC: Update state from the structured result
-        const resultData = handlerResult.toolResponse.result;
-        if (resultData && typeof resultData === 'object' && !Array.isArray(resultData)) {
-          const appointmentData = resultData as {
-            appointmentTypeId?: string;
-            appointmentTypeName?: string;
-            spokenName?: string;
-            duration?: number;
-            isUrgent?: boolean;
-            isImmediateBooking?: boolean;
-          };
-          
-          handlerResult.newState.appointmentBooking = {
-            ...handlerResult.newState.appointmentBooking,
-            typeId: appointmentData.appointmentTypeId,
-            typeName: appointmentData.appointmentTypeName,
-            spokenName: appointmentData.spokenName,
-            duration: appointmentData.duration,
-            patientRequest: (toolArguments as { patientRequest: string }).patientRequest,
-            isUrgent: appointmentData.isUrgent,
-            isImmediateBooking: appointmentData.isImmediateBooking
-          };
-        }
         break;
       }
 
@@ -157,53 +132,29 @@ export async function POST(request: Request) {
           toolArguments as { preferredDaysOfWeek?: string; timeBucket?: string; requestedDate?: string },
           toolCall.id
         );
-
-        // NEW LOGIC: Update state from the structured result
-        const resultData = handlerResult.toolResponse.result as CheckSlotsResultData | undefined;
-        if (resultData) {
-          handlerResult.newState.appointmentBooking = {
-            ...handlerResult.newState.appointmentBooking,
-            presentedSlots: resultData.foundSlots,
-            nextAvailableDate: resultData.nextAvailableDate
-          };
-        }
         break;
       }
 
       case "confirmBooking": {
         handlerResult = await handleConfirmBooking(
           state,
-          toolArguments as { userSelection: string },
           toolCall.id
         );
         break;
       }
 
       case "create_patient_record": {
-        const createPatientArgs = toolArguments as {
-          firstName: string;
-          lastName: string;
-          dateOfBirth: string;
-          phoneNumber: string;
-          email: string;
-        };
-        const response = await handleCreatePatientRecord(createPatientArgs, toolCall.id);
-        
-        // Adapt the response to the HandlerResult structure
-        handlerResult = {
-          toolResponse: {
-            toolCallId: toolCall.id,
-            result: response.result ? { nexhealthPatientId: response.result.nexhealthPatientId } : undefined,
-            message: response.message,
-            error: response.message?.type === "request-failed" ? response.message.content : undefined
+        handlerResult = await handleCreatePatientRecord(
+          state,
+          toolArguments as {
+            firstName: string;
+            lastName: string;
+            dateOfBirth: string;
+            phoneNumber: string;
+            email: string;
           },
-          newState: { ...state } // Create a copy of the current state
-        };
-
-        // Update the state based on the result
-        if (response.result?.nexhealthPatientId) {
-          handlerResult.newState.patientDetails.nexhealthPatientId = response.result.nexhealthPatientId;
-        }
+          toolCall.id
+        );
         break;
       }
 

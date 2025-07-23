@@ -5,16 +5,11 @@ export function getConfirmBookingTool(appBaseUrl: string): VapiTool {
     type: "function",
     function: {
       name: "confirmBooking",
-      description: "Books the appointment. Call this **only** after the user has verbally agreed to a *specific time slot* (e.g., 'Yes, 9 AM works'). This is the final action to secure the appointment.",
+      description: "Confirms and books the appointment using the patient details and the time slot already saved in the conversation. Call this only after a specific time has been selected and confirmed by the user. This is the final step.",
       parameters: {
         type: "object" as const,
-        properties: {
-          userSelection: {
-            type: "string" as const,
-            description: "The user's verbatim selection of the time slot they want. For example, 'the 2 PM one', 'tomorrow at 7:40 AM', or 'yes, that first one works'."
-          }
-        },
-        required: ["userSelection"]
+        properties: {},
+        required: []
       }
     },
     server: {

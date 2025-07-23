@@ -160,8 +160,16 @@ export async function handleCheckAvailableSlots(
         practice.timezone || 'America/Chicago'
       );
 
+      // Create new state with slots data
+      const newState = { ...currentState };
+      newState.appointmentBooking = {
+        ...newState.appointmentBooking,
+        presentedSlots: searchResult.foundSlots,
+        nextAvailableDate: searchResult.nextAvailableDate || null
+      };
+
       return {
-        newState: currentState, // Return the original, unmodified state
+        newState: newState,
         toolResponse: {
           toolCallId: toolId,
           result: { // Structured data payload
@@ -222,8 +230,16 @@ export async function handleCheckAvailableSlots(
 
       console.log(`[CheckAvailableSlotsHandler] Successfully presented ${availableBuckets.length} time bucket options for ${filteredSlots.length} total slots`);
 
+      // Create new state with slots data
+      const newState = { ...currentState };
+      newState.appointmentBooking = {
+        ...newState.appointmentBooking,
+        presentedSlots: filteredSlots,
+        nextAvailableDate: searchResult.nextAvailableDate || null
+      };
+
       return {
-        newState: currentState, // Return the original, unmodified state
+        newState: newState,
         toolResponse: {
           toolCallId: toolId,
           result: { // Structured data payload

@@ -124,6 +124,19 @@ export async function handleFindAppointmentType(
 
     console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
 
+    // Create new state with appointment booking details
+    const newState = { ...currentState };
+    newState.appointmentBooking = {
+      ...newState.appointmentBooking,
+      typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+      typeName: matchedAppointmentType.name,
+      spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+      duration: matchedAppointmentType.duration,
+      patientRequest: patientRequest,
+      isUrgent: isUrgent,
+      isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+    };
+
     return {
       toolResponse: {
         toolCallId: toolId,
@@ -142,7 +155,7 @@ export async function handleFindAppointmentType(
           content: `Okay, I've noted you're looking for a ${matchedAppointmentType.spokenName || matchedAppointmentType.name}.`
         }
       },
-      newState: currentState // We will update the state in the webhook, not here.
+      newState: newState
     };
 
   } catch (error) {
