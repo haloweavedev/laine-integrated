@@ -299,8 +299,10 @@ interface ProviderSlotData {
 
 // Interface for NexHealth API response
 interface NexHealthSlotsResponse {
-  data: ProviderSlotData[];
-  next_available_date?: string;
+  data: {
+    data: ProviderSlotData[];
+    next_available_date?: string;
+  };
 }
 
 /**
@@ -385,28 +387,23 @@ export async function findAvailableSlots(
       // Add operatory IDs as array parameters  
       params['operatory_ids[]'] = operatoryIds;
 
-      // --- BEGIN: New logging block ---
+      // --- BEGIN: New Verification Log ---
       try {
-        // Use URLSearchParams for robust and correct URL encoding
         const queryParams = new URLSearchParams();
         for (const key in params) {
           const value = params[key];
           if (Array.isArray(value)) {
             value.forEach(item => queryParams.append(key, item));
           } else {
-            queryParams.append(key, value);
+            queryParams.append(key, String(value));
           }
         }
-        
-        // Construct the full URL for logging purposes
-        const fullRequestUrl = `https://api.nexhealth.com/v2/appointment_slots?subdomain=${practice.nexhealthSubdomain}&${queryParams.toString()}`;
-        
-        console.log(`[NexHealth API Request] GET ${fullRequestUrl}`);
-
+        const fullRequestUrl = `https://nexhealth.info/appointment_slots?subdomain=${practice.nexhealthSubdomain}&${queryParams.toString()}`;
+        console.log(`[NexHealth Request Verification] Constructed URL: ${fullRequestUrl}`);
       } catch (logError) {
-        console.error("[NexHealth API Request] Error constructing log URL:", logError);
+        console.error("[NexHealth Request Verification] Error constructing verification URL:", logError);
       }
-      // --- END: New logging block ---
+      // --- END: New Verification Log ---
 
       // Call NexHealth API
       const response = await fetchNexhealthAPI(
@@ -418,9 +415,12 @@ export async function findAvailableSlots(
       console.log(`[Slot Search] API response for ${searchDate}:`, JSON.stringify(response, null, 2));
 
       // Process the response data
-      if (response.data && Array.isArray(response.data)) {
+      const responseData = response.data; // The object from fetchNexhealthAPI
+      const nexhealthData = responseData.data; // The actual payload from NexHealth
+
+      if (nexhealthData && Array.isArray(nexhealthData)) {
         // Collect all slots from all providers for this date
-        const daySlots = response.data.flatMap((providerData: ProviderSlotData) => {
+        const daySlots = nexhealthData.flatMap((providerData: ProviderSlotData) => {
           if (providerData.slots && Array.isArray(providerData.slots)) {
             return providerData.slots.map((slot) => ({
               ...slot,
@@ -522,8 +522,9 @@ export async function findAvailableSlots(
       }
 
       // Store next_available_date from the last API response if present
-      if (response.next_available_date) {
-        nextAvailableDate = response.next_available_date;
+      // Correctly parse the next_available_date from the top-level of the NexHealth payload
+      if (responseData && responseData.next_available_date) {
+        nextAvailableDate = responseData.next_available_date;
         console.log(`[Slot Search] Found next_available_date: ${nextAvailableDate}`);
       }
 

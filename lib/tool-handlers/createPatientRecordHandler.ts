@@ -26,6 +26,8 @@ export async function handleCreatePatientRecord(args: CreatePatientToolArguments
     // Extract the patient ID from the successful response
     const patientId = responseData.user.id;
 
+    console.log(`[Patient Creation] SUCCESS: Patient "${args.firstName} ${args.lastName}" created successfully in NexHealth with ID: ${patientId}`);
+
     return {
       result: { nexhealthPatientId: patientId, apiLog: updatedApiLog },
       message: {
