@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { fetchNexhealthAPI } from "@/lib/nexhealth";
 import { generateAppointmentNote } from "@/lib/ai/summaryHelper";
+import { matchUserSelectionToSlot } from '@/lib/ai/slotMatcher';
 import { DateTime } from "luxon";
 import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
 
@@ -21,6 +22,29 @@ export async function handleConfirmBooking(
   console.log(`[ConfirmBookingHandler] Processing final booking confirmation: "${userSelection}"`);
   
   try {
+    let selectedSlot = currentState.appointmentBooking.selectedSlot;
+
+    // NEW SAFEGUARD: If no slot is pre-selected in the state,
+    // try to match it now using the user's utterance.
+    if (!selectedSlot) {
+      console.log('[ConfirmBookingHandler] No pre-selected slot found in state. Attempting to match now...');
+      const practice = await prisma.practice.findUnique({ where: { id: currentState.practiceId } });
+      const practiceTimezone = practice?.timezone || 'America/Chicago';
+
+      const matchedSlot = await matchUserSelectionToSlot(
+        toolArguments.userSelection,
+        currentState.appointmentBooking.presentedSlots || [],
+        practiceTimezone
+      );
+
+      // If a match is found, update the state for this transaction
+      if (matchedSlot) {
+        selectedSlot = matchedSlot;
+        currentState.appointmentBooking.selectedSlot = matchedSlot;
+        console.log(`[ConfirmBookingHandler] Matched and selected slot: ${matchedSlot.time}`);
+      }
+    }
+
     // Get practice details
     const practice = await prisma.practice.findUnique({
       where: { id: currentState.practiceId },
@@ -44,7 +68,7 @@ export async function handleConfirmBooking(
     const practiceTimezone = practice.timezone || 'America/Chicago';
 
     // Ensure we have a selected slot
-    if (!currentState.appointmentBooking.selectedSlot) {
+    if (!selectedSlot) {
       return {
         toolResponse: {
           toolCallId: toolId,
@@ -54,7 +78,6 @@ export async function handleConfirmBooking(
       };
     }
 
-    const selectedSlot = currentState.appointmentBooking.selectedSlot;
     console.log(`[ConfirmBookingHandler] Proceeding with booking for slot: ${selectedSlot.time}`);
 
     // Generate appointment note
