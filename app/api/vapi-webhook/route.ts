@@ -4,6 +4,10 @@ import { handleCreatePatientRecord } from '@/lib/tool-handlers/createPatientReco
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
+import { handleUpdateSelectedSlot } from '@/lib/tool-handlers/updateSelectedSlotHandler';
+import { Liquid } from 'liquidjs';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import type { 
   ServerMessageToolCallsPayload, 
   ConversationState,
@@ -203,6 +207,15 @@ export async function POST(request: Request) {
         break;
       }
 
+      case "updateSelectedSlot": {
+        handlerResult = await handleUpdateSelectedSlot(
+          state,
+          toolArguments as { userSelection: string },
+          toolCall.id
+        );
+        break;
+      }
+
       default: {
         console.error(`[VAPI Webhook] Unknown tool: ${toolName}`);
         handlerResult = {
@@ -227,9 +240,29 @@ export async function POST(request: Request) {
     });
     console.log(`[State Management] Persisted state for call: ${callId}`);
 
-    // Construct and return the final response for VAPI
-    console.log(`[VAPI Webhook] Final response:`, handlerResult.toolResponse);
-    return NextResponse.json({ results: [handlerResult.toolResponse] });
+    // Render the system prompt with current state
+    try {
+      const liquid = new Liquid();
+      const promptPath = join(process.cwd(), 'lib/system-prompt/laine_system_prompt.md');
+      const promptTemplate = readFileSync(promptPath, 'utf-8');
+      
+      const renderedSystemPrompt = await liquid.parseAndRender(promptTemplate, state);
+      
+      console.log(`[State Injection] Successfully rendered system prompt with current state`);
+
+      // Construct and return the final response for VAPI with injected state
+      console.log(`[VAPI Webhook] Final response:`, handlerResult.toolResponse);
+      return NextResponse.json({ 
+        results: [handlerResult.toolResponse],
+        systemPrompt: renderedSystemPrompt
+      });
+    } catch (promptError) {
+      console.error('[State Injection] Error rendering system prompt:', promptError);
+      
+      // Fallback to original response without state injection
+      console.log(`[VAPI Webhook] Final response (fallback):`, handlerResult.toolResponse);
+      return NextResponse.json({ results: [handlerResult.toolResponse] });
+    }
 
   } catch (error) {
     console.error('Error in VAPI webhook:', error);
