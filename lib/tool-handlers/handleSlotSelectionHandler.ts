@@ -75,16 +75,11 @@ export async function handleSlotSelectionHandler(
     }
   });
 
-  // Return a confirmation message
+  // Return a silent confirmation
   return {
     toolResponse: {
       toolCallId,
-      result: { success: true },
-      message: {
-        type: 'assistant-message',
-        role: 'assistant',
-        content: `Okay, I've selected ${matchedSlot.time} for you.`
-      }
+      result: { success: true }
     },
     newState
   };

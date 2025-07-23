@@ -19,7 +19,7 @@ export async function handleConfirmBooking(
       return {
         toolResponse: {
           toolCallId: toolId,
-          error: "Patient record must be created before booking an appointment."
+          error: "Error: A patient record has not been created or found. I must use the create_patient_record tool before booking."
         },
         newState: currentState
       };
@@ -29,7 +29,7 @@ export async function handleConfirmBooking(
       return {
         toolResponse: {
           toolCallId: toolId,
-          error: "No time slot has been selected. Please choose a time slot first."
+          error: "Error: A time slot has not been selected. I must use the handleSlotSelection tool before confirming a booking."
         },
         newState: currentState
       };
