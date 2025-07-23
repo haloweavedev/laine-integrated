@@ -22,25 +22,26 @@ export async function handleCheckAvailableSlots(
   console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}", preferredDaysOfWeek: "${preferredDaysOfWeek}"`);
   
   try {
-    if (!currentState.practiceId) {
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          error: "Practice configuration not found."
-        },
-        newState: currentState
-      };
-    }
+    try {
+      if (!currentState.practiceId) {
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: "Practice configuration not found."
+          },
+          newState: currentState
+        };
+      }
 
-    if (!currentState.appointmentBooking.typeId) {
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          error: "Error: I must know the reason for the visit before checking for appointments. I need to use the findAppointmentType tool first."
-        },
-        newState: currentState
-      };
-    }
+      if (!currentState.appointmentBooking.typeId) {
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: "Error: I must know the reason for the visit before checking for appointments. I need to use the findAppointmentType tool first."
+          },
+          newState: currentState
+        };
+      }
 
     // Fetch practice details
     const practice = await prisma.practice.findUnique({
@@ -256,8 +257,31 @@ export async function handleCheckAvailableSlots(
       };
     }
 
+    } catch (error) {
+      console.error(`[CheckAvailableSlotsHandler] Error during slot search:`, error);
+      if (error instanceof Error && error.message.includes("Configuration Error")) {
+        // This is a configuration problem, not a lack of availability.
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: `There's a configuration issue with the '${currentState.appointmentBooking.spokenName}' appointment type. I cannot check for slots. Please inform the user that a staff member will call them back to schedule this specific appointment type.`
+          },
+          newState: currentState
+        };
+      }
+      // Generic fallback error for other issues
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { apiLog: apiLog },
+          error: "I encountered a system error while checking for available appointments."
+        },
+        newState: currentState
+      };
+    }
+
   } catch (error) {
-    console.error(`[CheckAvailableSlotsHandler] Error checking available slots:`, error);
+    console.error(`[CheckAvailableSlotsHandler] Outer error catching available slots:`, error);
     return {
       toolResponse: {
         toolCallId: toolId,

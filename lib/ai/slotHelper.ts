@@ -190,71 +190,76 @@ export async function getSlotSearchParams(
   practiceId: string
 ): Promise<{ duration: number; providerIds: string[]; operatoryIds: string[] }> {
   const { prisma } = await import("@/lib/prisma");
-  
-  // Fetch the AppointmentType to get its duration
+
+  // 1. Fetch the AppointmentType and include all related active providers and their operatories
   const appointmentType = await prisma.appointmentType.findFirst({
     where: {
       nexhealthAppointmentTypeId: appointmentTypeId,
-      practiceId: practiceId
+      practiceId: practiceId,
     },
-    select: {
-      duration: true
-    }
+    include: {
+      acceptedByProviders: { // This is the join table
+        where: {
+          savedProvider: {
+            isActive: true, // Filter for active providers
+          },
+        },
+        include: {
+          savedProvider: {
+            include: {
+              provider: true, // Get the provider details (for the ID)
+              assignedOperatories: { // Get the assigned operatories for this provider
+                where: {
+                  savedOperatory: {
+                    isActive: true, // Filter for active operatories
+                  },
+                },
+                include: {
+                  savedOperatory: true, // Get the operatory details (for the ID)
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
 
   if (!appointmentType) {
-    throw new Error(`Appointment type with ID ${appointmentTypeId} not found for practice ${practiceId}`);
+    throw new Error(`Configuration Error: Appointment type with ID ${appointmentTypeId} not found for practice ${practiceId}.`);
   }
 
-  // Fetch all active SavedProviders that accept this appointment type
-  const savedProviders = await prisma.savedProvider.findMany({
-    where: {
-      practiceId: practiceId,
-      isActive: true,
-      acceptedAppointmentTypes: {
-        some: {
-          appointmentType: {
-            nexhealthAppointmentTypeId: appointmentTypeId
-          }
-        }
-      }
-    },
-    include: {
-      provider: true,
-      assignedOperatories: {
-        include: {
-          savedOperatory: true
-        }
-      }
-    }
-  });
-
-  if (savedProviders.length === 0) {
-    throw new Error("No active providers are configured for this appointment type.");
-  }
-
-  // Collect unique NexHealth provider IDs
-  const providerIds = Array.from(
-    new Set(savedProviders.map(sp => sp.provider.nexhealthProviderId))
+  const activeProviders = appointmentType.acceptedByProviders.map(
+    (p) => p.savedProvider
   );
 
-  // Collect unique NexHealth operatory IDs from provider assignments
+  if (activeProviders.length === 0) {
+    throw new Error(`Configuration Error: No active providers are configured to accept the appointment type ID ${appointmentTypeId}.`);
+  }
+
+  // 2. Collect unique NexHealth provider IDs from the results
+  const providerIds = Array.from(
+    new Set(activeProviders.map((sp) => sp.provider.nexhealthProviderId))
+  );
+
+  // 3. Collect unique NexHealth operatory IDs from all found providers
   const operatoryIds = Array.from(
     new Set(
-      savedProviders
-        .flatMap(sp => sp.assignedOperatories)
-        .map(assignment => assignment.savedOperatory.nexhealthOperatoryId)
+      activeProviders
+        .flatMap((sp) => sp.assignedOperatories)
+        .map((assignment) => assignment.savedOperatory.nexhealthOperatoryId)
     )
   );
 
   if (operatoryIds.length === 0) {
-    throw new Error("No active operatories are assigned to the providers for this appointment type.");
+    throw new Error(`Configuration Error: The active providers for appointment type ID ${appointmentTypeId} have no active operatories assigned.`);
   }
 
+  // 4. Return the collected data
   return {
     duration: appointmentType.duration,
     providerIds,
-    operatoryIds
+    operatoryIds,
   };
 }
 
