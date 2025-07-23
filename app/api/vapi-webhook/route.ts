@@ -110,6 +110,8 @@ export async function POST(request: Request) {
       console.error('[DB Log] Failed to create initial tool log:', logError);
     }
 
+    console.log('[VAPI Webhook] State before processing:', JSON.stringify(state, null, 2));
+
     // Tool routing switch statement  
     switch (toolName) {
       case "findAppointmentType": {
@@ -215,6 +217,7 @@ export async function POST(request: Request) {
     }
 
     // After the switch statement
+    console.log('[VAPI Webhook] Handler result after processing:', JSON.stringify(handlerResult, null, 2));
     state = handlerResult.newState;
 
     // State persistence
@@ -240,11 +243,11 @@ export async function POST(request: Request) {
         await prisma.toolLog.updateMany({
           where: { toolCallId: toolCall.id },
           data: {
-            result: handlerResult.toolResponse?.result ? JSON.stringify(handlerResult.toolResponse.result) : undefined,
-            error: !isSuccess ? JSON.stringify(handlerResult.toolResponse) : undefined,
+            result: handlerResult?.toolResponse?.result ? JSON.stringify(handlerResult.toolResponse.result, null, 2) : undefined,
+            error: !isSuccess ? JSON.stringify(handlerResult?.toolResponse, null, 2) : undefined,
             success: isSuccess,
             executionTimeMs: executionTimeMs,
-            apiResponses: handlerResult.toolResponse?.result && typeof handlerResult.toolResponse.result === 'object' && 'apiLog' in handlerResult.toolResponse.result ? JSON.stringify(handlerResult.toolResponse.result.apiLog) : undefined,
+            apiResponses: handlerResult?.toolResponse?.result && typeof handlerResult.toolResponse.result === 'object' && 'apiLog' in handlerResult.toolResponse.result ? JSON.stringify(handlerResult.toolResponse.result.apiLog, null, 2) : undefined,
             updatedAt: new Date(),
           }
         });

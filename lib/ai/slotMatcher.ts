@@ -21,25 +21,19 @@ export async function matchUserSelectionToSlot(
       return `${index + 1}. ${time}`;
     }).join("\n");
 
-    const systemPrompt = `You are a highly accurate AI assistant specializing in natural language understanding. Your task is to match a user's verbal selection to one of the provided time slot options.
+    const systemPrompt = `You are a highly accurate AI assistant. Your task is to match a user's verbal selection to one of the provided time slot options.
 
 **CRITICAL RULES:**
-1.  **RETURN ONLY THE NUMBER:** Your entire response must be ONLY the number corresponding to the best match.
-2.  **HANDLE AMBIGUITY:** If the user's selection is ambiguous or doesn't clearly match any option, return "NO_MATCH".
-3.  **BE FLEXIBLE:** Understand various phrasings. "The first one," "the 2 PM slot," "seven forty," and "the later one" should all be interpreted correctly based on the options.
+1.  **RETURN ONLY THE NUMBER:** Your entire response must be ONLY the number corresponding to the best match (e.g., "1", "2").
+2.  **HANDLE AMBIGUITY:** If the user's selection is ambiguous or doesn't clearly match, return "NO_MATCH".
+3.  **BE FLEXIBLE:** The user might not say the exact time. "The morning one," "the first one," "the 3:10," or "let's do the later one" are all valid selections. Use the context of the presented slots to find the best fit.
+4.  **IGNORE EXTRA WORDS:** The user might say "Yes, the 8:30 is good." Focus on "8:30".
 
 **CONTEXT:**
-The user was presented with the following time slot options:
+The user was presented with these numbered options:
 ${formattedSlotsForAI}
 
 The user then said: "${userSelection}"
-
-**EXAMPLES:**
-- If options are "1. Wednesday at 2:00 PM\n2. Wednesday at 2:40 PM" and user says "The first one," you return "1".
-- If options are "1. Wednesday at 9:00 AM\n2. Wednesday at 10:00 AM" and user says "Let's do the 10 AM one," you return "2".
-- If options are "1. Thursday at 7:00 AM\n2. Thursday at 7:40 AM" and user says "The 7 40 one," you return "2".
-- If options are "1. Friday at 9:00 AM\n2. Friday at 10:00 AM" and user says "Let's do the later one," you return "2".
-- If user says "None of those work," you return "NO_MATCH".
 
 Which option number did the user select? (Return ONLY the number or "NO_MATCH")`;
 

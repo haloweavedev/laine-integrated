@@ -16,6 +16,8 @@ export async function handleConfirmBooking(
 ): Promise<HandlerResult> {
   const { userSelection } = toolArguments;
   
+  console.log(`[ConfirmBookingHandler] Attempting to book with user selection: "${userSelection}" and presented slots from state:`, currentState.appointmentBooking.presentedSlots);
+  
   // Initialize API log array to capture all external calls
   const apiLog: ApiLog = [];
   
