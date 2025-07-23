@@ -4,7 +4,7 @@ import { handleCreatePatientRecord } from '@/lib/tool-handlers/createPatientReco
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
-import { handleUpdateSelectedSlot } from '@/lib/tool-handlers/updateSelectedSlotHandler';
+import { handleSlotSelectionHandler } from '@/lib/tool-handlers/handleSlotSelectionHandler';
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -207,8 +207,8 @@ export async function POST(request: Request) {
         break;
       }
 
-      case "updateSelectedSlot": {
-        handlerResult = await handleUpdateSelectedSlot(
+      case "handleSlotSelection": {
+        handlerResult = await handleSlotSelectionHandler(
           state,
           toolArguments as { userSelection: string },
           toolCall.id
