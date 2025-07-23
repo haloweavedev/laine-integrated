@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
 import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+import { mergeState } from '@/lib/utils/state-helpers';
 
 interface CheckAvailableSlotsArgs {
   preferredDaysOfWeek?: string;
@@ -162,12 +163,12 @@ export async function handleCheckAvailableSlots(
       );
 
       // Create new state with slots data
-      const newState = { ...currentState };
-      newState.appointmentBooking = {
-        ...newState.appointmentBooking,
-        presentedSlots: searchResult.foundSlots,
-        nextAvailableDate: searchResult.nextAvailableDate || null
-      };
+      const newState = mergeState(currentState, {
+        appointmentBooking: {
+          presentedSlots: searchResult.foundSlots,
+          nextAvailableDate: searchResult.nextAvailableDate || null
+        }
+      });
 
       return {
         newState: newState,
@@ -232,12 +233,12 @@ export async function handleCheckAvailableSlots(
       console.log(`[CheckAvailableSlotsHandler] Successfully presented ${availableBuckets.length} time bucket options for ${filteredSlots.length} total slots`);
 
       // Create new state with slots data
-      const newState = { ...currentState };
-      newState.appointmentBooking = {
-        ...newState.appointmentBooking,
-        presentedSlots: filteredSlots,
-        nextAvailableDate: searchResult.nextAvailableDate || null
-      };
+      const newState = mergeState(currentState, {
+        appointmentBooking: {
+          presentedSlots: filteredSlots,
+          nextAvailableDate: searchResult.nextAvailableDate || null
+        }
+      });
 
       return {
         newState: newState,

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
 import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+import { mergeState } from '@/lib/utils/state-helpers';
 
 interface FindAppointmentTypeArgs {
   patientRequest: string;
@@ -125,17 +126,17 @@ export async function handleFindAppointmentType(
     console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
 
     // Create new state with appointment booking details
-    const newState = { ...currentState };
-    newState.appointmentBooking = {
-      ...newState.appointmentBooking,
-      typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
-      typeName: matchedAppointmentType.name,
-      spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
-      duration: matchedAppointmentType.duration,
-      patientRequest: patientRequest,
-      isUrgent: isUrgent,
-      isImmediateBooking: matchedAppointmentType.check_immediate_next_available
-    };
+    const newState = mergeState(currentState, {
+      appointmentBooking: {
+        typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+        typeName: matchedAppointmentType.name,
+        spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+        duration: matchedAppointmentType.duration,
+        patientRequest: patientRequest,
+        isUrgent: isUrgent,
+        isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+      }
+    });
 
     return {
       toolResponse: {

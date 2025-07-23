@@ -1,6 +1,7 @@
 import { matchUserSelectionToSlot } from '../ai/slotMatcher';
 import { ConversationState } from '../../types/vapi';
 import { prisma } from '@/lib/prisma';
+import { mergeState } from '@/lib/utils/state-helpers';
 
 interface HandleSlotSelectionArgs {
   userSelection: string;
@@ -68,13 +69,11 @@ export async function handleSlotSelectionHandler(
   console.log('[HandleSlotSelectionHandler] Successfully matched slot:', matchedSlot);
 
   // Update the state with the selected slot
-  const newState: ConversationState = {
-    ...currentState,
+  const newState = mergeState(currentState, {
     appointmentBooking: {
-      ...currentState.appointmentBooking,
       selectedSlot: matchedSlot
     }
-  };
+  });
 
   // Return a confirmation message
   return {
