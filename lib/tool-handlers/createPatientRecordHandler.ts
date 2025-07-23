@@ -1,5 +1,6 @@
 import { createPatient } from '@/lib/nexhealth';
 import type { ApiLog, ConversationState, HandlerResult } from '@/types/vapi';
+import { mergeState } from '@/lib/utils/state-helpers';
 
 interface CreatePatientToolArguments {
   firstName: string;
@@ -33,8 +34,11 @@ export async function handleCreatePatientRecord(
     console.log(`[Patient Creation] SUCCESS: Patient "${args.firstName} ${args.lastName}" created successfully in NexHealth with ID: ${patientId}`);
 
     // Create new state with the patient ID
-    const newState = { ...currentState };
-    newState.patientDetails.nexhealthPatientId = patientId;
+    const newState = mergeState(currentState, {
+      patientDetails: {
+        nexhealthPatientId: patientId
+      }
+    });
 
     return {
       toolResponse: {
