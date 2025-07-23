@@ -36,7 +36,7 @@ export async function handleCheckAvailableSlots(
       return {
         toolResponse: {
           toolCallId: toolId,
-          error: "No appointment type identified yet. Please identify an appointment type first."
+          error: "Error: I must know the reason for the visit before checking for appointments. I need to use the findAppointmentType tool first."
         },
         newState: currentState
       };

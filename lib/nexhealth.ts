@@ -150,7 +150,7 @@ export async function fetchNexhealthAPI(
   // Get valid bearer token
   const bearerToken = await getNexhealthBearerToken();
   
-  const url = new URL(`${NEXHEALTH_API_BASE_URL}${path}`);
+  const url = new URL(path, NEXHEALTH_API_BASE_URL); // Use the URL constructor that takes a base
   
   // Add subdomain for data API calls (not for /authenticates)
   if (path !== '/authenticates' && !params?.subdomain) {

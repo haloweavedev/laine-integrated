@@ -30,37 +30,16 @@ export async function normalizeDateWithAI(
 ): Promise<string | null> {
   try {
     const now = DateTime.now().setZone(practiceTimezone);
-    const systemPromptContent = `You are a highly specialized date parsing AI. Your only task is to convert a user's spoken date query into a strict 'YYYY-MM-DD' format.
-    
-    Current Context:
-    - Today's date is: ${now.toFormat('EEEE, MMMM d, yyyy')} (${now.toFormat('yyyy-MM-dd')}).
-    - The user is in the timezone: ${practiceTimezone}.
-    
-    Interpretation Rules:
-    1.  **Assume Current Year:** If no year is specified (e.g., "July 11"), assume the current year (${now.year}). If that date has already passed, assume the following year.
-    2.  **Relative Dates:** Interpret "today", "tomorrow", "day after tomorrow" based on the current date.
-    3.  **"Next" Keyword (CRITICAL):**
-        - If today is Wednesday (weekday 3) and the user says "next Tuesday" (weekday 2), they mean the upcoming Tuesday of the *next* week.
-        - If today is Monday (weekday 1) and the user says "next Wednesday" (weekday 3), they mean the upcoming Wednesday of the *same* week.
-        - "This Friday" always means the Friday of the current week.
-    4.  **Ambiguity:** If a query is truly ambiguous (e.g., "the 10th" without a month) or not a date, you MUST return 'INVALID_DATE'.
-    
-    Examples (Assuming today is Wednesday, 2025-07-09):
-    - "tomorrow" -> "2025-07-10"
-    - "July 11" -> "2025-07-11"
-    - "this Friday" -> "2025-07-11"
-    - "next Wednesday" -> "2025-07-16"
-    - "next Tuesday" -> "2025-07-15"
-    - "a week from today" -> "2025-07-16"
-    - "July 10th" -> "2025-07-10"
-    - "the day after tomorrow" -> "2025-07-11"
-    - "December 25" -> "2025-12-25"
-    - "March 1" -> "2026-03-01" (if we're past March 1, 2025)
-    
-    Output Format (CRITICAL):
-    - Your entire response MUST be ONLY the 'YYYY-MM-DD' string.
-    - If the query is invalid or cannot be resolved, your entire response MUST be the exact string "INVALID_DATE".
-    - Do NOT add any other words, explanations, or formatting.`;
+    const systemPromptContent = `You are a date parsing AI. Your only task is to convert a user's spoken date query into a strict 'YYYY-MM-DD' format. The user is in the 'America/Chicago' timezone.
+
+    Today's date is ${now.toFormat('yyyy-MM-dd')}.
+
+    - Interpret "today" as ${now.toFormat('yyyy-MM-dd')}.
+    - Interpret "tomorrow" as ${now.plus({ days: 1 }).toFormat('yyyy-MM-dd')}.
+    - If the user provides a date like "July 23rd" and that date has already passed this year, assume they mean next year.
+    - If a query is ambiguous or not a date, you MUST return 'INVALID_DATE'.
+
+    Your entire response MUST be ONLY the 'YYYY-MM-DD' string or "INVALID_DATE". Do not add any other words.`;
 
     const userPromptContent = `User Query: "${dateQuery}"
 
@@ -373,43 +352,25 @@ export async function findAvailableSlots(
     try {
       console.log(`[Slot Search] Searching date ${searchDate} (day ${i + 1}/${searchDates.length})`);
       
-      // Construct API parameters for NexHealth appointment_slots endpoint
-      const params: Record<string, string | string[]> = {
-        start_date: searchDate,
-        days: '1',
-        'lids[]': practice.nexhealthLocationId,
-        slot_length: duration.toString()
-      };
+      // Build the query string manually for precise control
+      let queryString = `start_date=${searchDate}&days=1&slot_length=${duration.toString()}`;
+      queryString += `&lids[]=${practice.nexhealthLocationId}`;
+      providerIds.forEach(id => {
+        queryString += `&pids[]=${id}`;
+      });
+      operatoryIds.forEach(id => {
+        queryString += `&operatory_ids[]=${id}`;
+      });
 
-      // Add provider IDs as array parameters
-      params['pids[]'] = providerIds;
-      
-      // Add operatory IDs as array parameters  
-      params['operatory_ids[]'] = operatoryIds;
+      const pathWithQuery = `/appointment_slots?${queryString}`;
 
-      // --- BEGIN: New Verification Log ---
-      try {
-        const queryParams = new URLSearchParams();
-        for (const key in params) {
-          const value = params[key];
-          if (Array.isArray(value)) {
-            value.forEach(item => queryParams.append(key, item));
-          } else {
-            queryParams.append(key, String(value));
-          }
-        }
-        const fullRequestUrl = `https://nexhealth.info/appointment_slots?subdomain=${practice.nexhealthSubdomain}&${queryParams.toString()}`;
-        console.log(`[NexHealth Request Verification] Constructed URL: ${fullRequestUrl}`);
-      } catch (logError) {
-        console.error("[NexHealth Request Verification] Error constructing verification URL:", logError);
-      }
-      // --- END: New Verification Log ---
+      console.log(`[NexHealth Request Verification] Manually constructed path: ${pathWithQuery}`);
 
-      // Call NexHealth API
+      // Call NexHealth API with the manually constructed path
       const response = await fetchNexhealthAPI(
-        '/appointment_slots',
+        pathWithQuery,
         practice.nexhealthSubdomain,
-        params
+        undefined // Pass undefined for params since we built it into the path
       ) as NexHealthSlotsResponse;
 
       console.log(`[Slot Search] API response for ${searchDate}:`, JSON.stringify(response, null, 2));
