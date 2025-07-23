@@ -2,19 +2,20 @@ import { matchUserSelectionToSlot } from '../ai/slotMatcher';
 import { ConversationState } from '../../types/vapi';
 import { prisma } from '@/lib/prisma';
 import { mergeState } from '@/lib/utils/state-helpers';
+import { DateTime } from 'luxon';
 
-interface HandleSlotSelectionArgs {
+interface SelectAndConfirmSlotArgs {
   userSelection: string;
 }
 
 import { HandlerResult } from '../../types/vapi';
 
-export async function handleSlotSelectionHandler(
+export async function handleSelectAndConfirmSlot(
   currentState: ConversationState,
-  toolArguments: HandleSlotSelectionArgs,
+  toolArguments: SelectAndConfirmSlotArgs,
   toolCallId: string
 ): Promise<HandlerResult> {
-  console.log('[HandleSlotSelectionHandler] Processing user selection:', toolArguments.userSelection);
+  console.log('[SelectAndConfirmSlot] Processing user selection:', toolArguments.userSelection);
 
   // Get practice details for timezone
   const practice = await prisma.practice.findUnique({
@@ -33,7 +34,7 @@ export async function handleSlotSelectionHandler(
   
   // Check if presentedSlots exists and is not empty
   if (!currentState.appointmentBooking?.presentedSlots || currentState.appointmentBooking.presentedSlots.length === 0) {
-    console.log('[HandleSlotSelectionHandler] ERROR: No presented slots available');
+    console.log('[SelectAndConfirmSlot] ERROR: No presented slots available');
     return {
       toolResponse: {
         toolCallId,
@@ -46,7 +47,7 @@ export async function handleSlotSelectionHandler(
   // Get the presented slots from current state
   const presentedSlots = currentState.appointmentBooking.presentedSlots;
 
-  console.log('[HandleSlotSelectionHandler] Matching selection against', presentedSlots.length, 'slots');
+  console.log('[SelectAndConfirmSlot] Matching selection against', presentedSlots.length, 'slots');
   
   // Use AI slot matcher to find the selected slot
   const matchedSlot = await matchUserSelectionToSlot(
@@ -56,7 +57,7 @@ export async function handleSlotSelectionHandler(
   );
 
   if (!matchedSlot) {
-    console.log('[HandleSlotSelectionHandler] ERROR: Could not match user selection');
+    console.log('[SelectAndConfirmSlot] ERROR: Could not match user selection');
     return {
       toolResponse: {
         toolCallId,
@@ -66,25 +67,48 @@ export async function handleSlotSelectionHandler(
     };
   }
 
-  console.log('[HandleSlotSelectionHandler] Successfully matched slot:', matchedSlot);
+  console.log('[SelectAndConfirmSlot] Successfully matched slot:', matchedSlot);
 
-  // Update the state with the selected slot
+  // Get the spokenName for the confirmation message
+  const { spokenName } = currentState.appointmentBooking;
+  if (!spokenName) {
+    console.log('[SelectAndConfirmSlot] ERROR: Missing spokenName in state');
+    return {
+      toolResponse: {
+        toolCallId,
+        error: "Cannot prepare confirmation. Appointment type information is missing."
+      },
+      newState: currentState
+    };
+  }
+
+  // Generate confirmation message using the matched slot and appointment details
+  const formattedTime = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone })
+                                .toFormat("cccc, MMMM d 'at' h:mm a");
+
+  const confirmationMessage = `Okay, just to confirm, I have you down for a ${spokenName} on ${formattedTime}. Does that all sound correct?`;
+
+  console.log('[SelectAndConfirmSlot] Generated confirmation message:', confirmationMessage);
+
+  // Update the state with the selected slot and clear presented slots
   const newState = mergeState(currentState, {
     appointmentBooking: {
-      selectedSlot: matchedSlot
+      selectedSlot: matchedSlot,
+      presentedSlots: [] // Clear the list of options once selection is made
     }
   });
 
-  // Return a silent confirmation with nextTool directive
+  // Return the confirmation message directly to the user
   return {
     toolResponse: {
       toolCallId,
-      result: { success: true }
+      result: { success: true },
+      message: {
+        type: 'assistant-message',
+        role: 'assistant',
+        content: confirmationMessage
+      }
     },
-    newState,
-    nextTool: { // <-- ADD THIS
-      toolName: 'prepareConfirmation',
-      toolArguments: {}
-    }
+    newState
   };
 } 

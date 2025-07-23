@@ -5,16 +5,21 @@ export function getConfirmBookingTool(appBaseUrl: string): VapiTool {
     type: "function",
     function: {
       name: "confirmBooking",
-      description: "Confirms and books the appointment using the patient details and the time slot already saved in the conversation. Call this only after a specific time has been selected and confirmed by the user. This is the final step.",
+      description: "The final step to book the appointment. Use this tool ONLY after the user has verbally confirmed the appointment details (e.g., they said 'yes' or 'that's correct').",
       parameters: {
         type: "object" as const,
-        properties: {},
-        required: []
+        properties: {
+          finalConfirmation: {
+            type: "boolean" as const,
+            description: "Set to true to confirm that the user has verbally agreed to the booking details."
+          }
+        },
+        required: ["finalConfirmation"]
       }
     },
     server: {
       url: `${appBaseUrl}/api/vapi-webhook`,
-      timeoutSeconds: 10
+      timeoutSeconds: 15
     }
   };
 } 

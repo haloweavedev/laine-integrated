@@ -1,15 +1,15 @@
 import type { VapiTool } from '@/types/vapi';
 
 /**
- * Get the VAPI tool definition for handleSlotSelection
- * This tool captures the user's slot selection and updates the conversation state
+ * Get the VAPI tool definition for selectAndConfirmSlot
+ * This tool captures the user's slot selection, saves it, and asks them for final confirmation
  */
-export function getHandleSlotSelectionTool(appBaseUrl: string): VapiTool {
+export function getSelectAndConfirmSlotTool(appBaseUrl: string): VapiTool {
   return {
     type: "function" as const,
     function: {
-      name: "handleSlotSelection",
-      description: "Use this tool after the user has verbally chosen a time slot from the options presented. This saves their choice.",
+      name: "selectAndConfirmSlot",
+      description: "Captures the user's verbal choice of a time slot, saves it, and asks them for final confirmation. Use this immediately after presenting time options and the user indicates their choice.",
       parameters: {
         type: "object" as const,
         properties: {

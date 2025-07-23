@@ -4,8 +4,7 @@ import { handleCreatePatientRecord } from '@/lib/tool-handlers/createPatientReco
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
-import { handleSlotSelectionHandler } from '@/lib/tool-handlers/handleSlotSelectionHandler';
-import { handlePrepareConfirmation } from '@/lib/tool-handlers/prepareConfirmationHandler';
+import { handleSelectAndConfirmSlot } from '@/lib/tool-handlers/selectAndConfirmSlotHandler';
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -159,18 +158,10 @@ export async function POST(request: Request) {
         break;
       }
 
-      case "handleSlotSelection": {
-        handlerResult = await handleSlotSelectionHandler(
+      case "selectAndConfirmSlot": {
+        handlerResult = await handleSelectAndConfirmSlot(
           state,
           toolArguments as { userSelection: string },
-          toolCall.id
-        );
-        break;
-      }
-
-      case "prepareConfirmation": {
-        handlerResult = await handlePrepareConfirmation(
-          state,
           toolCall.id
         );
         break;
@@ -197,17 +188,7 @@ export async function POST(request: Request) {
       }, { status: 200 });
     }
 
-    // NEW LOGIC FOR TOOL CHAINING
-    if (handlerResult.nextTool) {
-      console.log(`[Tool Chaining] Executing next tool: ${handlerResult.nextTool.toolName}`);
-      const chainedToolCallId = `${toolCall.id}-chained`;
-      
-      // We use the newState from the *previous* handler as the currentState for the chained tool
-      const chainedHandlerResult = await handlePrepareConfirmation(handlerResult.newState, chainedToolCallId);
-      
-      // The result of the chained tool becomes the final result for this turn
-      handlerResult = chainedHandlerResult;
-    }
+    // Tool chaining is no longer needed with the new consolidated selectAndConfirmSlot tool
 
     console.log('[VAPI Webhook] Final handler result after processing:', JSON.stringify(handlerResult, null, 2));
     

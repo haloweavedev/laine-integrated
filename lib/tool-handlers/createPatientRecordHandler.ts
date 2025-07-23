@@ -10,6 +10,17 @@ interface CreatePatientToolArguments {
   email: string;
 }
 
+interface NexHealthPatientResponse {
+  data?: {
+    user?: {
+      id?: number;
+    };
+  };
+  user?: {
+    id?: number;
+  };
+}
+
 export async function handleCreatePatientRecord(
   currentState: ConversationState,
   args: CreatePatientToolArguments, 
@@ -28,8 +39,18 @@ export async function handleCreatePatientRecord(
       apiLog
     );
 
-    // Extract the patient ID from the successful response
-    const patientId = responseData.user.id;
+    // Extract the patient ID from the nested successful response
+    // responseData contains the NexHealth API response, which has a nested structure
+    const nexHealthResponse = responseData as NexHealthPatientResponse;
+    const patientId = nexHealthResponse.data?.user?.id || nexHealthResponse.user?.id;
+
+    // Verify that patientId was successfully extracted
+    if (!patientId) {
+      console.error('[Patient Creation] FAILED: Patient ID missing from NexHealth response. Full response:', responseData);
+      throw new Error("Patient ID missing from NexHealth response.");
+    }
+
+    console.log('[Patient Creation] SUCCESS: Extracted patientId:', patientId);
 
     console.log(`[Patient Creation] SUCCESS: Patient "${args.firstName} ${args.lastName}" created successfully in NexHealth with ID: ${patientId}`);
 
@@ -47,7 +68,7 @@ export async function handleCreatePatientRecord(
         message: {
           type: "request-complete",
           role: "assistant",
-          content: `Thank you! I've successfully created a record for ${args.firstName} ${args.lastName}. What can I help you with next?`
+          content: `Thank you! I've successfully created a record for you, ${args.firstName}. Now, let's find an appointment time.`
         }
       },
       newState
