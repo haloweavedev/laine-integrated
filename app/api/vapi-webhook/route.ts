@@ -5,6 +5,7 @@ import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTy
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
 import { handleSlotSelectionHandler } from '@/lib/tool-handlers/handleSlotSelectionHandler';
+import { handlePrepareConfirmation } from '@/lib/tool-handlers/prepareConfirmationHandler';
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -167,6 +168,14 @@ export async function POST(request: Request) {
         break;
       }
 
+      case "prepareConfirmation": {
+        handlerResult = await handlePrepareConfirmation(
+          state,
+          toolCall.id
+        );
+        break;
+      }
+
       default: {
         console.error(`[VAPI Webhook] Unknown tool: ${toolName}`);
         handlerResult = {
@@ -188,7 +197,19 @@ export async function POST(request: Request) {
       }, { status: 200 });
     }
 
-    console.log('[VAPI Webhook] Handler result after processing:', JSON.stringify(handlerResult, null, 2));
+    // NEW LOGIC FOR TOOL CHAINING
+    if (handlerResult.nextTool) {
+      console.log(`[Tool Chaining] Executing next tool: ${handlerResult.nextTool.toolName}`);
+      const chainedToolCallId = `${toolCall.id}-chained`;
+      
+      // We use the newState from the *previous* handler as the currentState for the chained tool
+      const chainedHandlerResult = await handlePrepareConfirmation(handlerResult.newState, chainedToolCallId);
+      
+      // The result of the chained tool becomes the final result for this turn
+      handlerResult = chainedHandlerResult;
+    }
+
+    console.log('[VAPI Webhook] Final handler result after processing:', JSON.stringify(handlerResult, null, 2));
     
     // Use the exact newState object from the handler's result for all subsequent operations.
     const newState = handlerResult.newState;

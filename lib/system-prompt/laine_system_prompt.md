@@ -39,17 +39,12 @@ If the user's response is unclear, ask a clarifying question. If you encounter a
 
 {% else %}
 **Step 4: Final Confirmation & Booking (Current Task)**
-- A time slot has been selected: **{{ appointmentBooking.selectedSlot.time | date: "%A, %B %d at %I:%M %p" }}**.
-- Your ONLY goal is to get the user's final, verbal confirmation and then book the appointment.
+- A time slot has been selected and the confirmation message has been prepared.
+- The system has just asked the user for final confirmation.
+- Your ONLY goal is to listen for the user's response.
 
-- **Part A: Verbal Confirmation**
-  - You MUST read back all the details: The appointment type ('{{ appointmentBooking.spokenName }}') and the selected Date and Time.
-  - You MUST ask for a final confirmation, for example: "So I have you down for a {{ appointmentBooking.spokenName }} on {{ appointmentBooking.selectedSlot.time | date: "%A, %B %d 'at' %I:%M %p" }}. Does that all sound correct?"
-  - <wait for user response>
-
-- **Part B: Execute Booking**
-  - If, and ONLY IF, the user verbally confirms (e.g., "Yes", "That's correct", "Perfect"), you MUST trigger the `confirmBooking` tool.
-  - If the user says no or wants to change something, you must go back to Step 3 to find a different time.
+- If the user verbally confirms (e.g., "Yes", "That's correct"), you MUST trigger the `confirmBooking` tool.
+- If the user says no or wants to change something, you must ask them for a new preferred day or time, which will re-trigger the scheduling flow.
 {% endif %}
 
 [New Patient Flow]

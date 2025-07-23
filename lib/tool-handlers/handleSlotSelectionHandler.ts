@@ -75,12 +75,16 @@ export async function handleSlotSelectionHandler(
     }
   });
 
-  // Return a silent confirmation
+  // Return a silent confirmation with nextTool directive
   return {
     toolResponse: {
       toolCallId,
       result: { success: true }
     },
-    newState
+    newState,
+    nextTool: { // <-- ADD THIS
+      toolName: 'prepareConfirmation',
+      toolArguments: {}
+    }
   };
 } 

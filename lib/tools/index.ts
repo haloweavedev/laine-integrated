@@ -4,6 +4,7 @@ import { getCreatePatientRecordTool } from './definitions/createPatientRecordToo
 import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
 import { getHandleSlotSelectionTool } from './definitions/handleSlotSelectionTool';
 import { getConfirmBookingTool } from './definitions/confirmBookingTool';
+import { getPrepareConfirmationTool } from './definitions/prepareConfirmationTool';
 
 /**
  * Central map of all tool definitions
@@ -14,6 +15,7 @@ export const toolDefinitionMap = {
   create_patient_record: getCreatePatientRecordTool,
   checkAvailableSlots: getCheckAvailableSlotsTool,
   handleSlotSelection: getHandleSlotSelectionTool,
+  prepareConfirmation: getPrepareConfirmationTool,
   confirmBooking: getConfirmBookingTool,
 };
 
