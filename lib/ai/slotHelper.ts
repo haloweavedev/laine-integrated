@@ -335,7 +335,7 @@ export async function findAvailableSlots(
   const timezone = practice.timezone || 'America/Chicago';
   const lunchBreakStart = practiceSettings?.lunchBreakStart;
   const lunchBreakEnd = practiceSettings?.lunchBreakEnd;
-  const bookingBufferMinutes = practiceSettings?.minBookingBufferMinutes || 60;
+  const bookingBufferMinutes = practiceSettings?.minBookingBufferMinutes || 0;
   
   // Generate search dates based on startDate and searchDays
   const searchDates: string[] = [];
