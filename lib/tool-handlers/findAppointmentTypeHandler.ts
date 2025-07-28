@@ -168,7 +168,7 @@ export async function handleFindAppointmentType(
           message: {
             type: "request-complete",
             role: "assistant",
-            content: `${acknowledgmentPhrase}I have you down for a ${spokenName}. Let me just check for the next available appointment for you.`
+            content: `${acknowledgmentPhrase}I have you down for a ${spokenName}. Can I check for the next available appointment for you.`
           },
           followUpFunctionCall: followUpCall
         },
