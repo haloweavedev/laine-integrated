@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { handleCreatePatientRecord } from '@/lib/tool-handlers/createPatientRecordHandler';
+import { handleFindAndConfirmPatient } from '@/lib/tool-handlers/findAndConfirmPatientHandler';
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
@@ -152,6 +153,18 @@ export async function POST(request: Request) {
             dateOfBirth: string;
             phoneNumber: string;
             email: string;
+          },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "findAndConfirmPatient": {
+        handlerResult = await handleFindAndConfirmPatient(
+          state,
+          toolArguments as {
+            fullName: string;
+            dateOfBirth: string;
           },
           toolCall.id
         );
