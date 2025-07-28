@@ -106,10 +106,23 @@ export async function handleFindAndConfirmPatient(
 
     console.log(`[FindAndConfirmPatient] Found ${response.patients.length} patient(s) with matching name`);
 
-    // Find patient with matching date of birth
-    const matchedPatient = response.patients.find(patient => 
-      patient.bio?.date_of_birth === args.dateOfBirth
-    );
+    // Debug logging before DOB comparison
+    console.log(`[Patient Search] Searching for DOB: "${args.dateOfBirth}" (Type: ${typeof args.dateOfBirth})`);
+    response.patients.forEach((patient, index) => {
+      console.log(`[Patient Search] Record ${index} DOB: "${patient.bio?.date_of_birth}" (Type: ${typeof patient.bio?.date_of_birth})`);
+    });
+
+    // Find patient with matching date of birth - defensive comparison
+    const matchedPatient = response.patients.find(patient => {
+      const recordDob = patient.bio?.date_of_birth;
+      return typeof recordDob === 'string' && recordDob.trim() === args.dateOfBirth.trim();
+    });
+
+    if (matchedPatient) {
+      console.log(`[Patient Search] SUCCESS: Found matching patient with ID ${matchedPatient.id}.`);
+    } else {
+      console.log(`[Patient Search] FAILED: No patient found with a matching DOB.`);
+    }
 
     if (matchedPatient) {
       console.log(`[FindAndConfirmPatient] Successfully matched patient ID: ${matchedPatient.id}`);
