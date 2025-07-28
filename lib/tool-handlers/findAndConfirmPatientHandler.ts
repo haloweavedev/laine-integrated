@@ -12,13 +12,17 @@ interface NexHealthPatient {
   id: number;
   first_name: string;
   last_name: string;
-  bio: {
-    date_of_birth: string;
+  bio?: { // Make bio optional for safety
+    date_of_birth?: string; // Make dob optional for safety
   };
 }
 
-interface NexHealthPatientsResponse {
+interface NexHealthApiData {
   patients: NexHealthPatient[];
+}
+
+interface NexHealthApiResponse {
+  data?: NexHealthApiData; // The nested data object
 }
 
 /**
@@ -85,11 +89,13 @@ export async function handleFindAndConfirmPatient(
       apiLog
     );
 
-    const response = apiResponse as NexHealthPatientsResponse;
+    const response = apiResponse as NexHealthApiResponse;
+    const patients = response.data?.patients; // Safely access the nested array
 
-    // Check if we got a valid response with patients array
-    if (!response || !Array.isArray(response.patients)) {
-      console.log('[FindAndConfirmPatient] No patients found or invalid response format');
+    console.log(`[FindAndConfirmPatient] API search returned ${patients?.length ?? 0} patient(s) with the name "${args.fullName}".`);
+
+    if (!Array.isArray(patients) || patients.length === 0) {
+      console.log('[FindAndConfirmPatient] No patients array found in response.data or array is empty.');
       return {
         toolResponse: {
           toolCallId,
@@ -104,16 +110,16 @@ export async function handleFindAndConfirmPatient(
       };
     }
 
-    console.log(`[FindAndConfirmPatient] Found ${response.patients.length} patient(s) with matching name`);
+    console.log(`[FindAndConfirmPatient] Found ${patients.length} patient(s) with matching name`);
 
     // Debug logging before DOB comparison
     console.log(`[Patient Search] Searching for DOB: "${args.dateOfBirth}" (Type: ${typeof args.dateOfBirth})`);
-    response.patients.forEach((patient, index) => {
+    patients.forEach((patient, index) => {
       console.log(`[Patient Search] Record ${index} DOB: "${patient.bio?.date_of_birth}" (Type: ${typeof patient.bio?.date_of_birth})`);
     });
 
     // Find patient with matching date of birth - defensive comparison
-    const matchedPatient = response.patients.find(patient => {
+    const matchedPatient = patients.find(patient => {
       const recordDob = patient.bio?.date_of_birth;
       return typeof recordDob === 'string' && recordDob.trim() === args.dateOfBirth.trim();
     });
