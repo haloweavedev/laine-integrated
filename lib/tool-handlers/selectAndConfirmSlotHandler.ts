@@ -82,13 +82,9 @@ export async function handleSelectAndConfirmSlot(
     };
   }
 
-  // Generate confirmation message using the matched slot and appointment details
+  // Generate formatted time for use in messages
   const formattedTime = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone })
                                 .toFormat("cccc, MMMM d 'at' h:mm a");
-
-  const confirmationMessage = `Okay, just to confirm, I have you down for a ${spokenName} on ${formattedTime}. Does that all sound correct?`;
-
-  console.log('[SelectAndConfirmSlot] Generated confirmation message:', confirmationMessage);
 
   // Update the state with the selected slot and clear presented slots
   const newState = mergeState(currentState, {
@@ -98,17 +94,42 @@ export async function handleSelectAndConfirmSlot(
     }
   });
 
-  // Return the confirmation message directly to the user
-  return {
-    toolResponse: {
-      toolCallId,
-      result: { success: true },
-      message: {
-        type: 'assistant-message',
-        role: 'assistant',
-        content: confirmationMessage
-      }
-    },
-    newState
-  };
+  // Check if patient has been identified yet (urgent flow gate)
+  if (!currentState.patientDetails.nexhealthPatientId) {
+    // Urgent flow: We have a slot but no patient record yet
+    const urgentFlowMessage = `Okay, I'm holding the slot for you on ${formattedTime}. Before I can finalize that, I'll need to get your details. Are you a new or an existing patient?`;
+    
+    console.log('[SelectAndConfirmSlot] Urgent flow: Patient ID missing, pivoting to patient identification');
+    
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: true },
+        message: {
+          type: 'assistant-message',
+          role: 'assistant',
+          content: urgentFlowMessage
+        }
+      },
+      newState
+    };
+  } else {
+    // Standard flow: Patient already identified, proceed to confirmation
+    const confirmationMessage = `Okay, just to confirm, I have you down for a ${spokenName} on ${formattedTime}. Does that all sound correct?`;
+    
+    console.log('[SelectAndConfirmSlot] Standard flow: Generated confirmation message:', confirmationMessage);
+    
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: true },
+        message: {
+          type: 'assistant-message',
+          role: 'assistant',
+          content: confirmationMessage
+        }
+      },
+      newState
+    };
+  }
 } 

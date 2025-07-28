@@ -15,16 +15,6 @@ export async function handleConfirmBooking(
   
   try {
     // Validate required state before proceeding
-    if (!currentState.patientDetails.nexhealthPatientId) {
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          error: "Error: A patient record has not been created or found. I must use the create_patient_record tool before booking."
-        },
-        newState: currentState
-      };
-    }
-
     if (!currentState.appointmentBooking.selectedSlot) {
       return {
         toolResponse: {
