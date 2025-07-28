@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
+import { generateAcknowledgment } from '@/lib/ai/acknowledgmentGenerator';
 import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
 import { mergeState } from '@/lib/utils/state-helpers';
 
@@ -19,6 +20,9 @@ export async function handleFindAppointmentType(
   const apiLog: ApiLog = [];
   
   console.log(`[FindAppointmentTypeHandler] Processing request: "${patientRequest}", patientStatus: "${patientStatus}"`);
+  
+  // Generate AI-powered acknowledgment based on patient request
+  const acknowledgment = await generateAcknowledgment(toolArguments.patientRequest);
   
   try {
     if (!currentState.practiceId) {
@@ -117,12 +121,6 @@ export async function handleFindAppointmentType(
       };
     }
 
-    // Detect sentiment and urgency based on keywords in patient request
-    const URGENT_KEYWORDS = ['pain', 'toothache', 'emergency', 'hurts', 'broken', 'urgent', 'abscess', 'swelling', 'infection'];
-    
-    const requestLower = patientRequest.toLowerCase();
-    const isUrgent = URGENT_KEYWORDS.some(keyword => requestLower.includes(keyword));
-
     console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
 
     // Create new state with appointment booking details
@@ -133,7 +131,6 @@ export async function handleFindAppointmentType(
         spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
         duration: matchedAppointmentType.duration,
         patientRequest: patientRequest,
-        isUrgent: isUrgent,
         isImmediateBooking: matchedAppointmentType.check_immediate_next_available
       }
     });
@@ -146,14 +143,34 @@ export async function handleFindAppointmentType(
           appointmentTypeName: matchedAppointmentType.name,
           spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
           duration: matchedAppointmentType.duration,
-          isUrgent: isUrgent,
           isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
           apiLog: apiLog
         },
         message: { // The new high-fidelity message
           type: "request-complete",
           role: "assistant",
-          content: `Okay, I've noted you're looking for a ${matchedAppointmentType.spokenName || matchedAppointmentType.name}.`
+          content: (() => {
+            // 1. Use the acknowledgment we generated earlier, providing a default if it's empty.
+            const acknowledgmentPhrase = acknowledgment ? `${acknowledgment} ` : "Okay, ";
+
+            // 2. Get the appointment's spoken name for a natural-sounding confirmation.
+            const spokenName = matchedAppointmentType.spokenName || matchedAppointmentType.name;
+
+            // 3. Define the next step question dynamically based on appointment type requirements.
+            let nextStepQuestion = "";
+            if (matchedAppointmentType.check_immediate_next_available) {
+              nextStepQuestion = "Since this is time-sensitive, let's find an appointment slot for you first. What day and time are you hoping for?";
+              console.log(`[Flow Control] Appointment type "${spokenName}" is flagged for immediate booking. Pivoting to slot check.`);
+            } else {
+              nextStepQuestion = "First, I'll need to get a few details to create a file for you. What is your first and last name?";
+              console.log(`[Flow Control] Standard flow for "${spokenName}". Proceeding to patient creation.`);
+            }
+
+            // 4. Combine everything into the final, fluid response string.
+            const finalContent = `${acknowledgmentPhrase}I have you down for a ${spokenName}. ${nextStepQuestion}`;
+
+            return finalContent;
+          })()
         }
       },
       newState: newState
