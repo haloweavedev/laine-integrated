@@ -8,6 +8,7 @@ interface CheckAvailableSlotsArgs {
   preferredDaysOfWeek?: string;
   timeBucket?: string;
   requestedDate?: string;
+  searchWindowDays?: number;
 }
 
 export async function handleCheckAvailableSlots(
@@ -15,12 +16,12 @@ export async function handleCheckAvailableSlots(
   toolArguments: CheckAvailableSlotsArgs,
   toolId: string
 ): Promise<HandlerResult> {
-  const { requestedDate, timeBucket, preferredDaysOfWeek } = toolArguments;
+  const { requestedDate, timeBucket, preferredDaysOfWeek, searchWindowDays } = toolArguments;
   
   // Initialize API log array to capture all external calls
   const apiLog: ApiLog = [];
   
-  console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}", preferredDaysOfWeek: "${preferredDaysOfWeek}"`);
+  console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}", preferredDaysOfWeek: "${preferredDaysOfWeek}", searchWindowDays: ${searchWindowDays}`);
   
   try {
     try {
@@ -68,8 +69,13 @@ export async function handleCheckAvailableSlots(
     // 1. UNIFIED DATE DETERMINATION LOGIC (respects user preferences in all flows)
     let searchDate: string | null = null;
 
+    // Priority 0: Handle system-initiated urgent search
+    if (searchWindowDays) {
+      console.log(`[CheckAvailableSlotsHandler] Proactive urgent search triggered for ${searchWindowDays} days.`);
+      searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
+    }
     // Priority 1: Handle explicit user date request
-    if (requestedDate) {
+    else if (requestedDate) {
       console.log(`[CheckAvailableSlotsHandler] User provided a specific date: "${requestedDate}". Normalizing...`);
       searchDate = await normalizeDateWithAI(requestedDate, practice.timezone || 'America/Chicago');
       if (!searchDate) {
@@ -121,7 +127,9 @@ export async function handleCheckAvailableSlots(
     const { isUrgent, isImmediateBooking } = currentState.appointmentBooking;
     let searchDays: number;
     
-    if (requestedDate) {
+    if (searchWindowDays) {
+      searchDays = searchWindowDays; // Use the system-specified window for urgent proactive search
+    } else if (requestedDate) {
       searchDays = 1; // Search only the specific requested date
     } else if (isUrgent || isImmediateBooking) {
       searchDays = 7; // Search 7 days for urgent appointments if no specific date requested

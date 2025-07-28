@@ -137,6 +137,14 @@ export interface ServerMessageToolCallsPayload {
   };
 }
 
+export interface VapiFunctionCall {
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string; // Arguments must be a JSON string
+  };
+}
+
 export interface VapiToolResult {
   toolCallId: string;
   result?: string | Record<string, any>;
@@ -146,6 +154,7 @@ export interface VapiToolResult {
     role: string;
     content: string;
   };
+  followUpFunctionCall?: VapiFunctionCall; // Add this new property
 }
 
 // === VAPI Webhook Message Types ===

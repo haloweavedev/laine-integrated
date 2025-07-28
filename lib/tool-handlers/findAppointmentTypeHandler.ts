@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
 import { generateAcknowledgment } from '@/lib/ai/acknowledgmentGenerator';
-import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+import type { ConversationState, HandlerResult, ApiLog, VapiFunctionCall } from "@/types/vapi";
 import { mergeState } from '@/lib/utils/state-helpers';
 
 interface FindAppointmentTypeArgs {
@@ -135,46 +135,72 @@ export async function handleFindAppointmentType(
       }
     });
 
-    return {
-      toolResponse: {
-        toolCallId: toolId,
-        result: { // The new structured data payload
-          appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
-          appointmentTypeName: matchedAppointmentType.name,
-          spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
-          duration: matchedAppointmentType.duration,
-          isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
-          apiLog: apiLog
-        },
-        message: { // The new high-fidelity message
-          type: "request-complete",
-          role: "assistant",
-          content: (() => {
-            // 1. Use the acknowledgment we generated earlier, providing a default if it's empty.
-            const acknowledgmentPhrase = acknowledgment ? `${acknowledgment} ` : "Okay, ";
+    // Generate acknowledgment phrase
+    const acknowledgmentPhrase = acknowledgment ? `${acknowledgment} ` : "Okay, ";
+    const spokenName = matchedAppointmentType.spokenName || matchedAppointmentType.name;
 
-            // 2. Get the appointment's spoken name for a natural-sounding confirmation.
-            const spokenName = matchedAppointmentType.spokenName || matchedAppointmentType.name;
-
-            // 3. Define the next step question dynamically based on appointment type requirements.
-            let nextStepQuestion = "";
-            if (matchedAppointmentType.check_immediate_next_available) {
-              nextStepQuestion = "Since this is time-sensitive, let's find an appointment slot for you first. What day and time are you hoping for?";
-              console.log(`[Flow Control] Appointment type "${spokenName}" is flagged for immediate booking. Pivoting to slot check.`);
-            } else {
-              nextStepQuestion = "First, I'll need to get a few details to create a file for you. What is your first and last name?";
-              console.log(`[Flow Control] Standard flow for "${spokenName}". Proceeding to patient creation.`);
-            }
-
-            // 4. Combine everything into the final, fluid response string.
-            const finalContent = `${acknowledgmentPhrase}I have you down for a ${spokenName}. ${nextStepQuestion}`;
-
-            return finalContent;
-          })()
+    // Handle urgent appointments with proactive slot search
+    if (matchedAppointmentType.check_immediate_next_available) {
+      console.log(`[Flow Control] Urgent appointment "${spokenName}". Initiating proactive slot search.`);
+      
+      // The system will execute this tool call immediately after speaking the message
+      const followUpCall = {
+        type: 'function' as const,
+        function: {
+          name: 'checkAvailableSlots',
+          arguments: JSON.stringify({
+            searchWindowDays: 7
+          })
         }
-      },
-      newState: newState
-    };
+      } as VapiFunctionCall;
+
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { 
+            appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+            appointmentTypeName: matchedAppointmentType.name,
+            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+            duration: matchedAppointmentType.duration,
+            isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
+            apiLog: apiLog
+          },
+          message: {
+            type: "request-complete",
+            role: "assistant",
+            content: `${acknowledgmentPhrase}I have you down for a ${spokenName}. Let me just check for the next available appointment for you.`
+          },
+          followUpFunctionCall: followUpCall
+        },
+        newState
+      };
+    } else {
+      // Standard flow - proceed to patient creation
+      console.log(`[Flow Control] Standard flow for "${spokenName}". Proceeding to patient creation.`);
+      
+      const nextStepQuestion = "First, I'll need to get a few details to create a file for you. What is your first and last name?";
+      const finalContent = `${acknowledgmentPhrase}I have you down for a ${spokenName}. ${nextStepQuestion}`;
+
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { // The new structured data payload
+            appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+            appointmentTypeName: matchedAppointmentType.name,
+            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+            duration: matchedAppointmentType.duration,
+            isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
+            apiLog: apiLog
+          },
+          message: { // The new high-fidelity message
+            type: "request-complete",
+            role: "assistant",
+            content: finalContent
+          }
+        },
+        newState: newState
+      };
+    }
 
   } catch (error) {
     console.error(`[FindAppointmentTypeHandler] Error processing appointment type:`, error);
