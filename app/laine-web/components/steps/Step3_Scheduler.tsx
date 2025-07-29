@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useScheduling } from '../SchedulingContext';
 import { toast } from 'sonner';
 import { Button } from "@/components/ui/button";
@@ -25,74 +25,102 @@ export function Step3_Scheduler() {
   const [availableSlots, setAvailableSlots] = useState<SlotData[]>([]);
   const [selectedDay, setSelectedDay] = useState<Date | undefined>(undefined);
   const [timesForSelectedDay, setTimesForSelectedDay] = useState<SlotData[]>([]);
-  const [disabledDates, setDisabledDates] = useState<Date[]>([]);
+  const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set());
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(true);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [loadedMonths, setLoadedMonths] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    const fetchInitialAvailability = async () => {
-      if (!state.practice?.id || !state.appointmentType?.id) {
+  // Helper function to get month key for tracking loaded months
+  const getMonthKey = (date: Date) => {
+    return `${date.getFullYear()}-${date.getMonth()}`;
+  };
+
+  // Helper function to calculate start date for a given month
+  const getMonthStartDate = (date: Date) => {
+    const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    return startOfMonth.toISOString().split('T')[0];
+  };
+
+  const fetchAvailabilityForMonth = useCallback(async (monthDate: Date, isInitial = false) => {
+    if (!state.practice?.id || !state.appointmentType?.nexhealthAppointmentTypeId) {
+      if (isInitial) {
         setError('Missing practice or appointment type information');
-        return;
+      }
+      return;
+    }
+
+    const monthKey = getMonthKey(monthDate);
+    
+    // Skip if we've already loaded this month
+    if (loadedMonths.has(monthKey)) {
+      return;
+    }
+
+    try {
+      setIsLoadingAvailability(true);
+      if (isInitial) {
+        setError(null);
       }
 
-      try {
-        setIsLoadingAvailability(true);
-        setError(null);
+      const startDate = getMonthStartDate(monthDate);
+      
+      const response = await fetch(
+        `/api/laine-web/availability?practiceId=${state.practice.id}&nexhealthAppointmentTypeId=${state.appointmentType.nexhealthAppointmentTypeId}&startDate=${startDate}&searchDays=31`
+      );
 
-        // Get today's date in YYYY-MM-DD format
-        const today = new Date().toISOString().split('T')[0];
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch availability');
+      }
 
-        const response = await fetch(
-          `/api/laine-web/availability?practiceId=${state.practice.id}&appointmentTypeId=${state.appointmentType.id}&startDate=${today}&searchDays=60`
-        );
+      const data: AvailabilityResponse = await response.json();
+      const newSlots = data.foundSlots || [];
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to fetch availability');
-        }
+      // Append new slots to existing ones
+      setAvailableSlots(prevSlots => [...prevSlots, ...newSlots]);
 
-        const data: AvailabilityResponse = await response.json();
-        setAvailableSlots(data.foundSlots || []);
+      // Extract unique dates from new slots and add to disabled dates set
+      const newAvailableDates = new Set<string>();
+      newSlots.forEach(slot => {
+        const slotDate = slot.time.split('T')[0];
+        newAvailableDates.add(slotDate);
+      });
 
-        // Extract unique dates from slots and create a Set for efficient lookups
-        const uniqueDates = new Set<string>();
-        data.foundSlots.forEach(slot => {
-          const slotDate = slot.time.split('T')[0]; // Extract YYYY-MM-DD from ISO string
-          uniqueDates.add(slotDate);
-        });
+      // Update disabled dates - remove newly available dates from disabled set
+      setDisabledDates(prevDisabled => {
+        const newDisabled = new Set(prevDisabled);
+        newAvailableDates.forEach(date => newDisabled.delete(date));
+        return newDisabled;
+      });
 
-        // Calculate disabled dates for the calendar
-        const disabled: Date[] = [];
-        const currentDate = new Date();
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() + 60); // 60 days ahead
+      // Mark this month as loaded
+      setLoadedMonths(prev => new Set([...prev, monthKey]));
 
-        // Iterate through all dates in the range
-        for (let d = new Date(currentDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-          const dateString = d.toISOString().split('T')[0];
-          const isPast = d < new Date(new Date().setHours(0, 0, 0, 0));
-          const isUnavailable = !uniqueDates.has(dateString);
-          
-          if (isPast || isUnavailable) {
-            disabled.push(new Date(d));
-          }
-        }
-        setDisabledDates(disabled);
+      console.log(`[Step3_Scheduler] Loaded ${newSlots.length} slots for month ${monthKey}`);
 
-        console.log(`[Step3_Scheduler] Found ${data.foundSlots.length} slots across ${uniqueDates.size} days`);
-
-      } catch (error) {
-        console.error('Error fetching availability:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Failed to load availability';
+    } catch (error) {
+      console.error('Error fetching availability for month:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load availability';
+      if (isInitial) {
         setError(errorMessage);
         toast.error(errorMessage);
-      } finally {
-        setIsLoadingAvailability(false);
+      } else {
+        toast.error(`Failed to load availability for ${monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`);
       }
-    };
+    } finally {
+      setIsLoadingAvailability(false);
+    }
+  }, [state.practice?.id, state.appointmentType?.nexhealthAppointmentTypeId, loadedMonths, setError]);
 
-    fetchInitialAvailability();
-  }, [state.practice?.id, state.appointmentType?.id, setError]);
+  // Initial load effect
+  useEffect(() => {
+    fetchAvailabilityForMonth(new Date(), true);
+  }, [fetchAvailabilityForMonth]);
+
+  // Month change effect  
+  useEffect(() => {
+    fetchAvailabilityForMonth(currentMonth);
+  }, [currentMonth, fetchAvailabilityForMonth]);
 
   useEffect(() => {
     // When selectedDay changes, filter slots for that date and update context
@@ -127,7 +155,10 @@ export function Step3_Scheduler() {
     });
   };
 
-  if (isLoadingAvailability) {
+  // Convert disabled dates set to array for calendar
+  const disabledDatesArray = Array.from(disabledDates).map(dateStr => new Date(dateStr));
+
+  if (isLoadingAvailability && availableSlots.length === 0) {
     return (
       <div className="space-y-6">
         <div className="text-center">
@@ -156,26 +187,39 @@ export function Step3_Scheduler() {
       <Card className="gap-0 p-0">
         <CardContent className="relative p-0 md:pr-48">
           <div className="p-6">
-            <Calendar
-              mode="single"
-              selected={selectedDay}
-              onSelect={setSelectedDay}
-              defaultMonth={selectedDay}
-              disabled={disabledDates}
-              showOutsideDays={false}
-              modifiers={{
-                booked: disabledDates,
-              }}
-              modifiersClassNames={{
-                booked: "[&>button]:line-through opacity-100",
-              }}
-              className="bg-transparent p-0 [--cell-size:--spacing(10)] md:[--cell-size:--spacing(12)]"
-              formatters={{
-                formatWeekdayName: (date) => {
-                  return date.toLocaleString("en-US", { weekday: "short" })
-                },
-              }}
-            />
+            <div className="relative">
+              {isLoadingAvailability && (
+                <div className="absolute inset-0 bg-white/50 z-10 flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                </div>
+              )}
+              <Calendar
+                mode="single"
+                selected={selectedDay}
+                onSelect={setSelectedDay}
+                month={currentMonth}
+                onMonthChange={setCurrentMonth}
+                defaultMonth={selectedDay}
+                disabled={(date) => {
+                  const dateStr = date.toISOString().split('T')[0];
+                  const isPast = date < new Date(new Date().setHours(0, 0, 0, 0));
+                  return isPast || disabledDates.has(dateStr);
+                }}
+                showOutsideDays={false}
+                modifiers={{
+                  booked: disabledDatesArray,
+                }}
+                modifiersClassNames={{
+                  booked: "[&>button]:line-through opacity-100",
+                }}
+                className="bg-transparent p-0 [--cell-size:--spacing(10)] md:[--cell-size:--spacing(12)]"
+                formatters={{
+                  formatWeekdayName: (date) => {
+                    return date.toLocaleString("en-US", { weekday: "short" })
+                  },
+                }}
+              />
+            </div>
           </div>
           <div className="no-scrollbar inset-y-0 right-0 flex max-h-72 w-full scroll-pb-6 flex-col gap-4 overflow-y-auto border-t p-6 md:absolute md:max-h-none md:w-48 md:border-t-0 md:border-l">
             <div className="grid gap-2">

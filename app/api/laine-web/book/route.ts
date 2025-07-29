@@ -111,7 +111,8 @@ export async function POST(req: NextRequest) {
         bookingData.practice.nexhealthSubdomain,
         { 
           location_id: bookingData.practice.nexhealthLocationId,
-          name: `${bookingData.patient.firstName} ${bookingData.patient.lastName}`
+          name: `${bookingData.patient.firstName} ${bookingData.patient.lastName}`,
+          date_of_birth: bookingData.contactInfo.dob // Add DOB for server-side filtering
         },
         'GET',
         undefined,
@@ -128,13 +129,12 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Find patient with matching date of birth
-      const matchedPatient = patients.find(patient => {
-        const recordDob = patient.bio?.date_of_birth;
-        return typeof recordDob === 'string' && recordDob.trim() === bookingData.contactInfo.dob.trim();
-      });
+      // With server-side filtering, the first patient should be the correct match
+      const matchedPatient = patients[0];
 
-      if (!matchedPatient) {
+      // Verify date of birth as a safety check
+      const recordDob = matchedPatient.bio?.date_of_birth;
+      if (!recordDob || recordDob.trim() !== bookingData.contactInfo.dob.trim()) {
         return NextResponse.json(
           { error: 'No patient found with matching date of birth. Please verify your information or select "New Patient".' },
           { status: 404 }
@@ -181,9 +181,10 @@ export async function POST(req: NextRequest) {
         .toFormat('cccc, MMMM d, yyyy \'at\' h:mm a');
 
       await resend.emails.send({
-        from: 'Laine <scheduling@laine.dental>', // Replace with your actual domain
+        from: 'Laine <scheduling@laine.dental>',
         to: [bookingData.contactInfo.email],
-        subject: `Appointment Confirmed: ${bookingData.appointmentType.name} at ${bookingData.practice.name || 'Your Practice'}`,
+        bcc: 'deren@airodental.com', // Admin gets a copy of all bookings
+        subject: `[New Web Booking] ${bookingData.appointmentType.name} for ${bookingData.patient.firstName} ${bookingData.patient.lastName}`,
         react: AppointmentConfirmation({
           patientName: `${bookingData.patient.firstName} ${bookingData.patient.lastName}`,
           appointmentType: bookingData.appointmentType.name,

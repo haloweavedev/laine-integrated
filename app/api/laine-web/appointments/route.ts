@@ -29,18 +29,6 @@ export async function GET() {
     }
 
     // Fetch all web bookings for this practice
-    // TODO: Fix Prisma client issue - may need to run migrations
-    const webBookings: Array<{
-      id: string;
-      patientFirstName: string;
-      patientLastName: string;
-      patientEmail: string;
-      patientPhone: string;
-      selectedSlotTime: Date;
-      appointmentType: { name: string };
-      createdAt: Date;
-    }> = []; // Temporary placeholder
-    /*
     const webBookings = await prisma.webBooking.findMany({
       where: {
         practiceId: practice.id
@@ -56,7 +44,6 @@ export async function GET() {
         createdAt: 'desc'
       }
     });
-    */
 
     return NextResponse.json({
       success: true,

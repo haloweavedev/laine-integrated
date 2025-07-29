@@ -6,7 +6,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const practiceId = searchParams.get('practiceId');
-    const appointmentTypeId = searchParams.get('appointmentTypeId');
+    const nexhealthAppointmentTypeId = searchParams.get('nexhealthAppointmentTypeId');
     const startDate = searchParams.get('startDate');
     const searchDays = searchParams.get('searchDays');
 
@@ -18,9 +18,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    if (!appointmentTypeId) {
+    if (!nexhealthAppointmentTypeId) {
       return NextResponse.json(
-        { error: 'Appointment Type ID is required' },
+        { error: 'NexHealth Appointment Type ID is required' },
         { status: 400 }
       );
     }
@@ -59,29 +59,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Get the appointment type to get the nexhealthAppointmentTypeId
-    const appointmentType = await prisma.appointmentType.findFirst({
-      where: {
-        id: appointmentTypeId,
-        practiceId: practiceId
-      },
-      select: {
-        nexhealthAppointmentTypeId: true
-      }
-    });
+    console.log(`[Laine Web Availability] Searching for slots: practice=${practiceId}, nexhealthAppointmentTypeId=${nexhealthAppointmentTypeId}, startDate=${startDate}, searchDays=${searchDaysNum}`);
 
-    if (!appointmentType) {
-      return NextResponse.json(
-        { error: 'Appointment type not found' },
-        { status: 404 }
-      );
-    }
-
-    console.log(`[Laine Web Availability] Searching for slots: practice=${practiceId}, appointmentType=${appointmentTypeId}, startDate=${startDate}, searchDays=${searchDaysNum}`);
-
-    // Call the existing findAvailableSlots function
+    // Call the existing findAvailableSlots function with nexhealthAppointmentTypeId directly
     const result = await findAvailableSlots(
-      appointmentType.nexhealthAppointmentTypeId,
+      nexhealthAppointmentTypeId,
       {
         id: practice.id,
         nexhealthSubdomain: practice.nexhealthSubdomain,
