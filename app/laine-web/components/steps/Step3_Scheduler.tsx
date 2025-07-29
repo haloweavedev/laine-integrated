@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { DateTime } from 'luxon';
 import { useScheduling } from '../SchedulingContext';
 import { toast } from 'sonner';
 import { Button } from "@/components/ui/button";
@@ -173,21 +174,21 @@ export function Step3_Scheduler() {
     }
   };
 
-  // Filter times when a day is selected
+  // Filter times when a day is selected with timezone-aware comparison
   useEffect(() => {
     if (selectedDay) {
-      const dateString = selectedDay.toISOString().split('T')[0];
-      const slotsForDate = allSlots.filter(slot => 
-        slot.time.startsWith(dateString)
-      );
+      const slotsForDate = allSlots.filter(slot => {
+        const slotDate = DateTime.fromISO(slot.time, { zone: state.practice?.timezone || 'UTC' });
+        return slotDate.hasSame(DateTime.fromJSDate(selectedDay), 'day');
+      });
       setTimesForSelectedDay(slotsForDate);
       
       // Update the scheduling context with the selected date
-      selectDate(dateString);
+      selectDate(selectedDay.toISOString().split('T')[0]);
     } else {
       setTimesForSelectedDay([]);
     }
-  }, [selectedDay, allSlots, selectDate]);
+  }, [selectedDay, allSlots, selectDate, state.practice?.timezone]);
 
   const handleTimeSelect = (slot: SlotData) => {
     selectSlot(slot);
@@ -305,9 +306,9 @@ export function Step3_Scheduler() {
               <div className="no-scrollbar inset-y-0 right-0 flex max-h-72 w-full scroll-pb-6 flex-col gap-4 overflow-y-auto border-t p-6 md:absolute md:max-h-none md:w-48 md:border-t-0 md:border-l">
                 <div className="grid gap-2">
                   {selectedDay && timesForSelectedDay.length > 0 ? (
-                    timesForSelectedDay.map((slot, index) => (
+                    timesForSelectedDay.map((slot) => (
                       <Button
-                        key={index}
+                        key={slot.time}
                         variant={state.selectedSlot?.time === slot.time ? "default" : "outline"}
                         onClick={() => handleTimeSelect(slot)}
                         className="w-full shadow-none"

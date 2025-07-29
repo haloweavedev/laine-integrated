@@ -10,30 +10,12 @@ export async function GET(req: NextRequest) {
     const startDate = searchParams.get('startDate');
     const searchDays = searchParams.get('searchDays');
 
-    // Validate required parameters
-    if (!practiceId) {
-      return NextResponse.json(
-        { error: 'Practice ID is required' },
-        { status: 400 }
-      );
+    // --- Validation ---
+    if (!practiceId || !nexhealthAppointmentTypeId || !startDate) {
+      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
+    const searchDaysNum = searchDays ? parseInt(searchDays, 10) : 90;
 
-    if (!nexhealthAppointmentTypeId) {
-      return NextResponse.json(
-        { error: 'NexHealth Appointment Type ID is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!startDate) {
-      return NextResponse.json(
-        { error: 'Start date is required' },
-        { status: 400 }
-      );
-    }
-
-    // Parse and validate searchDays (default to 60 for wide search)
-    const searchDaysNum = searchDays ? parseInt(searchDays, 10) : 60;
     if (isNaN(searchDaysNum) || searchDaysNum < 1) {
       return NextResponse.json(
         { error: 'Search days must be a positive number' },
@@ -41,27 +23,21 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Fetch practice details from database
+    // --- Fetch Practice Details ---
     const practice = await prisma.practice.findUnique({
       where: { id: practiceId },
-      select: {
-        id: true,
-        nexhealthSubdomain: true,
-        nexhealthLocationId: true,
-        timezone: true
-      }
+      select: { id: true, nexhealthSubdomain: true, nexhealthLocationId: true, timezone: true }
     });
 
     if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
-      return NextResponse.json(
-        { error: 'Practice not found or not properly configured' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Practice not found or not configured' }, { status: 404 });
     }
 
-    console.log(`[Laine Web Availability] Searching for slots: practice=${practiceId}, nexhealthAppointmentTypeId=${nexhealthAppointmentTypeId}, startDate=${startDate}, searchDays=${searchDaysNum}`);
+    console.log(`[Laine Web Availability] Delegating to findAvailableSlots: practice=${practiceId}, appointmentType=${nexhealthAppointmentTypeId}, searchDays=${searchDaysNum}`);
 
-    // Call the existing findAvailableSlots function with nexhealthAppointmentTypeId directly
+    // --- Delegate to the Single Source of Truth ---
+    // This function will internally call getSlotSearchParams to get the correct
+    // providers, operatories, and duration for this specific appointment type
     const result = await findAvailableSlots(
       nexhealthAppointmentTypeId,
       {
@@ -83,14 +59,8 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('[Laine Web Availability] Error fetching availability:', error);
-    
-    // Extract meaningful error message
+    console.error('[Laine Web Availability API] Error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch availability';
-    
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 } 
