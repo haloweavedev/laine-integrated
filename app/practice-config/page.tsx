@@ -13,6 +13,7 @@ import { CheckAppointmentSlotsTool } from "./CheckAppointmentSlotsTool";
 interface Practice {
   id: string;
   name: string | null;
+  slug: string | null;
   nexhealthSubdomain: string | null;
   nexhealthLocationId: string | null;
   webhookLastSyncAt: string | null;
@@ -28,6 +29,7 @@ interface Practice {
     spokenName: string | null;
     check_immediate_next_available: boolean;
     keywords: string | null;
+    webPatientStatus: string;
     lastSyncError: string | null;
     createdAt: string;
     updatedAt: string;
@@ -228,6 +230,21 @@ export default function PracticeConfigPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter your practice name"
                 />
+              </div>
+
+              <div>
+                <label htmlFor="practiceSlug" className="block text-sm font-medium text-gray-700 mb-1">
+                  Practice Slug (Optional)
+                </label>
+                <input
+                  type="text"
+                  id="practiceSlug"
+                  name="practiceSlug"
+                  defaultValue={practice?.slug || ""}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., my-dental-practice"
+                />
+                <p className="text-xs text-gray-500 mt-1">Your public scheduling URL will be: yourdomain.com/laine-web/[slug]</p>
               </div>
               
               <div>

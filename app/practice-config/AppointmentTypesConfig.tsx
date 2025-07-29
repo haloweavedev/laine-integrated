@@ -12,6 +12,7 @@ interface AppointmentType {
   spokenName: string | null;
   check_immediate_next_available: boolean;
   keywords: string | null;
+  webPatientStatus: string;
   lastSyncError: string | null;
   createdAt: string;
   updatedAt: string;
@@ -29,6 +30,7 @@ interface FormData {
   spokenName: string;
   check_immediate_next_available: boolean;
   keywords: string;
+  webPatientStatus: string;
 }
 
 export function AppointmentTypesConfig({ 
@@ -48,7 +50,8 @@ export function AppointmentTypesConfig({
     bookableOnline: true,
     spokenName: '',
     check_immediate_next_available: false,
-    keywords: ''
+    keywords: '',
+    webPatientStatus: 'BOTH'
   });
 
   const resetForm = () => {
@@ -58,7 +61,8 @@ export function AppointmentTypesConfig({
       bookableOnline: true,
       spokenName: '',
       check_immediate_next_available: false,
-      keywords: ''
+      keywords: '',
+      webPatientStatus: 'BOTH'
     });
   };
 
@@ -224,7 +228,8 @@ export function AppointmentTypesConfig({
       bookableOnline: type.bookableOnline ?? true,
       spokenName: type.spokenName || '',
       check_immediate_next_available: type.check_immediate_next_available ?? false,
-      keywords: type.keywords || ''
+      keywords: type.keywords || '',
+      webPatientStatus: type.webPatientStatus || 'BOTH'
     });
     setShowEditModal(true);
   };
@@ -479,6 +484,20 @@ export function AppointmentTypesConfig({
                     Immediately find next available slot
                   </label>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Laine Web Availability
+                  </label>
+                  <select
+                    value={formData.webPatientStatus}
+                    onChange={(e) => setFormData({ ...formData, webPatientStatus: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="BOTH">New & Returning Patients</option>
+                    <option value="NEW">New Patients Only</option>
+                    <option value="RETURNING">Returning Patients Only</option>
+                  </select>
+                </div>
                 <div className="flex items-center">
                   <input
                     type="checkbox"
@@ -625,6 +644,20 @@ export function AppointmentTypesConfig({
                   <label htmlFor="editCheckImmediate" className="ml-2 block text-sm text-gray-700">
                     Immediately find next available slot
                   </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Laine Web Availability
+                  </label>
+                  <select
+                    value={formData.webPatientStatus}
+                    onChange={(e) => setFormData({ ...formData, webPatientStatus: e.target.value })}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="BOTH">New & Returning Patients</option>
+                    <option value="NEW">New Patients Only</option>
+                    <option value="RETURNING">Returning Patients Only</option>
+                  </select>
                 </div>
                 <div className="flex items-center">
                   <input

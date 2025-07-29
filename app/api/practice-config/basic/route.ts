@@ -12,6 +12,7 @@ export async function POST(req: NextRequest) {
 
     const formData = await req.formData();
     const name = formData.get("practiceName") as string | null;
+    const practiceSlug = formData.get("practiceSlug") as string | null;
     const subdomain = formData.get("nexhealthSubdomain") as string;
     const locationId = formData.get("nexhealthLocationId") as string;
     const address = formData.get("practiceAddress") as string | null;
@@ -25,6 +26,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Validate and normalize slug if provided
+    let validatedSlug: string | null = null;
+    if (practiceSlug && practiceSlug.trim()) {
+      const slugValue = practiceSlug.trim().toLowerCase();
+      
+      // Check if slug is URL-friendly format (lowercase, no spaces, no special characters except hyphens)
+      const slugRegex = /^[a-z0-9-]+$/;
+      if (!slugRegex.test(slugValue)) {
+        return NextResponse.json(
+          { error: "Practice slug must contain only lowercase letters, numbers, and hyphens" },
+          { status: 400 }
+        );
+      }
+
+      // Check for uniqueness
+      const existingPracticeWithSlug = await prisma.practice.findFirst({
+        where: {
+          slug: slugValue,
+          clerkUserId: { not: userId } // Exclude current practice
+        }
+      });
+
+      if (existingPracticeWithSlug) {
+        return NextResponse.json(
+          { error: "This practice slug is already in use. Please choose a different one." },
+          { status: 409 }
+        );
+      }
+
+      validatedSlug = slugValue;
+    }
+
     // Update webhook last sync timestamp to reflect sync attempt time
     const syncAttemptTime = new Date();
 
@@ -33,6 +66,7 @@ export async function POST(req: NextRequest) {
       where: { clerkUserId: userId },
       update: { 
         name, 
+        slug: validatedSlug,
         nexhealthSubdomain: subdomain, 
         nexhealthLocationId: locationId,
         address,
@@ -43,6 +77,7 @@ export async function POST(req: NextRequest) {
       create: { 
         clerkUserId: userId, 
         name, 
+        slug: validatedSlug,
         nexhealthSubdomain: subdomain, 
         nexhealthLocationId: locationId,
         address,

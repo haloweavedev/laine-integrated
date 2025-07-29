@@ -16,7 +16,8 @@ const createAppointmentTypeSchema = z.object({
   bookableOnline: z.boolean().optional().default(true),
   spokenName: z.string().nullable().optional(),
   check_immediate_next_available: z.boolean().optional(),
-  keywords: z.string().nullable().optional()
+  keywords: z.string().nullable().optional(),
+  webPatientStatus: z.enum(["NEW", "RETURNING", "BOTH"]).optional().default("BOTH")
 });
 
 export async function GET() {
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { name, minutes, bookableOnline, spokenName, check_immediate_next_available, keywords } = validationResult.data;
+    const { name, minutes, bookableOnline, spokenName, check_immediate_next_available, keywords, webPatientStatus } = validationResult.data;
 
     try {
       // Create appointment type in NexHealth (spokenName, check_immediate_next_available and keywords are Laine-specific, not sent to NexHealth)
@@ -113,6 +114,7 @@ export async function POST(req: NextRequest) {
           spokenName: spokenName || null, // Store the Laine-specific spoken name
           check_immediate_next_available: check_immediate_next_available || false, // Store the immediate check flag
           keywords: keywords || null, // Store the Laine-specific keywords
+          webPatientStatus: webPatientStatus, // Store the Laine-specific web patient status
           parentType: nexhealthResponse.parent_type,
           parentId: nexhealthResponse.parent_id.toString(),
           lastSyncError: null // Start with no sync errors

@@ -8,6 +8,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PatientWebStatus {
+  NEW
+  RETURNING
+  BOTH
+}
+
 model Practice {
   id                            String                         @id @default(cuid())
   clerkUserId                   String                         @unique
@@ -24,6 +30,7 @@ model Practice {
   lunchBreakStart               String?
   lunchBreakEnd                 String?
   minBookingBufferMinutes       Int?                           @default(60)
+  slug                          String?                        @unique
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
   appointmentTypes              AppointmentType[]
@@ -34,6 +41,7 @@ model Practice {
   toolLogs                      ToolLog[]
   savedOperatories              SavedOperatory[]
   savedProviders                SavedProvider[]
+  webBookings                   WebBooking[]
 }
 
 model SavedProvider {
@@ -189,10 +197,12 @@ model AppointmentType {
   parentType                     String?
   parentId                       String?
   lastSyncError                  String?
+  webPatientStatus               PatientWebStatus                  @default(BOTH)
   createdAt                      DateTime                          @default(now())
   updatedAt                      DateTime                          @updatedAt
   practice                       Practice                          @relation(fields: [practiceId], references: [id], onDelete: Cascade)
   acceptedByProviders            ProviderAcceptedAppointmentType[] @relation("ProviderAcceptedTypes")
+  webBookings                    WebBooking[]
 
   @@unique([practiceId, nexhealthAppointmentTypeId])
 }
@@ -217,4 +227,33 @@ model NexhealthTokenCache {
   expiresAt   DateTime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model WebBooking {
+  id                  String    @id @default(cuid())
+  practiceId          String
+  appointmentTypeId   String
+  status              String    // e.g., "COMPLETED", "ABANDONED"
+  
+  // Patient Info
+  patientFirstName    String
+  patientLastName     String
+  patientDob          String?   // Optional as it might not be collected for new patients initially
+  patientEmail        String
+  patientPhone        String
+  patientStatus       String    // "NEW" or "RETURNING"
+  
+  // Appointment Info
+  selectedSlotTime    DateTime
+  notes               String?
+  nexhealthBookingId  String?   @unique
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  practice            Practice        @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  appointmentType     AppointmentType @relation(fields: [appointmentTypeId], references: [id], onDelete: Cascade)
+
+  @@index([practiceId])
+  @@index([appointmentTypeId])
 }

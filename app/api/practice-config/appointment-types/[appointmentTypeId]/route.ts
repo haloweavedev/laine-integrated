@@ -25,7 +25,8 @@ const updateAppointmentTypeSchema = z.object({
   bookableOnline: z.boolean().optional(),
   spokenName: z.string().nullable().optional(),
   check_immediate_next_available: z.boolean().optional(),
-  keywords: z.string().nullable().optional()
+  keywords: z.string().nullable().optional(),
+  webPatientStatus: z.enum(["NEW", "RETURNING", "BOTH"]).optional()
 });
 
 export async function PUT(
@@ -79,7 +80,7 @@ export async function PUT(
       }, { status: 400 });
     }
 
-    const { name, minutes, bookableOnline, spokenName, check_immediate_next_available, keywords } = validationResult.data;
+    const { name, minutes, bookableOnline, spokenName, check_immediate_next_available, keywords, webPatientStatus } = validationResult.data;
 
     // Build update data object with only provided fields for NexHealth
     const nexhealthUpdateData: {
@@ -101,7 +102,7 @@ export async function PUT(
     }
 
     try {
-      // Build local update data (includes spokenName, check_immediate_next_available and keywords which are Laine-specific)
+      // Build local update data (includes spokenName, check_immediate_next_available, keywords and webPatientStatus which are Laine-specific)
       const localUpdateData: {
         name?: string;
         duration?: number;
@@ -109,6 +110,7 @@ export async function PUT(
         spokenName?: string | null;
         check_immediate_next_available?: boolean;
         keywords?: string | null;
+        webPatientStatus?: "NEW" | "RETURNING" | "BOTH";
         parentType?: string;
         parentId?: string;
         lastSyncError?: null;
@@ -145,7 +147,7 @@ export async function PUT(
         console.log(`Successfully updated NexHealth appointment type ${localAppointmentType.nexhealthAppointmentTypeId}`);
       }
 
-      // Add spokenName, check_immediate_next_available and keywords updates if provided (Laine-specific fields)
+      // Add spokenName, check_immediate_next_available, keywords and webPatientStatus updates if provided (Laine-specific fields)
       if (spokenName !== undefined) {
         localUpdateData.spokenName = spokenName;
       }
@@ -154,6 +156,9 @@ export async function PUT(
       }
       if (keywords !== undefined) {
         localUpdateData.keywords = keywords;
+      }
+      if (webPatientStatus !== undefined) {
+        localUpdateData.webPatientStatus = webPatientStatus;
       }
 
       // Clear any previous sync errors on successful update
@@ -177,12 +182,13 @@ export async function PUT(
     } catch (nexhealthError) {
       console.error("Error updating appointment type in NexHealth:", nexhealthError);
       
-      // If only spokenName/check_immediate_next_available/keywords were being updated and NexHealth call failed, still update locally
-      if (Object.keys(nexhealthUpdateData).length === 0 && (spokenName !== undefined || check_immediate_next_available !== undefined || keywords !== undefined)) {
-        const localOnlyData: { spokenName?: string | null; check_immediate_next_available?: boolean; keywords?: string | null } = {};
+      // If only spokenName/check_immediate_next_available/keywords/webPatientStatus were being updated and NexHealth call failed, still update locally
+      if (Object.keys(nexhealthUpdateData).length === 0 && (spokenName !== undefined || check_immediate_next_available !== undefined || keywords !== undefined || webPatientStatus !== undefined)) {
+        const localOnlyData: { spokenName?: string | null; check_immediate_next_available?: boolean; keywords?: string | null; webPatientStatus?: "NEW" | "RETURNING" | "BOTH" } = {};
         if (spokenName !== undefined) localOnlyData.spokenName = spokenName;
         if (check_immediate_next_available !== undefined) localOnlyData.check_immediate_next_available = check_immediate_next_available;
         if (keywords !== undefined) localOnlyData.keywords = keywords;
+        if (webPatientStatus !== undefined) localOnlyData.webPatientStatus = webPatientStatus;
         
         const updatedLocalAppointmentType = await prisma.appointmentType.update({
           where: { id: appointmentTypeId },
