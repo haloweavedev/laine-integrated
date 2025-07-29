@@ -17,9 +17,13 @@ export function Step2_AppointmentType() {
   const [appointmentTypes, setAppointmentTypes] = useState<AppointmentTypeAPI[]>([]);
   const [isLoadingTypes, setIsLoadingTypes] = useState(true);
 
+  // Extract dependencies to clean up the array
+  const practiceId = state.practice?.id;
+  const patientStatus = state.patient.status;
+
   useEffect(() => {
     const fetchAppointmentTypes = async () => {
-      if (!state.practice?.id || !state.patient.status) {
+      if (!practiceId || !patientStatus) {
         setError('Missing practice or patient information');
         return;
       }
@@ -29,7 +33,7 @@ export function Step2_AppointmentType() {
         setError(null);
 
         const response = await fetch(
-          `/api/laine-web/appointment-types?practiceId=${state.practice.id}&patientStatus=${state.patient.status}`
+          `/api/laine-web/appointment-types?practiceId=${practiceId}&patientStatus=${patientStatus}`
         );
 
         if (!response.ok) {
@@ -51,7 +55,8 @@ export function Step2_AppointmentType() {
     };
 
     fetchAppointmentTypes();
-  }, [state.practice?.id, state.patient.status, setError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [practiceId, patientStatus]);
 
   const handleSelectAppointmentType = (appointmentType: AppointmentTypeAPI) => {
     selectAppointmentType({
