@@ -23,20 +23,29 @@ interface AvailabilityResponse {
 export function Step3_Scheduler() {
   const { state, selectDate, selectSlot, nextStep, prevStep, setError } = useScheduling();
   
-  // Simplified state management
+  // Core state management
   const [isLoading, setIsLoading] = useState(true);
   const [allSlots, setAllSlots] = useState<SlotData[]>([]);
   const [availableDatesSet, setAvailableDatesSet] = useState<Set<string>>(new Set());
   const [selectedDay, setSelectedDay] = useState<Date | undefined>(undefined);
   const [timesForSelectedDay, setTimesForSelectedDay] = useState<SlotData[]>([]);
+  
+  // Infinite scroll state
+  const [searchEndDate, setSearchEndDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 90);
+    return d;
+  });
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [showLoadMore, setShowLoadMore] = useState(false);
 
   // Extract dependencies for clarity
   const practiceId = state.practice?.id;
   const nexhealthAppointmentTypeId = state.appointmentType?.nexhealthAppointmentTypeId;
 
-  // Single fetch on component mount for 90 days
+  // Single fetch on component mount for initial 90 days
   useEffect(() => {
-    const fetchAllAvailability = async () => {
+    const fetchInitialAvailability = async () => {
       if (!practiceId || !nexhealthAppointmentTypeId) {
         setError('Missing practice or appointment type information');
         return;
@@ -49,7 +58,7 @@ export function Step3_Scheduler() {
         // Get today's date in YYYY-MM-DD format
         const today = new Date().toISOString().split('T')[0];
 
-        console.log('[Step3_Scheduler] Fetching 90 days of availability...');
+        console.log('[Step3_Scheduler] Fetching initial 90 days of availability...');
 
         const response = await fetch(
           `/api/laine-web/availability?practiceId=${practiceId}&nexhealthAppointmentTypeId=${nexhealthAppointmentTypeId}&startDate=${today}&searchDays=90`
@@ -74,10 +83,10 @@ export function Step3_Scheduler() {
         });
         setAvailableDatesSet(availableDates);
 
-        console.log(`[Step3_Scheduler] Loaded ${slots.length} slots across ${availableDates.size} days`);
+        console.log(`[Step3_Scheduler] Initial load: ${slots.length} slots across ${availableDates.size} days`);
 
       } catch (error) {
-        console.error('Error fetching availability:', error);
+        console.error('Error fetching initial availability:', error);
         const errorMessage = error instanceof Error ? error.message : 'Failed to load availability';
         setError(errorMessage);
         toast.error(errorMessage);
@@ -86,9 +95,83 @@ export function Step3_Scheduler() {
       }
     };
 
-    fetchAllAvailability();
+    fetchInitialAvailability();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [practiceId, nexhealthAppointmentTypeId]);
+
+  // Load more functionality for infinite scroll
+  const handleLoadMore = async () => {
+    if (isFetchingMore || !practiceId || !nexhealthAppointmentTypeId) return;
+
+    try {
+      setIsFetchingMore(true);
+      setError(null);
+
+      // Calculate the new start date (day after current search end date)
+      const newStartDate = new Date(searchEndDate);
+      newStartDate.setDate(newStartDate.getDate() + 1);
+      const startDateString = newStartDate.toISOString().split('T')[0];
+
+      console.log(`[Step3_Scheduler] Loading more: next 90 days starting from ${startDateString}`);
+
+      const response = await fetch(
+        `/api/laine-web/availability?practiceId=${practiceId}&nexhealthAppointmentTypeId=${nexhealthAppointmentTypeId}&startDate=${startDateString}&searchDays=90`
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch more availability');
+      }
+
+      const data: AvailabilityResponse = await response.json();
+      const newSlots = data.foundSlots || [];
+
+      // Append new slots to existing ones
+      setAllSlots(prevSlots => [...prevSlots, ...newSlots]);
+
+      // Update available dates set with new dates
+      const newAvailableDates = new Set<string>();
+      newSlots.forEach(slot => {
+        const slotDate = slot.time.split('T')[0];
+        newAvailableDates.add(slotDate);
+      });
+
+      setAvailableDatesSet(prevDates => {
+        const updatedSet = new Set(prevDates);
+        newAvailableDates.forEach(date => updatedSet.add(date));
+        return updatedSet;
+      });
+
+      // Update search end date by adding another 90 days
+      const newEndDate = new Date(searchEndDate);
+      newEndDate.setDate(newEndDate.getDate() + 90);
+      setSearchEndDate(newEndDate);
+
+      // Hide the load more button after successful load
+      setShowLoadMore(false);
+
+      console.log(`[Step3_Scheduler] Loaded ${newSlots.length} additional slots, total available dates: ${availableDatesSet.size + newAvailableDates.size}`);
+
+      toast.success(`Loaded ${newAvailableDates.size} more days with availability`);
+
+    } catch (error) {
+      console.error('Error loading more availability:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load more dates';
+      toast.error(errorMessage);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  // Handle month changes to detect when user navigates beyond loaded window
+  const handleMonthChange = (month: Date) => {
+    if (month > searchEndDate) {
+      console.log(`[Step3_Scheduler] User navigated to ${month.toISOString().split('T')[0]} beyond loaded window ending ${searchEndDate.toISOString().split('T')[0]}`);
+      setShowLoadMore(true);
+    } else {
+      setShowLoadMore(false);
+    }
+  };
 
   // Filter times when a day is selected
   useEffect(() => {
@@ -161,7 +244,7 @@ export function Step3_Scheduler() {
         </p>
         {availableDatesSet.size > 0 && (
           <p className="text-sm text-gray-500 mt-2">
-            {availableDatesSet.size} days available in the next 3 months
+            {availableDatesSet.size} days available • Navigate months to see more dates
           </p>
         )}
       </div>
@@ -184,96 +267,123 @@ export function Step3_Scheduler() {
           </p>
         </Card>
       ) : (
-        <Card className="gap-0 p-0">
-          <CardContent className="relative p-0 md:pr-48">
-            <div className="p-6">
-              <Calendar
-                mode="single"
-                selected={selectedDay}
-                onSelect={setSelectedDay}
-                showOutsideDays={false}
-                disabled={(date) => {
-                  // Disable past dates
-                  if (date < new Date(new Date().setHours(0, 0, 0, 0))) {
-                    return true;
-                  }
-                  // For future dates, disable them if they are NOT in our available set
-                  return !availableDatesSet.has(date.toISOString().split('T')[0]);
-                }}
-                modifiers={{
-                  unavailable: (date) => {
-                    if (date < new Date(new Date().setHours(0, 0, 0, 0))) return true;
+        <div className="space-y-4">
+          <Card className="gap-0 p-0">
+            <CardContent className="relative p-0 md:pr-48">
+              <div className="p-6">
+                <Calendar
+                  mode="single"
+                  selected={selectedDay}
+                  onSelect={setSelectedDay}
+                  onMonthChange={handleMonthChange}
+                  showOutsideDays={false}
+                  disabled={(date) => {
+                    // Disable past dates
+                    if (date < new Date(new Date().setHours(0, 0, 0, 0))) {
+                      return true;
+                    }
+                    // For future dates, disable them if they are NOT in our available set
                     return !availableDatesSet.has(date.toISOString().split('T')[0]);
-                  }
-                }}
-                modifiersClassNames={{
-                  unavailable: "[&>button]:line-through opacity-50",
-                }}
-                className="bg-transparent p-0 [--cell-size:--spacing(10)] md:[--cell-size:--spacing(12)]"
-                formatters={{
-                  formatWeekdayName: (date) => {
-                    return date.toLocaleString("en-US", { weekday: "short" })
-                  },
-                }}
-              />
-            </div>
-            <div className="no-scrollbar inset-y-0 right-0 flex max-h-72 w-full scroll-pb-6 flex-col gap-4 overflow-y-auto border-t p-6 md:absolute md:max-h-none md:w-48 md:border-t-0 md:border-l">
-              <div className="grid gap-2">
-                {selectedDay && timesForSelectedDay.length > 0 ? (
-                  timesForSelectedDay.map((slot, index) => (
-                    <Button
-                      key={index}
-                      variant={state.selectedSlot?.time === slot.time ? "default" : "outline"}
-                      onClick={() => handleTimeSelect(slot)}
-                      className="w-full shadow-none"
-                    >
-                      {formatTime(slot.time)}
-                    </Button>
-                  ))
-                ) : selectedDay ? (
-                  <p className="text-gray-500 text-center text-sm py-4">
-                    No available times for this date.
-                  </p>
+                  }}
+                  modifiers={{
+                    unavailable: (date) => {
+                      if (date < new Date(new Date().setHours(0, 0, 0, 0))) return true;
+                      return !availableDatesSet.has(date.toISOString().split('T')[0]);
+                    }
+                  }}
+                  modifiersClassNames={{
+                    unavailable: "[&>button]:line-through opacity-50",
+                  }}
+                  className="bg-transparent p-0 [--cell-size:--spacing(10)] md:[--cell-size:--spacing(12)]"
+                  formatters={{
+                    formatWeekdayName: (date) => {
+                      return date.toLocaleString("en-US", { weekday: "short" })
+                    },
+                  }}
+                />
+              </div>
+              <div className="no-scrollbar inset-y-0 right-0 flex max-h-72 w-full scroll-pb-6 flex-col gap-4 overflow-y-auto border-t p-6 md:absolute md:max-h-none md:w-48 md:border-t-0 md:border-l">
+                <div className="grid gap-2">
+                  {selectedDay && timesForSelectedDay.length > 0 ? (
+                    timesForSelectedDay.map((slot, index) => (
+                      <Button
+                        key={index}
+                        variant={state.selectedSlot?.time === slot.time ? "default" : "outline"}
+                        onClick={() => handleTimeSelect(slot)}
+                        className="w-full shadow-none"
+                      >
+                        {formatTime(slot.time)}
+                      </Button>
+                    ))
+                  ) : selectedDay ? (
+                    <p className="text-gray-500 text-center text-sm py-4">
+                      No available times for this date.
+                    </p>
+                  ) : (
+                    <p className="text-gray-500 text-center text-sm py-4">
+                      Select a date to see available times.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex flex-col gap-4 border-t px-6 !py-5 md:flex-row">
+              <div className="text-sm">
+                {selectedDay && state.selectedSlot ? (
+                  <>
+                    Your <span className="font-medium">{state.appointmentType?.name}</span> is booked for{" "}
+                    <span className="font-medium">
+                      {formatDate(selectedDay)}
+                    </span>
+                    {" "}at <span className="font-medium">{formatTime(state.selectedSlot.time)}</span>.
+                  </>
                 ) : (
-                  <p className="text-gray-500 text-center text-sm py-4">
-                    Select a date to see available times.
-                  </p>
+                  <>Select a date and time for your {state.appointmentType?.name || 'appointment'}.</>
                 )}
               </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-4 border-t px-6 !py-5 md:flex-row">
-            <div className="text-sm">
-              {selectedDay && state.selectedSlot ? (
-                <>
-                  Your <span className="font-medium">{state.appointmentType?.name}</span> is booked for{" "}
-                  <span className="font-medium">
-                    {formatDate(selectedDay)}
-                  </span>
-                  {" "}at <span className="font-medium">{formatTime(state.selectedSlot.time)}</span>.
-                </>
-              ) : (
-                <>Select a date and time for your {state.appointmentType?.name || 'appointment'}.</>
-              )}
-            </div>
-            <div className="flex gap-2 w-full md:ml-auto md:w-auto">
+              <div className="flex gap-2 w-full md:ml-auto md:w-auto">
+                <Button
+                  onClick={prevStep}
+                  variant="outline"
+                  className="flex-1 md:flex-none"
+                >
+                  Back
+                </Button>
+                <Button
+                  disabled={!state.selectedSlot}
+                  onClick={nextStep}
+                  className="flex-1 md:flex-none"
+                >
+                  Continue
+                </Button>
+              </div>
+            </CardFooter>
+          </Card>
+
+          {/* Load More Button for Infinite Scroll */}
+          {showLoadMore && (
+            <div className="text-center">
               <Button
-                onClick={prevStep}
                 variant="outline"
-                className="flex-1 md:flex-none"
+                onClick={handleLoadMore}
+                disabled={isFetchingMore}
+                className="min-w-48"
               >
-                Back
+                {isFetchingMore ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                    Loading more dates...
+                  </>
+                ) : (
+                  <>Check for later dates</>
+                )}
               </Button>
-              <Button
-                disabled={!state.selectedSlot}
-                onClick={nextStep}
-                className="flex-1 md:flex-none"
-              >
-                Continue
-              </Button>
+              <p className="text-xs text-gray-500 mt-2">
+                Load the next 3 months of availability
+              </p>
             </div>
-          </CardFooter>
-        </Card>
+          )}
+        </div>
       )}
     </div>
   );

@@ -318,7 +318,7 @@ export async function findAvailableSlots(
     practice.id
   );
 
-  console.log(`[Slot Search] Searching for ${duration}-minute slots with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
+  console.log(`[Slot Search] Bulk searching for ${duration}-minute slots across ${searchDays} days with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
 
   // Fetch practice-specific scheduling rules
   const practiceSettings = await prisma.practice.findUnique({
@@ -337,198 +337,173 @@ export async function findAvailableSlots(
   const lunchBreakEnd = practiceSettings?.lunchBreakEnd;
   const bookingBufferMinutes = practiceSettings?.minBookingBufferMinutes || 0;
   
-  // Generate search dates based on startDate and searchDays
-  const searchDates: string[] = [];
-  const startDateTime = DateTime.fromISO(startDate, { zone: timezone });
-  
-  for (let i = 0; i < searchDays; i++) {
-    searchDates.push(startDateTime.plus({ days: i }).toFormat('yyyy-MM-dd'));
-  }
+  console.log(`[Slot Search] Searching from ${startDate} for ${searchDays} days in timezone ${timezone}`);
 
-  console.log(`[Slot Search] Searching dates: ${searchDates.join(', ')} in timezone ${timezone}`);
+  try {
+    // Build the query string for a single bulk API call
+    let queryString = `start_date=${startDate}&days=${searchDays}&slot_length=${duration.toString()}`;
+    queryString += `&lids[]=${practice.nexhealthLocationId}`;
+    providerIds.forEach(id => {
+      queryString += `&pids[]=${id}`;
+    });
+    operatoryIds.forEach(id => {
+      queryString += `&operatory_ids[]=${id}`;
+    });
 
-  const foundSlots: SlotData[] = [];
-  let nextAvailableDate: string | null = null;
+    const pathWithQuery = `/appointment_slots?${queryString}`;
 
-  // Search through the specified date range
-  for (let i = 0; i < searchDates.length; i++) {
-    const searchDate = searchDates[i];
-    
-    try {
-      console.log(`[Slot Search] Searching date ${searchDate} (day ${i + 1}/${searchDates.length})`);
+    console.log(`[NexHealth Bulk Request] Fetching ${searchDays} days with path: ${pathWithQuery}`);
+
+    // Make single bulk API call to NexHealth
+    const response = await fetchNexhealthAPI(
+      pathWithQuery,
+      practice.nexhealthSubdomain,
+      undefined // Pass undefined for params since we built it into the path
+    ) as NexHealthSlotsResponse;
+
+    console.log(`[Slot Search] Bulk API response received for ${searchDays} days`);
+
+    // Process the response data
+    const responseData = response.data; // The object from fetchNexhealthAPI
+    const nexhealthData = responseData.data; // The actual payload from NexHealth
+    let nextAvailableDate: string | null = null;
+
+    // Store next_available_date from the API response if present
+    if (responseData && responseData.next_available_date) {
+      nextAvailableDate = responseData.next_available_date;
+      console.log(`[Slot Search] Found next_available_date: ${nextAvailableDate}`);
+    }
+
+    if (!nexhealthData || !Array.isArray(nexhealthData)) {
+      console.log(`[Slot Search] No slot data received from bulk API call`);
+      return { foundSlots: [], nextAvailableDate };
+    }
+
+    // Collect all slots from all providers across all days
+    const allSlots = nexhealthData.flatMap((providerData: ProviderSlotData) => {
+      if (providerData.slots && Array.isArray(providerData.slots)) {
+        return providerData.slots.map((slot) => ({
+          ...slot,
+          providerId: providerData.pid,
+          locationId: providerData.lid
+        }));
+      }
+      return [];
+    });
+
+    console.log(`[Slot Search] Collected ${allSlots.length} total slots from bulk API response`);
+
+    // Filter out slots that overlap with configurable lunch break
+    const lunchFilteredSlots = allSlots.filter((slot) => {
+      try {
+        // Parse the slot time to get the start time
+        const slotStartTime = DateTime.fromISO(slot.time).setZone(timezone);
+        
+        // Calculate the slot end time by adding duration
+        const slotEndTime = slotStartTime.plus({ minutes: duration });
+        
+        // Check for lunch break conflicts only if lunch break is configured
+        if (lunchBreakStart && lunchBreakEnd) {
+          const [lunchStartHour, lunchStartMinute] = lunchBreakStart.split(':').map(Number);
+          const [lunchEndHour, lunchEndMinute] = lunchBreakEnd.split(':').map(Number);
+          
+          const slotStartHour = slotStartTime.hour;
+          const slotStartMinute = slotStartTime.minute;
+          const slotEndHour = slotEndTime.hour;
+          const slotEndMinute = slotEndTime.minute;
+          
+          // Check if slot overlaps with lunch break
+          const slotStartsInLunch = (slotStartHour === lunchStartHour && slotStartMinute >= lunchStartMinute) || 
+                                   (slotStartHour > lunchStartHour && slotStartHour < lunchEndHour) ||
+                                   (slotStartHour === lunchEndHour && slotStartMinute < lunchEndMinute);
+          
+          const slotEndsInLunch = (slotEndHour === lunchStartHour && slotEndMinute > lunchStartMinute) || 
+                                 (slotEndHour > lunchStartHour && slotEndHour < lunchEndHour) ||
+                                 (slotEndHour === lunchEndHour && slotEndMinute <= lunchEndMinute);
+          
+          const slotSpansLunch = (slotStartHour < lunchStartHour || (slotStartHour === lunchStartHour && slotStartMinute <= lunchStartMinute)) && 
+                               (slotEndHour > lunchEndHour || (slotEndHour === lunchEndHour && slotEndMinute >= lunchEndMinute));
+          
+          const isLunchConflict = slotStartsInLunch || slotEndsInLunch || slotSpansLunch;
+          
+          if (isLunchConflict) {
+            console.log(`[Lunch Filter] Discarded slot at ${slot.time} - conflicts with lunch break (${lunchBreakStart} - ${lunchBreakEnd})`);
+            return false;
+          }
+        }
+        
+        return true;
+      } catch (error) {
+        console.error(`[Lunch Filter] Error parsing slot time ${slot.time}:`, error);
+        // Keep the slot if we can't parse it rather than losing potentially valid slots
+        return true;
+      }
+    });
+
+    console.log(`[Lunch Filter] Filtered ${allSlots.length} slots to ${lunchFilteredSlots.length} slots after removing lunch conflicts`);
+
+    // Apply time bucket filter if specified
+    let timeBucketFilteredSlots = lunchFilteredSlots;
+    if (timeBucket && timeBucket !== 'AllDay' && TIME_BUCKETS[timeBucket]) {
+      const timeBucketRange = TIME_BUCKETS[timeBucket];
+      const [startHour, startMinute] = timeBucketRange.start.split(':').map(Number);
+      const [endHour, endMinute] = timeBucketRange.end.split(':').map(Number);
       
-      // Build the query string manually for precise control
-      let queryString = `start_date=${searchDate}&days=1&slot_length=${duration.toString()}`;
-      queryString += `&lids[]=${practice.nexhealthLocationId}`;
-      providerIds.forEach(id => {
-        queryString += `&pids[]=${id}`;
-      });
-      operatoryIds.forEach(id => {
-        queryString += `&operatory_ids[]=${id}`;
-      });
-
-      const pathWithQuery = `/appointment_slots?${queryString}`;
-
-      console.log(`[NexHealth Request Verification] Manually constructed path: ${pathWithQuery}`);
-
-      // Call NexHealth API with the manually constructed path
-      const response = await fetchNexhealthAPI(
-        pathWithQuery,
-        practice.nexhealthSubdomain,
-        undefined // Pass undefined for params since we built it into the path
-      ) as NexHealthSlotsResponse;
-
-      console.log(`[Slot Search] API response for ${searchDate}:`, JSON.stringify(response, null, 2));
-
-      // Process the response data
-      const responseData = response.data; // The object from fetchNexhealthAPI
-      const nexhealthData = responseData.data; // The actual payload from NexHealth
-
-      if (nexhealthData && Array.isArray(nexhealthData)) {
-        // Collect all slots from all providers for this date
-        const daySlots = nexhealthData.flatMap((providerData: ProviderSlotData) => {
-          if (providerData.slots && Array.isArray(providerData.slots)) {
-            return providerData.slots.map((slot) => ({
-              ...slot,
-              providerId: providerData.pid,
-              locationId: providerData.lid
-            }));
-          }
-          return [];
-        });
-
-        // Filter out slots that overlap with configurable lunch break
-        const filteredDaySlots = daySlots.filter((slot) => {
-          try {
-            // Parse the slot time to get the start time
-            const slotStartTime = DateTime.fromISO(slot.time).setZone(timezone);
-            
-            // Calculate the slot end time by adding duration
-            const slotEndTime = slotStartTime.plus({ minutes: duration });
-            
-            // Check for lunch break conflicts only if lunch break is configured
-            if (lunchBreakStart && lunchBreakEnd) {
-              const [lunchStartHour, lunchStartMinute] = lunchBreakStart.split(':').map(Number);
-              const [lunchEndHour, lunchEndMinute] = lunchBreakEnd.split(':').map(Number);
-              
-              const slotStartHour = slotStartTime.hour;
-              const slotStartMinute = slotStartTime.minute;
-              const slotEndHour = slotEndTime.hour;
-              const slotEndMinute = slotEndTime.minute;
-              
-              // Check if slot overlaps with lunch break
-              const slotStartsInLunch = (slotStartHour === lunchStartHour && slotStartMinute >= lunchStartMinute) || 
-                                       (slotStartHour > lunchStartHour && slotStartHour < lunchEndHour) ||
-                                       (slotStartHour === lunchEndHour && slotStartMinute < lunchEndMinute);
-              
-              const slotEndsInLunch = (slotEndHour === lunchStartHour && slotEndMinute > lunchStartMinute) || 
-                                     (slotEndHour > lunchStartHour && slotEndHour < lunchEndHour) ||
-                                     (slotEndHour === lunchEndHour && slotEndMinute <= lunchEndMinute);
-              
-              const slotSpansLunch = (slotStartHour < lunchStartHour || (slotStartHour === lunchStartHour && slotStartMinute <= lunchStartMinute)) && 
-                                   (slotEndHour > lunchEndHour || (slotEndHour === lunchEndHour && slotEndMinute >= lunchEndMinute));
-              
-              const isLunchConflict = slotStartsInLunch || slotEndsInLunch || slotSpansLunch;
-              
-              if (isLunchConflict) {
-                console.log(`[Lunch Filter] Discarded slot at ${slot.time} - conflicts with lunch break (${lunchBreakStart} - ${lunchBreakEnd})`);
-                return false;
-              }
-            }
-            
-            return true;
-          } catch (error) {
-            console.error(`[Lunch Filter] Error parsing slot time ${slot.time}:`, error);
-            // Keep the slot if we can't parse it rather than losing potentially valid slots
-            return true;
-          }
-        });
-
-        console.log(`[Lunch Filter] Filtered ${daySlots.length} slots to ${filteredDaySlots.length} slots after removing lunch conflicts on ${searchDate}`);
-
-        // Apply time bucket filter if specified
-        let finalDaySlots = filteredDaySlots;
-        if (timeBucket && timeBucket !== 'AllDay' && TIME_BUCKETS[timeBucket]) {
-          const timeBucketRange = TIME_BUCKETS[timeBucket];
-          const [startHour, startMinute] = timeBucketRange.start.split(':').map(Number);
-          const [endHour, endMinute] = timeBucketRange.end.split(':').map(Number);
-          
-          console.log(`[Time Bucket Filter] Filtering slots for ${timeBucket} preference (${timeBucketRange.start} - ${timeBucketRange.end}) on ${searchDate}`);
-          
-          finalDaySlots = filteredDaySlots.filter(slot => {
-            const slotTime = DateTime.fromISO(slot.time, { zone: timezone });
-            const slotHour = slotTime.hour;
-            const slotMinute = slotTime.minute;
-            
-            // Check if slot time falls within the time bucket
-            const slotTimeInMinutes = slotHour * 60 + slotMinute;
-            const startTimeInMinutes = startHour * 60 + startMinute;
-            const endTimeInMinutes = endHour * 60 + endMinute;
-            
-            const withinRange = slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
-            
-            if (!withinRange) {
-              console.log(`[Time Bucket Filter] Filtered out slot ${slot.time} (${slotHour}:${slotMinute.toString().padStart(2, '0')}) - outside ${timeBucket} range`);
-            }
-            
-            return withinRange;
-          });
-          
-          console.log(`[Time Bucket Filter] Filtered from ${filteredDaySlots.length} to ${finalDaySlots.length} slots for ${timeBucket} preference on ${searchDate}`);
+      console.log(`[Time Bucket Filter] Filtering slots for ${timeBucket} preference (${timeBucketRange.start} - ${timeBucketRange.end})`);
+      
+      timeBucketFilteredSlots = lunchFilteredSlots.filter(slot => {
+        const slotTime = DateTime.fromISO(slot.time, { zone: timezone });
+        const slotHour = slotTime.hour;
+        const slotMinute = slotTime.minute;
+        
+        // Check if slot time falls within the time bucket
+        const slotTimeInMinutes = slotHour * 60 + slotMinute;
+        const startTimeInMinutes = startHour * 60 + startMinute;
+        const endTimeInMinutes = endHour * 60 + endMinute;
+        
+        const withinRange = slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
+        
+        if (!withinRange) {
+          console.log(`[Time Bucket Filter] Filtered out slot ${slot.time} (${slotHour}:${slotMinute.toString().padStart(2, '0')}) - outside ${timeBucket} range`);
         }
-
-        foundSlots.push(...finalDaySlots);
-        console.log(`[Slot Search] Found ${finalDaySlots.length} slots on ${searchDate} (after all filtering), total so far: ${foundSlots.length}`);
-
-        // If we have 2 or more slots, we can break early
-        if (foundSlots.length >= 2) {
-          console.log(`[Slot Search] Found sufficient slots (${foundSlots.length}), stopping search`);
-          break;
-        }
-      }
-
-      // Store next_available_date from the last API response if present
-      // Correctly parse the next_available_date from the top-level of the NexHealth payload
-      if (responseData && responseData.next_available_date) {
-        nextAvailableDate = responseData.next_available_date;
-        console.log(`[Slot Search] Found next_available_date: ${nextAvailableDate}`);
-      }
-
-    } catch (error) {
-      console.error(`[Slot Search] Error searching ${searchDate}:`, error);
-      // Continue to next date on error
+        
+        return withinRange;
+      });
+      
+      console.log(`[Time Bucket Filter] Filtered from ${lunchFilteredSlots.length} to ${timeBucketFilteredSlots.length} slots for ${timeBucket} preference`);
     }
+
+    // Apply booking buffer filter - remove slots that are too soon from now
+    const now = DateTime.now().setZone(timezone);
+    const bookingBufferSlots = timeBucketFilteredSlots.filter(slot => {
+      const slotStartTime = DateTime.fromISO(slot.time, { zone: timezone });
+      const minutesFromNow = slotStartTime.diff(now, 'minutes').minutes;
+      
+      if (minutesFromNow < bookingBufferMinutes) {
+        console.log(`[Booking Buffer] Discarded slot at ${slot.time} - too soon (${Math.round(minutesFromNow)} minutes from now, minimum required: ${bookingBufferMinutes})`);
+        return false;
+      }
+      
+      return true;
+    });
+
+    console.log(`[Booking Buffer] Filtered from ${timeBucketFilteredSlots.length} to ${bookingBufferSlots.length} slots after applying ${bookingBufferMinutes}-minute booking buffer`);
+
+    // Sort slots chronologically to ensure earliest times are offered first
+    bookingBufferSlots.sort((a, b) => a.time.localeCompare(b.time));
+    console.log('[Slot Search] Sorted slots chronologically.');
+
+    console.log(`[Slot Search] Bulk search complete: ${bookingBufferSlots.length} slots found across ${searchDays} days, next available: ${nextAvailableDate}`);
+
+    return {
+      foundSlots: bookingBufferSlots,
+      nextAvailableDate
+    };
+
+  } catch (error) {
+    console.error(`[Slot Search] Error in bulk API call:`, error);
+    return { foundSlots: [], nextAvailableDate: null };
   }
-
-  // Apply booking buffer filter - remove slots that are too soon from now
-  const now = DateTime.now().setZone(timezone);
-  const bookingBufferSlots = foundSlots.filter(slot => {
-    const slotStartTime = DateTime.fromISO(slot.time, { zone: timezone });
-    const minutesFromNow = slotStartTime.diff(now, 'minutes').minutes;
-    
-    if (minutesFromNow < bookingBufferMinutes) {
-      console.log(`[Booking Buffer] Discarded slot at ${slot.time} - too soon (${Math.round(minutesFromNow)} minutes from now, minimum required: ${bookingBufferMinutes})`);
-      return false;
-    }
-    
-    return true;
-  });
-
-  console.log(`[Booking Buffer] Filtered from ${foundSlots.length} to ${bookingBufferSlots.length} slots after applying ${bookingBufferMinutes}-minute booking buffer`);
-
-  // Sort slots chronologically to ensure earliest times are offered first
-  bookingBufferSlots.sort((a, b) => a.time.localeCompare(b.time));
-  console.log('[Slot Search] Sorted slots chronologically.');
-
-  // Limit to first 2-3 slots for response
-  const limitedSlots = bookingBufferSlots.slice(0, 3);
-  
-  console.log(`[Slot Search] Final result: ${limitedSlots.length} slots found, next available: ${nextAvailableDate}`);
-
-  return {
-    foundSlots: limitedSlots,
-    nextAvailableDate
-  };
 }
 
 /**
