@@ -2,7 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 const isProtectedRoute = createRouteMatcher([
   '/practice-config(.*)',
-  '/laine(.*)',
+  '/laine-web/appointments(.*)', // Protect the admin appointments view
   '/test(.*)',
 ]);
 
