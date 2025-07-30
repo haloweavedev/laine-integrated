@@ -5,6 +5,7 @@ import { getFindAndConfirmPatientTool } from './definitions/findAndConfirmPatien
 import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
 import { getSelectAndConfirmSlotTool } from './definitions/selectAndConfirmSlotTool';
 import { getConfirmBookingTool } from './definitions/confirmBookingTool';
+import { getInsuranceInfoTool } from './definitions/insuranceInfoTool';
 
 /**
  * Central map of all tool definitions
@@ -17,6 +18,7 @@ export const toolDefinitionMap = {
   checkAvailableSlots: getCheckAvailableSlotsTool,
   selectAndConfirmSlot: getSelectAndConfirmSlotTool,
   confirmBooking: getConfirmBookingTool,
+  insuranceInfo: getInsuranceInfoTool,
 };
 
 /**

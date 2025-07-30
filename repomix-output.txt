@@ -1,0 +1,2432 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: lib/ai, lib/system-prompt/laine_system_prompt.md, lib/tool-handlers, lib/tools
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+lib/
+  ai/
+    acknowledgmentGenerator.ts
+    appointmentMatcher.ts
+    slotHelper.ts
+    slotMatcher.ts
+    summaryHelper.ts
+  system-prompt/
+    laine_system_prompt.md
+  tool-handlers/
+    checkAvailableSlotsHandler.ts
+    confirmBookingHandler.ts
+    createPatientRecordHandler.ts
+    findAndConfirmPatientHandler.ts
+    findAppointmentTypeHandler.ts
+    selectAndConfirmSlotHandler.ts
+  tools/
+    definitions/
+      checkAvailableSlotsTool.ts
+      confirmBookingTool.ts
+      createPatientRecordTool.ts
+      findAndConfirmPatientTool.ts
+      findAppointmentTypeTool.ts
+      selectAndConfirmSlotTool.ts
+    index.ts
+
+================================================================
+Files
+================================================================
+
+================
+File: lib/ai/acknowledgmentGenerator.ts
+================
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import type { CoreMessage } from "ai";
+
+/**
+ * Generates a short, context-aware acknowledgment phrase based on the user's request.
+ * Produces empathetic responses for painful/negative requests, encouraging responses 
+ * for positive/cosmetic requests, and simple professional acknowledgments for routine requests.
+ * @param patientRequest The patient's stated reason for calling or request
+ * @returns A promise that resolves to a contextually appropriate acknowledgment string
+ */
+export async function generateAcknowledgment(patientRequest: string): Promise<string> {
+  try {
+    const systemPrompt = `You are an expert AI copywriter specializing in creating short, natural-sounding conversational acknowledgments for a dental receptionist. Your response MUST be a single, short phrase and nothing else. Do not add any extra text or pleasantries.
+
+- If the user's request sounds painful or negative (e.g., "broken tooth," "toothache," "crown fell off"), generate an empathetic response.
+  - Example for "My crown fell off": "Oh no, that's no fun. Let's get that sorted for you."
+- If the user's request is for a cosmetic or positive procedure (e.g., "veneers," "whitening," "Invisalign"), generate an encouraging and positive response.
+  - Example for "I want to get my teeth whitened": "That's exciting! A brighter smile is a great goal."
+- If the user's request is neutral or routine (e.g., "I need a cleaning," "check-up"), generate a simple, pleasant acknowledgment.
+  - Example for "I'd like to schedule a cleaning": "Of course, we can definitely get that scheduled for you."`;
+
+    const messages: CoreMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: patientRequest }
+    ];
+
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages,
+      temperature: 0.2,
+      maxTokens: 50,
+    });
+
+    return text.trim();
+
+  } catch (error) {
+    console.error(`[AcknowledgmentGenerator] Error generating acknowledgment for request: "${patientRequest}"`, error);
+    return '';
+  }
+}
+
+================
+File: lib/tools/definitions/findAndConfirmPatientTool.ts
+================
+import type { VapiTool } from '@/types/vapi';
+
+/**
+ * Get the VAPI tool definition for findAndConfirmPatient
+ * This tool looks up an existing patient by their full name and date of birth to confirm their record
+ */
+export function getFindAndConfirmPatientTool(appBaseUrl: string): VapiTool {
+  return {
+    type: "function" as const,
+    function: {
+      name: "findAndConfirmPatient",
+      description: "Looks up an existing patient by their full name and date of birth to confirm their record. Use this after an existing patient provides both their name and DOB.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          fullName: { 
+            type: "string" as const, 
+            description: "The patient's full name (first and last name)." 
+          },
+          dateOfBirth: { 
+            type: "string" as const, 
+            description: "The patient's date of birth in YYYY-MM-DD format." 
+          },
+        },
+        required: ["fullName", "dateOfBirth"],
+      },
+    },
+    server: { 
+      url: `${appBaseUrl}/api/vapi-webhook`,
+      timeoutSeconds: 25
+    }
+  };
+}
+
+================
+File: lib/tools/definitions/selectAndConfirmSlotTool.ts
+================
+import type { VapiTool } from '@/types/vapi';
+
+/**
+ * Get the VAPI tool definition for selectAndConfirmSlot
+ * This tool captures the user's slot selection, saves it, and asks them for final confirmation
+ */
+export function getSelectAndConfirmSlotTool(appBaseUrl: string): VapiTool {
+  return {
+    type: "function" as const,
+    function: {
+      name: "selectAndConfirmSlot",
+      description: "Captures the user's verbal choice of a time slot, saves it, and asks them for final confirmation. Use this immediately after presenting time options and the user indicates their choice.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          userSelection: {
+            type: "string" as const,
+            description: "The user's verbal selection of a time slot (e.g., '10 AM', 'the first one', '8:30')"
+          }
+        },
+        required: ["userSelection"]
+      }
+    },
+    server: {
+      url: `${appBaseUrl}/api/vapi-webhook`,
+    }
+  };
+}
+
+================
+File: lib/tool-handlers/selectAndConfirmSlotHandler.ts
+================
+import { matchUserSelectionToSlot } from '../ai/slotMatcher';
+import { ConversationState } from '../../types/vapi';
+import { prisma } from '@/lib/prisma';
+import { mergeState } from '@/lib/utils/state-helpers';
+import { DateTime } from 'luxon';
+
+interface SelectAndConfirmSlotArgs {
+  userSelection: string;
+}
+
+import { HandlerResult } from '../../types/vapi';
+
+export async function handleSelectAndConfirmSlot(
+  currentState: ConversationState,
+  toolArguments: SelectAndConfirmSlotArgs,
+  toolCallId: string
+): Promise<HandlerResult> {
+  console.log('[SelectAndConfirmSlot] Processing user selection:', toolArguments.userSelection);
+
+  // Get practice details for timezone
+  const practice = await prisma.practice.findUnique({
+    where: { id: currentState.practiceId },
+    select: { timezone: true }
+  });
+
+  if (!practice) {
+    // Handle case where practice is not found
+    return {
+      toolResponse: { toolCallId, error: "Practice configuration not found." },
+      newState: currentState
+    };
+  }
+  const practiceTimezone = practice.timezone || 'America/Chicago'; // Use a sensible default
+  
+  // Check if presentedSlots exists and is not empty
+  if (!currentState.appointmentBooking?.presentedSlots || currentState.appointmentBooking.presentedSlots.length === 0) {
+    console.log('[SelectAndConfirmSlot] ERROR: No presented slots available');
+    return {
+      toolResponse: {
+        toolCallId,
+        error: "I don't see any available time slots to choose from. Let me check availability for you first."
+      },
+      newState: currentState
+    };
+  }
+
+  // Get the presented slots from current state
+  const presentedSlots = currentState.appointmentBooking.presentedSlots;
+
+  console.log('[SelectAndConfirmSlot] Matching selection against', presentedSlots.length, 'slots');
+  
+  // Use AI slot matcher to find the selected slot
+  const matchedSlot = await matchUserSelectionToSlot(
+    toolArguments.userSelection,
+    presentedSlots,
+    practiceTimezone
+  );
+
+  if (!matchedSlot) {
+    console.log('[SelectAndConfirmSlot] ERROR: Could not match user selection');
+    return {
+      toolResponse: {
+        toolCallId,
+        error: "I'm not sure which time slot you're referring to. Could you please be more specific? For example, you could say '10:30 AM' or 'the first option'."
+      },
+      newState: currentState
+    };
+  }
+
+  console.log('[SelectAndConfirmSlot] Successfully matched slot:', matchedSlot);
+
+  // Get the spokenName for the confirmation message
+  const { spokenName } = currentState.appointmentBooking;
+  if (!spokenName) {
+    console.log('[SelectAndConfirmSlot] ERROR: Missing spokenName in state');
+    return {
+      toolResponse: {
+        toolCallId,
+        error: "Cannot prepare confirmation. Appointment type information is missing."
+      },
+      newState: currentState
+    };
+  }
+
+  // Generate formatted time for use in messages
+  const formattedTime = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone })
+                                .toFormat("cccc, MMMM d 'at' h:mm a");
+
+  // Update the state with the selected slot and clear presented slots
+  const newState = mergeState(currentState, {
+    appointmentBooking: {
+      selectedSlot: matchedSlot,
+      presentedSlots: [] // Clear the list of options once selection is made
+    }
+  });
+
+  // Check if patient has been identified yet (urgent flow gate)
+  if (!currentState.patientDetails.nexhealthPatientId) {
+    // Urgent flow: We have a slot but no patient record yet
+    const urgentFlowMessage = `Okay, I'm holding the slot for you on ${formattedTime}. Before I can finalize that, I'll need to get your details. Are you a new or an existing patient?`;
+    
+    console.log('[SelectAndConfirmSlot] Urgent flow: Patient ID missing, pivoting to patient identification');
+    
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: true },
+        message: {
+          type: 'assistant-message',
+          role: 'assistant',
+          content: urgentFlowMessage
+        }
+      },
+      newState
+    };
+  } else {
+    // Standard flow: Patient already identified, proceed to confirmation
+    const confirmationMessage = `Okay, just to confirm, I have you down for a ${spokenName} on ${formattedTime}. Does that all sound correct?`;
+    
+    console.log('[SelectAndConfirmSlot] Standard flow: Generated confirmation message:', confirmationMessage);
+    
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: true },
+        message: {
+          type: 'assistant-message',
+          role: 'assistant',
+          content: confirmationMessage
+        }
+      },
+      newState
+    };
+  }
+}
+
+================
+File: lib/tools/definitions/createPatientRecordTool.ts
+================
+import type { VapiTool } from '@/types/vapi';
+
+/**
+ * Get the VAPI tool definition for create_patient_record
+ * This tool creates a new patient record in the dental practice's EHR system
+ */
+export function getCreatePatientRecordTool(appBaseUrl: string): VapiTool {
+  return {
+    type: "function" as const,
+    function: {
+      name: "create_patient_record",
+      description: "Creates a new patient record in the dental practice's Electronic Health Record (EHR) system. Use this tool only after collecting the patient's full name, date of birth, phone number, and email address.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          firstName: { 
+            type: "string" as const, 
+            description: "The patient's first name." 
+          },
+          lastName: { 
+            type: "string" as const, 
+            description: "The patient's last name." 
+          },
+          dateOfBirth: { 
+            type: "string" as const, 
+            description: "The patient's date of birth in YYYY-MM-DD format." 
+          },
+          phoneNumber: { 
+            type: "string" as const, 
+            description: "The patient's 10-digit phone number, without country code or symbols." 
+          },
+          email: { 
+            type: "string" as const, 
+            description: "The patient's email address." 
+          },
+        },
+        required: ["firstName", "lastName", "dateOfBirth", "phoneNumber", "email"],
+      },
+    },
+    server: { 
+      url: `${appBaseUrl}/api/vapi-webhook`,
+      timeoutSeconds: 25
+    }
+  };
+}
+
+================
+File: lib/ai/summaryHelper.ts
+================
+import type { ConversationState } from '@/types/vapi';
+
+/**
+ * Generates a concise, professional appointment note for dental office staff
+ * @param state The full conversation state containing booking details
+ * @returns A professional note string for the appointment
+ */
+export async function generateAppointmentNote(
+  state: ConversationState
+): Promise<string> {
+  const { typeName, duration, patientRequest } = state.appointmentBooking;
+
+  const note = `
+Appointment Type: ${typeName || 'Not specified'}
+Duration: ${duration || 'N/A'} minutes
+Patient's Stated Reason: "${patientRequest || 'Not available'}"
+  `.trim().replace(/^    /gm, ''); // Cleans up indentation
+
+  console.log(`[SummaryHelper] Generated state-driven appointment note: "${note}"`);
+  return Promise.resolve(note); // Return as a promise to maintain async signature
+}
+
+================
+File: lib/tool-handlers/findAndConfirmPatientHandler.ts
+================
+import { prisma } from "@/lib/prisma";
+import { fetchNexhealthAPI } from "@/lib/nexhealth";
+import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+import { mergeState } from '@/lib/utils/state-helpers';
+
+interface FindAndConfirmPatientArgs {
+  fullName: string;
+  dateOfBirth: string;
+}
+
+interface NexHealthPatient {
+  id: number;
+  first_name: string;
+  last_name: string;
+  bio?: { // Make bio optional for safety
+    date_of_birth?: string; // Make dob optional for safety
+  };
+}
+
+interface NexHealthApiData {
+  patients: NexHealthPatient[];
+}
+
+interface NexHealthApiResponse {
+  data?: NexHealthApiData; // The nested data object
+}
+
+/**
+ * Handles the findAndConfirmPatient tool call
+ * Looks up an existing patient by full name and validates their date of birth
+ * @param currentState Current conversation state
+ * @param args Tool arguments containing fullName and dateOfBirth
+ * @param toolCallId ID of the tool call for response tracking
+ * @returns HandlerResult with updated state if patient found, or appropriate error message
+ */
+export async function handleFindAndConfirmPatient(
+  currentState: ConversationState,
+  args: FindAndConfirmPatientArgs,
+  toolCallId: string
+): Promise<HandlerResult> {
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
+
+  console.log(`[FindAndConfirmPatient] Processing lookup for: "${args.fullName}", DOB: "${args.dateOfBirth}"`);
+
+  try {
+    if (!currentState.practiceId) {
+      return {
+        toolResponse: {
+          toolCallId,
+          error: "Practice configuration not found."
+        },
+        newState: currentState
+      };
+    }
+
+    // Get practice details from database
+    const practice = await prisma.practice.findUnique({
+      where: { id: currentState.practiceId },
+      select: {
+        nexhealthSubdomain: true,
+        nexhealthLocationId: true
+      }
+    });
+
+    if (!practice?.nexhealthSubdomain || !practice?.nexhealthLocationId) {
+      console.error('[FindAndConfirmPatient] Practice missing NexHealth configuration');
+      return {
+        toolResponse: {
+          toolCallId,
+          error: "Practice NexHealth configuration incomplete."
+        },
+        newState: currentState
+      };
+    }
+
+    console.log(`[FindAndConfirmPatient] Using practice: ${practice.nexhealthSubdomain}`);
+
+    // Call NexHealth API to search for patients by name
+    const { data: apiResponse, apiLog: updatedApiLog } = await fetchNexhealthAPI(
+      '/patients',
+      practice.nexhealthSubdomain,
+      { 
+        location_id: practice.nexhealthLocationId,
+        name: args.fullName
+      },
+      'GET',
+      undefined,
+      apiLog
+    );
+
+    const response = apiResponse as NexHealthApiResponse;
+    const patients = response.data?.patients; // Safely access the nested array
+
+    console.log(`[FindAndConfirmPatient] API search returned ${patients?.length ?? 0} patient(s) with the name "${args.fullName}".`);
+
+    if (!Array.isArray(patients) || patients.length === 0) {
+      console.log('[FindAndConfirmPatient] No patients array found in response.data or array is empty.');
+      return {
+        toolResponse: {
+          toolCallId,
+          result: { success: false, apiLog: updatedApiLog },
+          message: {
+            type: "request-complete",
+            role: "assistant",
+            content: "I couldn't find any record for that name and date of birth. Let's proceed with creating a new patient file for you. What's the best phone number and email address for you?"
+          }
+        },
+        newState: currentState
+      };
+    }
+
+    console.log(`[FindAndConfirmPatient] Found ${patients.length} patient(s) with matching name`);
+
+    // Debug logging before DOB comparison
+    console.log(`[Patient Search] Searching for DOB: "${args.dateOfBirth}" (Type: ${typeof args.dateOfBirth})`);
+    patients.forEach((patient, index) => {
+      console.log(`[Patient Search] Record ${index} DOB: "${patient.bio?.date_of_birth}" (Type: ${typeof patient.bio?.date_of_birth})`);
+    });
+
+    // Find patient with matching date of birth - defensive comparison
+    const matchedPatient = patients.find(patient => {
+      const recordDob = patient.bio?.date_of_birth;
+      return typeof recordDob === 'string' && recordDob.trim() === args.dateOfBirth.trim();
+    });
+
+    if (matchedPatient) {
+      console.log(`[Patient Search] SUCCESS: Found matching patient with ID ${matchedPatient.id}.`);
+    } else {
+      console.log(`[Patient Search] FAILED: No patient found with a matching DOB.`);
+    }
+
+    if (matchedPatient) {
+      console.log(`[FindAndConfirmPatient] Successfully matched patient ID: ${matchedPatient.id}`);
+
+      // Update conversation state with patient details
+      const newState = mergeState(currentState, {
+        patientDetails: {
+          nexhealthPatientId: matchedPatient.id,
+          collectedInfo: {
+            firstName: matchedPatient.first_name,
+            lastName: matchedPatient.last_name,
+            dob: args.dateOfBirth
+          }
+        }
+      });
+
+      return {
+        toolResponse: {
+          toolCallId,
+          result: { 
+            success: true, 
+            nexhealthPatientId: matchedPatient.id,
+            patientName: `${matchedPatient.first_name} ${matchedPatient.last_name}`,
+            apiLog: updatedApiLog 
+          },
+          message: {
+            type: "request-complete",
+            role: "assistant",
+            content: `Great, I've found and confirmed your record, ${matchedPatient.first_name}. Now, let's find a time for your appointment. What day are you thinking?`
+          }
+        },
+        newState
+      };
+    } else {
+      console.log(`[FindAndConfirmPatient] Found patients with name but no DOB match`);
+      return {
+        toolResponse: {
+          toolCallId,
+          result: { success: false, apiLog: updatedApiLog },
+          message: {
+            type: "request-complete",
+            role: "assistant",
+            content: "I found a record for that name, but the date of birth doesn't match. To be safe, let's create a new file for you. I'll just need your phone number and email address to finish up."
+          }
+        },
+        newState: currentState
+      };
+    }
+
+  } catch (error) {
+    console.error('[FindAndConfirmPatient] Error during patient lookup:', error);
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: false, apiLog: apiLog },
+        message: {
+          type: "request-failed",
+          role: "assistant", 
+          content: "I'm sorry, I ran into a technical problem while looking up your record. Let me help you create a new patient file instead. What's your phone number and email address?"
+        }
+      },
+      newState: currentState
+    };
+  }
+}
+
+================
+File: lib/tools/definitions/findAppointmentTypeTool.ts
+================
+import type { VapiTool } from '@/types/vapi';
+
+/**
+ * Get the VAPI tool definition for findAppointmentType
+ * This tool identifies the most suitable dental appointment type based on patient needs
+ */
+export function getFindAppointmentTypeTool(appBaseUrl: string): VapiTool {
+  return {
+    type: "function" as const,
+    function: {
+      name: "findAppointmentType",
+      description: "Identifies the patient's need (e.g., 'toothache', 'cleaning') and determines the correct appointment type. **This is always the first tool to call in a conversation.**",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          patientRequest: {
+            type: "string" as const,
+            description: "The patient's verbatim description of their reason for calling, their symptoms, or the type of appointment they are requesting. For example, 'I have a toothache', 'I need a cleaning', or 'My crown fell off and I need it re-cemented'."
+          }
+        },
+        required: ["patientRequest"]
+      }
+    },
+    server: {
+      url: `${appBaseUrl}/api/vapi-webhook`,
+    }
+  };
+}
+
+================
+File: lib/ai/slotMatcher.ts
+================
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import type { CoreMessage } from "ai";
+import type { SlotData } from "@/types/vapi";
+import { DateTime } from "luxon";
+
+export async function matchUserSelectionToSlot(
+  userSelection: string,
+  presentedSlots: SlotData[],
+  practiceTimezone: string
+): Promise<SlotData | null> {
+  try {
+    if (!presentedSlots || presentedSlots.length === 0) {
+      console.error("[SlotMatcher] No presented slots provided to match against.");
+      return null;
+    }
+
+    // Create a simplified, numbered list of slots for the AI to parse.
+    const formattedSlotsForAI = presentedSlots.map((slot, index) => {
+      const time = DateTime.fromISO(slot.time, { zone: practiceTimezone }).toFormat("cccc 'at' h:mm a");
+      return `${index + 1}. ${time}`;
+    }).join("\n");
+
+    const systemPrompt = `You are a highly accurate AI assistant. Your task is to match a user's verbal selection to one of the provided time slot options.
+
+**CRITICAL RULES:**
+1.  **RETURN ONLY THE NUMBER:** Your entire response must be ONLY the number corresponding to the best match (e.g., "1", "2").
+2.  **HANDLE AMBIGUITY:** If the user's selection is ambiguous or doesn't clearly match, return "NO_MATCH".
+3.  **BE FLEXIBLE:** The user might not say the exact time. "The morning one," "the first one," "the 3:10," or "let's do the later one" are all valid selections. Use the context of the presented slots to find the best fit.
+4.  **IGNORE EXTRA WORDS:** The user might say "Yes, the 8:30 is good." Focus on "8:30".
+
+**CONTEXT:**
+The user was presented with these numbered options:
+${formattedSlotsForAI}
+
+The user then said: "${userSelection}"
+
+Which option number did the user select? (Return ONLY the number or "NO_MATCH")`;
+
+    const messages: CoreMessage[] = [{ role: 'system', content: systemPrompt }];
+
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages,
+      temperature: 0, // Set to 0 for maximum predictability
+      maxTokens: 10,
+    });
+
+    const matchedIndex = parseInt(text.trim(), 10) - 1;
+
+    if (!isNaN(matchedIndex) && matchedIndex >= 0 && matchedIndex < presentedSlots.length) {
+      const matchedSlot = presentedSlots[matchedIndex];
+      console.log(`[SlotMatcher] Successfully matched "${userSelection}" to slot #${matchedIndex + 1}: ${matchedSlot.time}`);
+      return matchedSlot;
+    }
+
+    console.log(`[SlotMatcher] No definitive match found for user selection: "${userSelection}". AI response: "${text.trim()}"`);
+    return null;
+
+  } catch (error) {
+    console.error("[SlotMatcher] Error during AI slot matching:", error);
+    return null;
+  }
+}
+
+================
+File: lib/tools/definitions/confirmBookingTool.ts
+================
+import type { VapiTool } from "@/types/vapi";
+
+export function getConfirmBookingTool(appBaseUrl: string): VapiTool {
+  return {
+    type: "function",
+    function: {
+      name: "confirmBooking",
+      description: "The final step to book the appointment. Use this tool ONLY after the user has verbally confirmed the appointment details (e.g., they said 'yes' or 'that's correct').",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          finalConfirmation: {
+            type: "boolean" as const,
+            description: "Set to true to confirm that the user has verbally agreed to the booking details."
+          }
+        },
+        required: ["finalConfirmation"]
+      }
+    },
+    server: {
+      url: `${appBaseUrl}/api/vapi-webhook`,
+      timeoutSeconds: 15
+    }
+  };
+}
+
+================
+File: lib/tools/definitions/checkAvailableSlotsTool.ts
+================
+import type { VapiTool } from '@/types/vapi';
+
+/**
+ * Get the VAPI tool definition for checkAvailableSlots
+ * This tool checks for available appointment slots for a previously identified appointment type
+ */
+export function getCheckAvailableSlotsTool(appBaseUrl: string): VapiTool {
+  return {
+    type: "function" as const,
+    function: {
+      name: "checkAvailableSlots",
+      description: "Finds available time *buckets* (e.g., 'Morning', 'Afternoon') for a standard, non-urgent appointment. Call this *after* the appointment type is known and the user has expressed a preference for a day or time.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          preferredDaysOfWeek: {
+            type: "string" as const,
+            description: "A JSON string array of the user's preferred days of the week. Example: '[\"Monday\", \"Wednesday\"]'. This is collected from the user."
+          },
+          timeBucket: {
+            type: "string" as const,
+            description: "The user's general time preference, which must be one of the following values: 'Early', 'Morning', 'Midday', 'Afternoon', 'Evening', 'Late', or 'AllDay'. This is collected from the user."
+          },
+          requestedDate: {
+            type: "string" as const,
+            description: "The user's specific requested date, like 'tomorrow', 'next Wednesday', or 'July 10th'. Use this for specific date searches."
+          }
+        },
+        required: []
+      }
+    },
+    server: {
+      url: `${appBaseUrl}/api/vapi-webhook`,
+    }
+  };
+}
+
+================
+File: lib/tool-handlers/createPatientRecordHandler.ts
+================
+import { createPatient } from '@/lib/nexhealth';
+import type { ApiLog, ConversationState, HandlerResult } from '@/types/vapi';
+import { mergeState } from '@/lib/utils/state-helpers';
+
+interface CreatePatientToolArguments {
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  phoneNumber: string;
+  email: string;
+}
+
+interface NexHealthPatientResponse {
+  data?: {
+    user?: {
+      id?: number;
+    };
+  };
+  user?: {
+    id?: number;
+  };
+}
+
+export async function handleCreatePatientRecord(
+  currentState: ConversationState,
+  args: CreatePatientToolArguments, 
+  toolCallId: string
+): Promise<HandlerResult> {
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
+
+  try {
+    // Call createPatient with the apiLog array
+    const { data: responseData, apiLog: updatedApiLog } = await createPatient(
+      args,
+      'xyz', // subdomain
+      318534, // locationId  
+      377851148, // providerId
+      apiLog
+    );
+
+    // Extract the patient ID from the nested successful response
+    // responseData contains the NexHealth API response, which has a nested structure
+    const nexHealthResponse = responseData as NexHealthPatientResponse;
+    const patientId = nexHealthResponse.data?.user?.id || nexHealthResponse.user?.id;
+
+    // Verify that patientId was successfully extracted
+    if (!patientId) {
+      console.error('[Patient Creation] FAILED: Patient ID missing from NexHealth response. Full response:', responseData);
+      throw new Error("Patient ID missing from NexHealth response.");
+    }
+
+    console.log('[Patient Creation] SUCCESS: Extracted patientId:', patientId);
+
+    console.log(`[Patient Creation] SUCCESS: Patient "${args.firstName} ${args.lastName}" created successfully in NexHealth with ID: ${patientId}`);
+
+    // Create new state with the patient ID
+    const newState = mergeState(currentState, {
+      patientDetails: {
+        nexhealthPatientId: patientId
+      }
+    });
+
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: true, nexhealthPatientId: patientId, apiLog: updatedApiLog },
+        message: {
+          type: "request-complete",
+          role: "assistant",
+          content: `Thank you! I've successfully created a record for you, ${args.firstName}. Now, let's find an appointment time.`
+        }
+      },
+      newState
+    };
+  } catch (error) {
+    console.error('Error creating patient record:', error);
+    return {
+      toolResponse: {
+        toolCallId,
+        result: { success: false, apiLog: apiLog }, // Return the API log even on error
+        message: {
+          type: "request-failed", 
+          role: "assistant",
+          content: "I'm sorry, I ran into a technical problem while saving your information. Could we please try again in a moment?"
+        }
+      },
+      newState: currentState // Return original state on error
+    };
+  }
+}
+
+================
+File: lib/ai/appointmentMatcher.ts
+================
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import type { CoreMessage } from "ai";
+
+interface ApptTypeInputForMatcher {
+  id: string; // nexhealthAppointmentTypeId
+  name: string;
+  keywords: string | null;
+}
+
+export async function matchAppointmentTypeIntent(
+  patientQuery: string,
+  availableAppointmentTypes: ApptTypeInputForMatcher[]
+): Promise<string | null> {
+  try {
+    console.log(`[AI Matcher] Attempting to match query: "${patientQuery}"`);
+
+    // Check if OpenAI API key is available
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("[AI Matcher] OPENAI_API_KEY not found in environment variables");
+      return null;
+    }
+
+    // Format appointment types for the LLM prompt
+    const formattedTypesString = availableAppointmentTypes
+      .map(type => `ID: ${type.id}, Name: ${type.name}, Keywords: ${type.keywords || "None"}`)
+      .join("\n");
+
+    // Construct messages for the generateText call
+    const messages: CoreMessage[] = [
+      {
+        role: "system",
+        content: `You are an expert AI assistant for a dental office. Your task is to match a patient's stated reason for calling with the most appropriate dental appointment type from the provided list.
+The list includes appointment type IDs, names, and associated keywords.
+Respond ONLY with the 'ID' of the best matching appointment type.
+If no clear match is found based on the patient's query and the available types/keywords, respond with "NO_MATCH".
+Prioritize matches where the patient's query aligns well with the keywords or the name of the appointment type.
+Consider common dental terms and patient language.
+Example: If patient says "my tooth hurts badly", and an appointment type is "Emergency Exam" with keywords "toothache, pain, urgent", you should match it.
+If patient says "I need a cleaning" and type is "Routine Cleaning", match it.
+If patient says "I want to discuss veneers" and no cosmetic/veneer appointment type exists, return "NO_MATCH".`
+      },
+      {
+        role: "user",
+        content: `Patient's reason for calling: "${patientQuery}"
+
+Available appointment types:
+${formattedTypesString}
+
+Which appointment type ID is the best match? (Return ONLY the ID or "NO_MATCH")`
+      }
+    ];
+
+    // Call OpenAI with the messages
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages,
+      temperature: 0.1,
+      maxTokens: 50
+    });
+
+    console.log(`[AI Matcher] LLM response for matching: "${text}"`);
+
+    // Process the response
+    const trimmedResponse = text.trim();
+    if (trimmedResponse === "NO_MATCH") {
+      return null;
+    }
+
+    return trimmedResponse;
+
+  } catch (error) {
+    console.error("[AI Matcher] Error during AI call:", error);
+    return null;
+  }
+}
+
+================
+File: lib/tool-handlers/confirmBookingHandler.ts
+================
+import { prisma } from "@/lib/prisma";
+import { fetchNexhealthAPI } from "@/lib/nexhealth";
+import { generateAppointmentNote } from "@/lib/ai/summaryHelper";
+import { DateTime } from "luxon";
+import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+
+export async function handleConfirmBooking(
+  currentState: ConversationState,
+  toolId: string
+): Promise<HandlerResult> {
+  console.log(`[ConfirmBookingHandler] Attempting to book appointment with current state`);
+  
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
+  
+  try {
+    // Validate required state before proceeding
+    if (!currentState.appointmentBooking.selectedSlot) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Error: A time slot has not been selected. I must use the handleSlotSelection tool before confirming a booking."
+        },
+        newState: currentState
+      };
+    }
+
+    const selectedSlot = currentState.appointmentBooking.selectedSlot;
+
+    // Get practice details
+    const practice = await prisma.practice.findUnique({
+      where: { id: currentState.practiceId },
+      select: { 
+        timezone: true,
+        nexhealthSubdomain: true,
+        nexhealthLocationId: true
+      }
+    });
+
+    if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Practice configuration not found for booking."
+        },
+        newState: currentState
+      };
+    }
+
+    const practiceTimezone = practice.timezone || 'America/Chicago';
+
+    console.log(`[ConfirmBookingHandler] Proceeding with booking for slot: ${selectedSlot.time}`);
+
+    // Generate appointment note
+    const appointmentNote = await generateAppointmentNote(currentState);
+    
+    // Log the generated note
+    await prisma.toolLog.updateMany({
+      where: { toolCallId: toolId },
+      data: { result: `[AI Summary] Generated Note: "${appointmentNote}"` }
+    });
+    console.log(`[DB Log] Logged generated appointment note for tool call ${toolId}.`);
+
+    // Construct NexHealth payload
+    const startTimeLocal = DateTime.fromISO(selectedSlot.time, { zone: practiceTimezone });
+    const endTimeLocal = startTimeLocal.plus({ minutes: currentState.appointmentBooking.duration || 30 });
+
+    const appointmentPayload = {
+      appt: {
+        patient_id: currentState.patientDetails.nexhealthPatientId,
+        provider_id: selectedSlot.providerId,
+        operatory_id: selectedSlot.operatory_id || 0,
+        start_time: startTimeLocal.toFormat("yyyy-MM-dd'T'HH:mm:ssZZ"),
+        end_time: endTimeLocal.toFormat("yyyy-MM-dd'T'HH:mm:ssZZ"),
+        note: appointmentNote
+      }
+    };
+
+    console.log(`[ConfirmBookingHandler] Constructed appointment payload:`, appointmentPayload);
+    
+    // Log the payload for debugging
+    await prisma.toolLog.updateMany({
+      where: { toolCallId: toolId },
+      data: { result: `[NexHealth Request] Sending payload: ${JSON.stringify(appointmentPayload)}` }
+    });
+    console.log(`[DB Log] Logged NexHealth request payload for tool call ${toolId}.`);
+
+    // Make the API call with logging
+    console.log(`[ConfirmBookingHandler] Calling NexHealth API to create appointment`);
+    
+    const { data: apiResponse, apiLog: updatedApiLog } = await fetchNexhealthAPI(
+      '/appointments',
+      practice.nexhealthSubdomain,
+      { location_id: practice.nexhealthLocationId },
+      'POST',
+      appointmentPayload,
+      apiLog
+    );
+
+    console.log(`[ConfirmBookingHandler] Successfully created appointment:`, apiResponse);
+
+    // Format the confirmation message
+    const confirmationTime = DateTime.fromISO(selectedSlot.time, { zone: practiceTimezone });
+    const dayName = confirmationTime.toFormat('cccc');
+    const time = confirmationTime.toFormat('h:mm a');
+    const date = confirmationTime.toFormat('MMMM d');
+    const appointmentType = currentState.appointmentBooking.spokenName || 
+                           currentState.appointmentBooking.typeName || 
+                           'appointment';
+
+    const confirmationMessage = `You're all set! I've booked your ${appointmentType} for ${dayName}, ${date} at ${time}. You should receive a confirmation shortly. Is there anything else I can help you with today?`;
+
+    console.log(`[ConfirmBookingHandler] Booking confirmed successfully`);
+
+    return {
+      newState: currentState,
+      toolResponse: {
+        toolCallId: toolId,
+        result: { success: true, nexhealthResponse: apiResponse, apiLog: updatedApiLog },
+        message: {
+          type: "request-complete",
+          role: "assistant",
+          content: confirmationMessage
+        }
+      }
+    };
+
+  } catch (error) {
+    console.error(`[ConfirmBookingHandler] Failed to create appointment:`, error);
+    
+    // Check if the error indicates the slot is already booked
+    const errorMessageText = error instanceof Error ? error.message.toLowerCase() : '';
+    if (errorMessageText.includes('slot is not available') || errorMessageText.includes('already booked')) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { success: false, apiLog: apiLog },
+          message: {
+            type: "request-failed",
+            role: "assistant",
+            content: "I'm so sorry, it looks like that time was just taken. Would you like me to check for other available times?"
+          }
+        },
+        newState: currentState
+      };
+    }
+    
+    // Generic error fallback
+    return {
+      toolResponse: {
+        toolCallId: toolId,
+        result: { success: false, apiLog: apiLog },
+        message: {
+          type: "request-failed",
+          role: "assistant",
+          content: "I'm sorry, but there was a system error and I couldn't finalize your booking. Our staff has been notified and will give you a call back shortly to confirm a time. Thank you for your patience."
+        }
+      },
+      newState: currentState
+    };
+  }
+}
+
+================
+File: lib/tool-handlers/findAppointmentTypeHandler.ts
+================
+import { prisma } from "@/lib/prisma";
+import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
+import { generateAcknowledgment } from '@/lib/ai/acknowledgmentGenerator';
+import type { ConversationState, HandlerResult, ApiLog, VapiFunctionCall } from "@/types/vapi";
+import { mergeState } from '@/lib/utils/state-helpers';
+
+interface FindAppointmentTypeArgs {
+  patientRequest: string;
+  patientStatus?: string;
+}
+
+export async function handleFindAppointmentType(
+  currentState: ConversationState,
+  toolArguments: FindAppointmentTypeArgs,
+  toolId: string
+): Promise<HandlerResult> {
+  const { patientRequest, patientStatus } = toolArguments;
+  
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
+  
+  console.log(`[FindAppointmentTypeHandler] Processing request: "${patientRequest}", patientStatus: "${patientStatus}"`);
+  
+  // Generate AI-powered acknowledgment based on patient request
+  const acknowledgment = await generateAcknowledgment(toolArguments.patientRequest);
+  
+  try {
+    if (!currentState.practiceId) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Practice configuration not found."
+        },
+        newState: currentState
+      };
+    }
+
+    if (!patientRequest) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Missing patientRequest parameter."
+        },
+        newState: currentState
+      };
+    }
+
+    console.log(`[FindAppointmentTypeHandler] Using practice: ${currentState.practiceId}`);
+
+    // Fetch appointment types with keywords for this practice (only bookable online)
+    const dbAppointmentTypes = await prisma.appointmentType.findMany({
+      where: {
+        practiceId: currentState.practiceId,
+        bookableOnline: true, // Only include appointment types that are active for online booking
+        AND: [
+          { keywords: { not: null } },
+          { keywords: { not: "" } }
+        ]
+      },
+      select: {
+        nexhealthAppointmentTypeId: true,
+        name: true,
+        duration: true,
+        keywords: true,
+        check_immediate_next_available: true,
+        spokenName: true
+      }
+    });
+
+    if (!dbAppointmentTypes || dbAppointmentTypes.length === 0) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "No suitable appointment types are configured for matching in this practice."
+        },
+        newState: currentState
+      };
+    }
+
+    console.log(`[FindAppointmentTypeHandler] Found ${dbAppointmentTypes.length} appointment types with keywords`);
+
+    // Use AI to match the patient request to appointment types
+    const matchedApptId = await matchAppointmentTypeIntent(
+      patientRequest,
+      dbAppointmentTypes.map(at => ({
+        id: at.nexhealthAppointmentTypeId,
+        name: at.name,
+        keywords: at.keywords || "",
+      }))
+    );
+
+    if (!matchedApptId) {
+      console.log(`[FindAppointmentTypeHandler] No appointment type matched for request: "${patientRequest}"`);
+
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { apiLog: apiLog },
+          message: {
+            type: "request-failed",
+            role: "assistant",
+            content: "I understand you're looking for an appointment, but I couldn't determine the exact type of service you need. Could you please be more specific?"
+          }
+        },
+        newState: currentState
+      };
+    }
+
+    // Find the matched appointment type's details 
+    const matchedAppointmentType = dbAppointmentTypes.find(at => 
+      at.nexhealthAppointmentTypeId === matchedApptId
+    );
+
+    if (!matchedAppointmentType) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Error retrieving appointment type details."
+        },
+        newState: currentState
+      };
+    }
+
+    console.log(`[FindAppointmentTypeHandler] Successfully found appointment type: ${matchedAppointmentType.name}`);
+
+    // Create new state with appointment booking details
+    const newState = mergeState(currentState, {
+      appointmentBooking: {
+        typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+        typeName: matchedAppointmentType.name,
+        spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+        duration: matchedAppointmentType.duration,
+        patientRequest: patientRequest,
+        isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+      }
+    });
+
+    // Generate acknowledgment phrase
+    const acknowledgmentPhrase = acknowledgment ? `${acknowledgment} ` : "Okay, ";
+    const spokenName = matchedAppointmentType.spokenName || matchedAppointmentType.name;
+
+    // Handle urgent appointments with proactive slot search
+    if (matchedAppointmentType.check_immediate_next_available) {
+      console.log(`[Flow Control] Urgent appointment "${spokenName}". Initiating proactive slot search.`);
+      
+      // The system will execute this tool call immediately after speaking the message
+      const followUpCall = {
+        type: 'function' as const,
+        function: {
+          name: 'checkAvailableSlots',
+          arguments: JSON.stringify({
+            searchWindowDays: 7
+          })
+        }
+      } as VapiFunctionCall;
+
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { 
+            appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+            appointmentTypeName: matchedAppointmentType.name,
+            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+            duration: matchedAppointmentType.duration,
+            isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
+            apiLog: apiLog
+          },
+          message: {
+            type: "request-complete",
+            role: "assistant",
+            content: `${acknowledgmentPhrase}I have you down for a ${spokenName}. Can I check for the next available appointment for you.`
+          },
+          followUpFunctionCall: followUpCall
+        },
+        newState
+      };
+    } else {
+      // Standard flow - proceed to patient creation
+      console.log(`[Flow Control] Standard flow for "${spokenName}". Proceeding to patient creation.`);
+      
+      const nextStepQuestion = "First, I'll need to get a few details to create a file for you. What is your first and last name?";
+      const finalContent = `${acknowledgmentPhrase}I have you down for a ${spokenName}. ${nextStepQuestion}`;
+
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { // The new structured data payload
+            appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+            appointmentTypeName: matchedAppointmentType.name,
+            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+            duration: matchedAppointmentType.duration,
+            isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
+            apiLog: apiLog
+          },
+          message: { // The new high-fidelity message
+            type: "request-complete",
+            role: "assistant",
+            content: finalContent
+          }
+        },
+        newState: newState
+      };
+    }
+
+  } catch (error) {
+    console.error(`[FindAppointmentTypeHandler] Error processing appointment type:`, error);
+    return {
+      toolResponse: {
+        toolCallId: toolId,
+        result: { apiLog: apiLog },
+        error: "Database error while fetching appointment types."
+      },
+      newState: currentState
+    };
+  }
+}
+
+================
+File: lib/tool-handlers/checkAvailableSlotsHandler.ts
+================
+import { prisma } from "@/lib/prisma";
+import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
+import { DateTime } from "luxon";
+import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+import { mergeState } from '@/lib/utils/state-helpers';
+
+interface CheckAvailableSlotsArgs {
+  preferredDaysOfWeek?: string;
+  timeBucket?: string;
+  requestedDate?: string;
+  searchWindowDays?: number;
+}
+
+export async function handleCheckAvailableSlots(
+  currentState: ConversationState,
+  toolArguments: CheckAvailableSlotsArgs,
+  toolId: string
+): Promise<HandlerResult> {
+  const { requestedDate, timeBucket, preferredDaysOfWeek, searchWindowDays } = toolArguments;
+  
+  // Initialize API log array to capture all external calls
+  const apiLog: ApiLog = [];
+  
+  console.log(`[CheckAvailableSlotsHandler] Processing with requestedDate: "${requestedDate}", timeBucket: "${timeBucket}", preferredDaysOfWeek: "${preferredDaysOfWeek}", searchWindowDays: ${searchWindowDays}`);
+  
+  try {
+    try {
+      if (!currentState.practiceId) {
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: "Practice configuration not found."
+          },
+          newState: currentState
+        };
+      }
+
+      if (!currentState.appointmentBooking.typeId) {
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: "Error: I must know the reason for the visit before checking for appointments. I need to use the findAppointmentType tool first."
+          },
+          newState: currentState
+        };
+      }
+
+    // Fetch practice details
+    const practice = await prisma.practice.findUnique({
+      where: { id: currentState.practiceId },
+      select: {
+        id: true,
+        timezone: true,
+        nexhealthSubdomain: true,
+        nexhealthLocationId: true,
+      }
+    });
+
+    if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Practice NexHealth configuration not found."
+        },
+        newState: currentState
+      };
+    }
+
+    // 1. UNIFIED DATE DETERMINATION LOGIC (respects user preferences in all flows)
+    let searchDate: string | null = null;
+
+    // Priority 0: Handle system-initiated urgent search
+    if (searchWindowDays) {
+      console.log(`[CheckAvailableSlotsHandler] Proactive urgent search triggered for ${searchWindowDays} days.`);
+      searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
+    }
+    // Priority 1: Handle explicit user date request
+    else if (requestedDate) {
+      console.log(`[CheckAvailableSlotsHandler] User provided a specific date: "${requestedDate}". Normalizing...`);
+      searchDate = await normalizeDateWithAI(requestedDate, practice.timezone || 'America/Chicago');
+      if (!searchDate) {
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            result: `I couldn't quite understand the date "${requestedDate}". Could you try saying it a different way?`
+          },
+          newState: currentState
+        };
+      }
+      console.log(`[CheckAvailableSlotsHandler] Normalized date to: ${searchDate}`);
+    } 
+    // Priority 2: Handle preferred days of week
+    else if (preferredDaysOfWeek) {
+      try {
+        const preferredDays = JSON.parse(preferredDaysOfWeek);
+        if (Array.isArray(preferredDays) && preferredDays.length > 0) {
+          const dayName = preferredDays[0]; // Taking the first preferred day
+          const dayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(dayName.toLowerCase());
+          
+          if (dayIndex !== -1) {
+            let searchDateTime = DateTime.now().setZone(practice.timezone || 'America/Chicago');
+            
+            // Find the next occurrence of the preferred day
+            // If today is the preferred day, we'll still look for next occurrence to avoid booking too last minute
+            do {
+              searchDateTime = searchDateTime.plus({ days: 1 });
+            } while (searchDateTime.weekday % 7 !== dayIndex);
+            
+            searchDate = searchDateTime.toFormat('yyyy-MM-dd');
+            console.log(`[CheckAvailableSlotsHandler] Calculated next ${dayName} as: ${searchDate}`);
+          } else {
+            console.error(`[CheckAvailableSlotsHandler] Invalid day name: ${dayName}`);
+          }
+        }
+      } catch (e) {
+        console.error("[CheckAvailableSlotsHandler] Could not parse preferredDaysOfWeek", e);
+      }
+    }
+
+    // Priority 3: Default to today if no date or preference provided
+    if (!searchDate) {
+      console.log(`[CheckAvailableSlotsHandler] No specific date preference provided. Using today as default.`);
+      searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
+    }
+
+    // 2. DETERMINE SEARCH WINDOW
+    const { isUrgent, isImmediateBooking } = currentState.appointmentBooking;
+    let searchDays: number;
+    
+    if (searchWindowDays) {
+      searchDays = searchWindowDays; // Use the system-specified window for urgent proactive search
+    } else if (requestedDate) {
+      searchDays = 1; // Search only the specific requested date
+    } else if (isUrgent || isImmediateBooking) {
+      searchDays = 7; // Search 7 days for urgent appointments if no specific date requested
+    } else {
+      searchDays = 3; // Search 3 days for standard flow if no specific date requested
+    }
+
+    // 3. PERFORM THE SEARCH
+    const searchResult = await findAvailableSlots(
+      currentState.appointmentBooking.typeId,
+      {
+        id: practice.id,
+        nexhealthSubdomain: practice.nexhealthSubdomain!,
+        nexhealthLocationId: practice.nexhealthLocationId!,
+        timezone: practice.timezone || 'America/Chicago'
+      },
+      searchDate,
+      searchDays,
+      timeBucket as TimeBucket
+    );
+
+    // 4. SLOTS ARE NOW PRE-FILTERED BY findAvailableSlots
+    const filteredSlots = searchResult.foundSlots;
+
+    const spokenName = currentState.appointmentBooking.spokenName || currentState.appointmentBooking.typeName || 'appointment';
+
+    // 4. DECIDE HOW TO RESPOND BASED ON FLOW TYPE
+    
+    // Decide whether to present specific slots or time buckets
+    const shouldPresentSpecificSlots = (isUrgent || isImmediateBooking) || timeBucket;
+
+    if (shouldPresentSpecificSlots) {
+      console.log(`[CheckAvailableSlotsHandler] Presenting specific slots. isUrgent: ${isUrgent}, isImmediateBooking: ${isImmediateBooking}, timeBucket provided: ${!!timeBucket}`);
+
+      const aiResponse = await generateSlotResponse(
+        searchResult, // searchResult already contains the pre-filtered slots
+        spokenName,
+        practice.timezone || 'America/Chicago'
+      );
+
+      // Create new state with slots data
+      const newState = mergeState(currentState, {
+        appointmentBooking: {
+          presentedSlots: searchResult.foundSlots,
+          nextAvailableDate: searchResult.nextAvailableDate || null
+        }
+      });
+
+      return {
+        newState: newState,
+        toolResponse: {
+          toolCallId: toolId,
+          result: { // Structured data payload
+            foundSlots: searchResult.foundSlots,
+            nextAvailableDate: searchResult.nextAvailableDate || null,
+            apiLog: apiLog
+          },
+          message: { // High-fidelity message
+            type: "request-complete",
+            role: "assistant",
+            content: aiResponse // The AI-generated response from generateSlotResponse
+          }
+        }
+      };
+
+    } else {
+      // STANDARD FLOW - First pass, present time buckets
+      console.log('[CheckAvailableSlotsHandler] Presenting time buckets for standard flow.');
+      
+      // Generate response with time buckets based on filteredSlots
+      const availableBuckets: string[] = [];
+      const primaryBuckets = ['Morning', 'Afternoon', 'Evening'] as const;
+      
+      for (const bucket of primaryBuckets) {
+        const bucketRange = TIME_BUCKETS[bucket];
+        const [startHour, startMinute] = bucketRange.start.split(':').map(Number);
+        const [endHour, endMinute] = bucketRange.end.split(':').map(Number);
+        
+        const hasSlotInBucket = filteredSlots.some(slot => {
+          const slotTime = DateTime.fromISO(slot.time);
+          const slotHour = slotTime.hour;
+          const slotMinute = slotTime.minute;
+          
+          const slotTimeInMinutes = slotHour * 60 + slotMinute;
+          const startTimeInMinutes = startHour * 60 + startMinute;
+          const endTimeInMinutes = endHour * 60 + endMinute;
+          
+          return slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
+        });
+        
+        if (hasSlotInBucket) {
+          availableBuckets.push(bucket);
+        }
+      }
+
+      console.log(`[CheckAvailableSlotsHandler] Found slots in time buckets: ${availableBuckets.join(', ')}`);
+
+      // Generate the day of week for the response
+      const searchDateTime = DateTime.fromISO(searchDate, { zone: practice.timezone || 'America/Chicago' });
+      const dayOfWeek = searchDateTime.toFormat('cccc'); // e.g., "Thursday"
+      
+      // Use the time bucket response generator
+      const aiResponse = await generateTimeBucketResponse(
+        availableBuckets,
+        dayOfWeek,
+        spokenName
+      );
+
+      console.log(`[CheckAvailableSlotsHandler] Successfully presented ${availableBuckets.length} time bucket options for ${filteredSlots.length} total slots`);
+
+      // Create new state with slots data
+      const newState = mergeState(currentState, {
+        appointmentBooking: {
+          presentedSlots: filteredSlots,
+          nextAvailableDate: searchResult.nextAvailableDate || null
+        }
+      });
+
+      return {
+        newState: newState,
+        toolResponse: {
+          toolCallId: toolId,
+          result: { // Structured data payload
+            foundSlots: filteredSlots, // Note: we return all filtered slots here
+            nextAvailableDate: searchResult.nextAvailableDate || null,
+            apiLog: apiLog
+          },
+          message: { // High-fidelity message
+            type: "request-complete",
+            role: "assistant",
+            content: aiResponse // The AI-generated response from generateTimeBucketResponse
+          }
+        }
+      };
+    }
+
+    } catch (error) {
+      console.error(`[CheckAvailableSlotsHandler] Error during slot search:`, error);
+      if (error instanceof Error && error.message.includes("Configuration Error")) {
+        // This is a configuration problem, not a lack of availability.
+        return {
+          toolResponse: {
+            toolCallId: toolId,
+            error: `There's a configuration issue with the '${currentState.appointmentBooking.spokenName}' appointment type. I cannot check for slots. Please inform the user that a staff member will call them back to schedule this specific appointment type.`
+          },
+          newState: currentState
+        };
+      }
+      // Generic fallback error for other issues
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          result: { apiLog: apiLog },
+          error: "I encountered a system error while checking for available appointments."
+        },
+        newState: currentState
+      };
+    }
+
+  } catch (error) {
+    console.error(`[CheckAvailableSlotsHandler] Outer error catching available slots:`, error);
+    return {
+      toolResponse: {
+        toolCallId: toolId,
+        result: { apiLog: apiLog },
+        error: "Error checking available appointment slots."
+      },
+      newState: currentState
+    };
+  }
+}
+
+================
+File: lib/tools/index.ts
+================
+import type { VapiTool } from '@/types/vapi';
+import { getFindAppointmentTypeTool } from './definitions/findAppointmentTypeTool';
+import { getCreatePatientRecordTool } from './definitions/createPatientRecordTool';
+import { getFindAndConfirmPatientTool } from './definitions/findAndConfirmPatientTool';
+import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
+import { getSelectAndConfirmSlotTool } from './definitions/selectAndConfirmSlotTool';
+import { getConfirmBookingTool } from './definitions/confirmBookingTool';
+
+/**
+ * Central map of all tool definitions
+ * Keys are tool names, values are tool-getter functions
+ */
+export const toolDefinitionMap = {
+  findAppointmentType: getFindAppointmentTypeTool,
+  create_patient_record: getCreatePatientRecordTool,
+  findAndConfirmPatient: getFindAndConfirmPatientTool,
+  checkAvailableSlots: getCheckAvailableSlotsTool,
+  selectAndConfirmSlot: getSelectAndConfirmSlotTool,
+  confirmBooking: getConfirmBookingTool,
+};
+
+/**
+ * Aggregate all individual tool definitions for use when updating the VAPI assistant
+ * @param appBaseUrl - The base URL for the application (used in tool server URLs)
+ * @returns Array of all available VAPI tool definitions
+ */
+export function getAllTools(appBaseUrl: string): VapiTool[] {
+  const tools: VapiTool[] = Object.values(toolDefinitionMap).map(getToolFn => getToolFn(appBaseUrl));
+  return tools;
+}
+
+================
+File: lib/ai/slotHelper.ts
+================
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { DateTime } from "luxon";
+import type { CoreMessage } from "ai";
+
+/**
+ * Defines the time ranges for different parts of the day.
+ * Used to filter appointment slots based on user preference.
+ * Note: 'Morning' and 'Afternoon' are broad, while others are more specific.
+ * 'Midday' overlaps with both Morning and Afternoon to catch appointments around noon.
+ */
+export const TIME_BUCKETS = {
+  Early:     { start: "05:00", end: "08:30" },
+  Morning:   { start: "05:00", end: "12:00" },
+  Midday:    { start: "10:00", end: "15:00" },
+  Afternoon: { start: "12:00", end: "17:00" },
+  Evening:   { start: "15:30", end: "20:00" },
+  Late:      { start: "17:00", end: "22:00" },
+  AllDay:    { start: "05:00", end: "22:00" }
+};
+
+export type TimeBucket = keyof typeof TIME_BUCKETS;
+
+/**
+ * Normalize a date query using AI to convert natural language dates into YYYY-MM-DD format
+ */
+export async function normalizeDateWithAI(
+  dateQuery: string, 
+  practiceTimezone: string
+): Promise<string | null> {
+  try {
+    const now = DateTime.now().setZone(practiceTimezone);
+    const systemPromptContent = `You are a date parsing AI. Your only task is to convert a user's spoken date query into a strict 'YYYY-MM-DD' format. The user is in the 'America/Chicago' timezone.
+
+    Today's date is ${now.toFormat('yyyy-MM-dd')}.
+
+    - Interpret "today" as ${now.toFormat('yyyy-MM-dd')}.
+    - Interpret "tomorrow" as ${now.plus({ days: 1 }).toFormat('yyyy-MM-dd')}.
+    - If the user provides a date like "July 23rd" and that date has already passed this year, assume they mean next year.
+    - If a query is ambiguous or not a date, you MUST return 'INVALID_DATE'.
+
+    Your entire response MUST be ONLY the 'YYYY-MM-DD' string or "INVALID_DATE". Do not add any other words.`;
+
+    const userPromptContent = `User Query: "${dateQuery}"
+
+Normalized Date (YYYY-MM-DD or INVALID_DATE):`;
+
+    const messages: CoreMessage[] = [
+      { role: 'system', content: systemPromptContent },
+      { role: 'user', content: userPromptContent }
+    ];
+
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages,
+      temperature: 0,
+      maxTokens: 50
+    });
+
+    const normalizedDate = text.trim();
+    
+    if (!normalizedDate || normalizedDate === "INVALID_DATE") {
+      console.log(`[Date Normalization] Could not parse date: "${dateQuery}"`);
+      return null;
+    }
+
+    // Validate the returned date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(normalizedDate)) {
+      console.error(`[Date Normalization] AI returned invalid format: "${normalizedDate}"`);
+      return null;
+    }
+
+    console.log(`[Date Normalization] Successfully parsed "${dateQuery}" → "${normalizedDate}"`);
+    return normalizedDate;
+  } catch (error) {
+    console.error('[Date Normalization] Error:', error);
+    return null;
+  }
+}
+
+/**
+ * Generate a natural spoken message presenting available slots or alternatives
+ * @deprecated This function will be removed in a future refactor phase as we move to preference-based scheduling
+ */
+export async function generateSlotResponseMessage(
+  appointmentTypeName: string,
+  normalizedDate: string,
+  availableSlots: string[],
+  timePreference?: string
+): Promise<string> {
+  try {
+    console.log(`[Slot Response] Generating message for ${appointmentTypeName} on ${normalizedDate}, ${availableSlots.length} slots available`);
+
+    // Format the date for natural speech
+    const dateObj = DateTime.fromISO(normalizedDate);
+    const friendlyDate = dateObj.toFormat('EEEE, MMMM dd'); // e.g., "Monday, December 23"
+    
+    const timePreferenceText = timePreference ? ` ${timePreference}` : '';
+    
+    let prompt: string;
+
+    if (availableSlots.length > 0) {
+      const slotsList = availableSlots.slice(0, 3).join(', '); // Limit to first 3 slots
+      const hasMoreSlots = availableSlots.length > 3;
+      
+      prompt = `You are Laine, a friendly dental assistant. Generate a natural response offering available appointment slots.
+
+Appointment Type: ${appointmentTypeName}
+Date: ${friendlyDate}
+Time Preference: ${timePreference || 'none specified'}
+Available slots: ${slotsList}${hasMoreSlots ? ' (and more)' : ''}
+
+Create a natural, conversational response that:
+1. Confirms the appointment type and date
+2. Presents the available time slots (up to 3)
+3. Asks if any of those work for the patient
+4. Be warm and helpful
+
+Keep it concise and natural. Return only the response text.
+
+Example format: "Great! For your ${appointmentTypeName} on ${friendlyDate}${timePreferenceText}, I have ${slotsList} available. Would any of those work for you?"`;
+    } else {
+      prompt = `You are Laine, a friendly dental assistant. Generate a natural response when no appointment slots are available.
+
+Appointment Type: ${appointmentTypeName}
+Date: ${friendlyDate}
+Time Preference: ${timePreference || 'none specified'}
+
+Create a natural, apologetic response that:
+1. Acknowledges the specific appointment type and date requested
+2. Mentions if there was a time preference
+3. Suggests trying a different date or removing time restrictions
+4. Be empathetic and helpful
+
+Keep it concise and natural. Return only the response text.
+
+Example format: "I'm sorry, I don't have any available slots for your ${appointmentTypeName} on ${friendlyDate}${timePreferenceText}. Would you like to try a different date, or perhaps I can check for any availability that day without a specific time preference?"`;
+    }
+
+    const messages: CoreMessage[] = [
+      {
+        role: "user",
+        content: prompt
+      }
+    ];
+
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages,
+      temperature: 0.3,
+      maxTokens: 150
+    });
+
+    const message = text.trim();
+    
+    if (!message) {
+      // Fallback message
+      if (availableSlots.length > 0) {
+        const slotsList = availableSlots.slice(0, 3).join(', ');
+        return `For your ${appointmentTypeName} on ${friendlyDate}, I have ${slotsList} available. Would any of those work for you?`;
+      } else {
+        return `I'm sorry, I don't have any available slots for your ${appointmentTypeName} on ${friendlyDate}. Would you like to try a different date?`;
+      }
+    }
+
+    console.log(`[Slot Response] Generated message: "${message}"`);
+    return message;
+  } catch (error) {
+    console.error('[Slot Response] Error generating message:', error);
+    
+    // Fallback message
+    if (availableSlots.length > 0) {
+      const slotsList = availableSlots.slice(0, 3).join(', ');
+      return `For your ${appointmentTypeName}, I have ${slotsList} available. Would any of those work for you?`;
+    } else {
+      return `I'm sorry, I don't have any available slots for your ${appointmentTypeName} on that date. Would you like to try a different date?`;
+    }
+  }
+}
+
+/**
+ * Get slot search parameters for a specific appointment type from the database
+ * @param appointmentTypeId NexHealth appointment type ID 
+ * @param practiceId Practice ID
+ * @returns Object with duration, providerIds, and operatoryIds needed for slot search
+ */
+export async function getSlotSearchParams(
+  appointmentTypeId: string,
+  practiceId: string
+): Promise<{ duration: number; providerIds: string[]; operatoryIds: string[] }> {
+  const { prisma } = await import("@/lib/prisma");
+
+  // 1. Fetch the AppointmentType and include all related active providers and their operatories
+  const appointmentType = await prisma.appointmentType.findFirst({
+    where: {
+      nexhealthAppointmentTypeId: appointmentTypeId,
+      practiceId: practiceId,
+    },
+    include: {
+      acceptedByProviders: { // This is the join table
+        where: {
+          savedProvider: {
+            isActive: true, // Filter for active providers
+          },
+        },
+        include: {
+          savedProvider: {
+            include: {
+              provider: true, // Get the provider details (for the ID)
+              assignedOperatories: { // Get the assigned operatories for this provider
+                where: {
+                  savedOperatory: {
+                    isActive: true, // Filter for active operatories
+                  },
+                },
+                include: {
+                  savedOperatory: true, // Get the operatory details (for the ID)
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!appointmentType) {
+    throw new Error(`Configuration Error: Appointment type with ID ${appointmentTypeId} not found for practice ${practiceId}.`);
+  }
+
+  const activeProviders = appointmentType.acceptedByProviders.map(
+    (p) => p.savedProvider
+  );
+
+  if (activeProviders.length === 0) {
+    throw new Error(`Configuration Error: No active providers are configured to accept the appointment type ID ${appointmentTypeId}.`);
+  }
+
+  // 2. Collect unique NexHealth provider IDs from the results
+  const providerIds = Array.from(
+    new Set(activeProviders.map((sp) => sp.provider.nexhealthProviderId))
+  );
+
+  // 3. Collect unique NexHealth operatory IDs from all found providers
+  const operatoryIds = Array.from(
+    new Set(
+      activeProviders
+        .flatMap((sp) => sp.assignedOperatories)
+        .map((assignment) => assignment.savedOperatory.nexhealthOperatoryId)
+    )
+  );
+
+  if (operatoryIds.length === 0) {
+    throw new Error(`Configuration Error: The active providers for appointment type ID ${appointmentTypeId} have no active operatories assigned.`);
+  }
+
+  // 4. Return the collected data
+  return {
+    duration: appointmentType.duration,
+    providerIds,
+    operatoryIds,
+  };
+}
+
+// Interface for individual slot data
+interface SlotData {
+  time: string;
+  operatory_id?: number;
+  providerId: number;
+  locationId: number;
+}
+
+// Interface for provider data from NexHealth API
+interface ProviderSlotData {
+  pid: number;
+  lid: number;
+  slots: Array<{
+    time: string;
+    operatory_id?: number;
+  }>;
+}
+
+// Interface for NexHealth API response
+interface NexHealthSlotsResponse {
+  data: {
+    data: ProviderSlotData[];
+    next_available_date?: string;
+  };
+}
+
+/**
+ * Find available slots for an appointment type
+ * @param appointmentTypeId NexHealth appointment type ID
+ * @param practice Practice details with NexHealth configuration
+ * @param startDate Starting date to search from in YYYY-MM-DD format
+ * @param searchDays Number of days to search
+ * @returns Object with found slots and next available date if no slots found
+ */
+export async function findAvailableSlots(
+  appointmentTypeId: string,
+  practice: {
+    id: string;
+    nexhealthSubdomain: string;
+    nexhealthLocationId: string;
+    timezone: string;
+  },
+  startDate: string,
+  searchDays: number,
+  timeBucket?: TimeBucket
+): Promise<{ foundSlots: SlotData[]; nextAvailableDate: string | null }> {
+  const { fetchNexhealthAPI } = await import("@/lib/nexhealth");
+  const { prisma } = await import("@/lib/prisma");
+  
+  // Get slot search parameters
+  const { duration, providerIds, operatoryIds } = await getSlotSearchParams(
+    appointmentTypeId,
+    practice.id
+  );
+
+  console.log(`[Slot Search] Bulk searching for ${duration}-minute slots across ${searchDays} days with providers: ${providerIds.join(', ')} and operatories: ${operatoryIds.join(', ')}`);
+
+  // Fetch practice-specific scheduling rules
+  const practiceSettings = await prisma.practice.findUnique({
+    where: { id: practice.id },
+    select: {
+      lunchBreakStart: true,
+      lunchBreakEnd: true,
+      minBookingBufferMinutes: true,
+      timezone: true
+    }
+  });
+
+  // Use practice timezone, default to America/Chicago if not set
+  const timezone = practice.timezone || 'America/Chicago';
+  const lunchBreakStart = practiceSettings?.lunchBreakStart;
+  const lunchBreakEnd = practiceSettings?.lunchBreakEnd;
+  const bookingBufferMinutes = practiceSettings?.minBookingBufferMinutes || 0;
+  
+  console.log(`[Slot Search] Searching from ${startDate} for ${searchDays} days in timezone ${timezone}`);
+
+  try {
+    // Build the query string for a single bulk API call
+    let queryString = `start_date=${startDate}&days=${searchDays}&slot_length=${duration.toString()}`;
+    queryString += `&lids[]=${practice.nexhealthLocationId}`;
+    providerIds.forEach(id => {
+      queryString += `&pids[]=${id}`;
+    });
+    operatoryIds.forEach(id => {
+      queryString += `&operatory_ids[]=${id}`;
+    });
+
+    const pathWithQuery = `/appointment_slots?${queryString}`;
+
+    console.log(`[NexHealth Bulk Request] Fetching ${searchDays} days with path: ${pathWithQuery}`);
+
+    // Make single bulk API call to NexHealth
+    const response = await fetchNexhealthAPI(
+      pathWithQuery,
+      practice.nexhealthSubdomain,
+      undefined // Pass undefined for params since we built it into the path
+    ) as NexHealthSlotsResponse;
+
+    console.log(`[Slot Search] Bulk API response received for ${searchDays} days`);
+
+    // Process the response data
+    const responseData = response.data; // The object from fetchNexhealthAPI
+    const nexhealthData = responseData.data; // The actual payload from NexHealth
+    let nextAvailableDate: string | null = null;
+
+    // Store next_available_date from the API response if present
+    if (responseData && responseData.next_available_date) {
+      nextAvailableDate = responseData.next_available_date;
+      console.log(`[Slot Search] Found next_available_date: ${nextAvailableDate}`);
+    }
+
+    if (!nexhealthData || !Array.isArray(nexhealthData)) {
+      console.log(`[Slot Search] No slot data received from bulk API call`);
+      return { foundSlots: [], nextAvailableDate };
+    }
+
+    // Collect all slots from all providers across all days
+    const allSlots = nexhealthData.flatMap((providerData: ProviderSlotData) => {
+      if (providerData.slots && Array.isArray(providerData.slots)) {
+        return providerData.slots.map((slot) => ({
+          ...slot,
+          providerId: providerData.pid,
+          locationId: providerData.lid
+        }));
+      }
+      return [];
+    });
+
+    console.log(`[Slot Search] Collected ${allSlots.length} total slots from bulk API response`);
+
+    // Filter out slots that overlap with configurable lunch break
+    const lunchFilteredSlots = allSlots.filter((slot) => {
+      try {
+        // Parse the slot time to get the start time
+        const slotStartTime = DateTime.fromISO(slot.time).setZone(timezone);
+        
+        // Calculate the slot end time by adding duration
+        const slotEndTime = slotStartTime.plus({ minutes: duration });
+        
+        // Check for lunch break conflicts only if lunch break is configured
+        if (lunchBreakStart && lunchBreakEnd) {
+          const [lunchStartHour, lunchStartMinute] = lunchBreakStart.split(':').map(Number);
+          const [lunchEndHour, lunchEndMinute] = lunchBreakEnd.split(':').map(Number);
+          
+          const slotStartHour = slotStartTime.hour;
+          const slotStartMinute = slotStartTime.minute;
+          const slotEndHour = slotEndTime.hour;
+          const slotEndMinute = slotEndTime.minute;
+          
+          // Check if slot overlaps with lunch break
+          const slotStartsInLunch = (slotStartHour === lunchStartHour && slotStartMinute >= lunchStartMinute) || 
+                                   (slotStartHour > lunchStartHour && slotStartHour < lunchEndHour) ||
+                                   (slotStartHour === lunchEndHour && slotStartMinute < lunchEndMinute);
+          
+          const slotEndsInLunch = (slotEndHour === lunchStartHour && slotEndMinute > lunchStartMinute) || 
+                                 (slotEndHour > lunchStartHour && slotEndHour < lunchEndHour) ||
+                                 (slotEndHour === lunchEndHour && slotEndMinute <= lunchEndMinute);
+          
+          const slotSpansLunch = (slotStartHour < lunchStartHour || (slotStartHour === lunchStartHour && slotStartMinute <= lunchStartMinute)) && 
+                               (slotEndHour > lunchEndHour || (slotEndHour === lunchEndHour && slotEndMinute >= lunchEndMinute));
+          
+          const isLunchConflict = slotStartsInLunch || slotEndsInLunch || slotSpansLunch;
+          
+          if (isLunchConflict) {
+            console.log(`[Lunch Filter] Discarded slot at ${slot.time} - conflicts with lunch break (${lunchBreakStart} - ${lunchBreakEnd})`);
+            return false;
+          }
+        }
+        
+        return true;
+      } catch (error) {
+        console.error(`[Lunch Filter] Error parsing slot time ${slot.time}:`, error);
+        // Keep the slot if we can't parse it rather than losing potentially valid slots
+        return true;
+      }
+    });
+
+    console.log(`[Lunch Filter] Filtered ${allSlots.length} slots to ${lunchFilteredSlots.length} slots after removing lunch conflicts`);
+
+    // Apply time bucket filter if specified
+    let timeBucketFilteredSlots = lunchFilteredSlots;
+    if (timeBucket && timeBucket !== 'AllDay' && TIME_BUCKETS[timeBucket]) {
+      const timeBucketRange = TIME_BUCKETS[timeBucket];
+      const [startHour, startMinute] = timeBucketRange.start.split(':').map(Number);
+      const [endHour, endMinute] = timeBucketRange.end.split(':').map(Number);
+      
+      console.log(`[Time Bucket Filter] Filtering slots for ${timeBucket} preference (${timeBucketRange.start} - ${timeBucketRange.end})`);
+      
+      timeBucketFilteredSlots = lunchFilteredSlots.filter(slot => {
+        const slotTime = DateTime.fromISO(slot.time, { zone: timezone });
+        const slotHour = slotTime.hour;
+        const slotMinute = slotTime.minute;
+        
+        // Check if slot time falls within the time bucket
+        const slotTimeInMinutes = slotHour * 60 + slotMinute;
+        const startTimeInMinutes = startHour * 60 + startMinute;
+        const endTimeInMinutes = endHour * 60 + endMinute;
+        
+        const withinRange = slotTimeInMinutes >= startTimeInMinutes && slotTimeInMinutes <= endTimeInMinutes;
+        
+        if (!withinRange) {
+          console.log(`[Time Bucket Filter] Filtered out slot ${slot.time} (${slotHour}:${slotMinute.toString().padStart(2, '0')}) - outside ${timeBucket} range`);
+        }
+        
+        return withinRange;
+      });
+      
+      console.log(`[Time Bucket Filter] Filtered from ${lunchFilteredSlots.length} to ${timeBucketFilteredSlots.length} slots for ${timeBucket} preference`);
+    }
+
+    // Apply booking buffer filter - remove slots that are too soon from now
+    const now = DateTime.now().setZone(timezone);
+    const bookingBufferSlots = timeBucketFilteredSlots.filter(slot => {
+      const slotStartTime = DateTime.fromISO(slot.time, { zone: timezone });
+      const minutesFromNow = slotStartTime.diff(now, 'minutes').minutes;
+      
+      if (minutesFromNow < bookingBufferMinutes) {
+        console.log(`[Booking Buffer] Discarded slot at ${slot.time} - too soon (${Math.round(minutesFromNow)} minutes from now, minimum required: ${bookingBufferMinutes})`);
+        return false;
+      }
+      
+      return true;
+    });
+
+    console.log(`[Booking Buffer] Filtered from ${timeBucketFilteredSlots.length} to ${bookingBufferSlots.length} slots after applying ${bookingBufferMinutes}-minute booking buffer`);
+
+    // Sort slots chronologically to ensure earliest times are offered first
+    bookingBufferSlots.sort((a, b) => a.time.localeCompare(b.time));
+    console.log('[Slot Search] Sorted slots chronologically.');
+
+    console.log(`[Slot Search] Bulk search complete: ${bookingBufferSlots.length} slots found across ${searchDays} days, next available: ${nextAvailableDate}`);
+
+    return {
+      foundSlots: bookingBufferSlots,
+      nextAvailableDate
+    };
+
+  } catch (error) {
+    console.error(`[Slot Search] Error in bulk API call:`, error);
+    return { foundSlots: [], nextAvailableDate: null };
+  }
+}
+
+/**
+ * Generate a natural AI response for slot checking results
+ * @param searchResult The result from findAvailableSlots
+ * @param spokenName The natural name of the appointment type for conversation
+ * @param practiceTimezone The practice's timezone for proper time formatting
+ * @returns Generated AI response message
+ */
+export async function generateSlotResponse(
+  searchResult: { foundSlots: SlotData[]; nextAvailableDate: string | null },
+  spokenName: string,
+  practiceTimezone: string
+): Promise<string> {
+  const { generateText } = await import("ai");
+  const { openai } = await import("@ai-sdk/openai");
+
+  if (searchResult.foundSlots.length > 0) {
+    // De-duplicate slots to ensure only unique time strings are presented to users
+    const uniqueSlots = searchResult.foundSlots.filter(
+      (slot, index, self) =>
+        index ===
+        self.findIndex((s) => 
+          DateTime.fromISO(s.time).setZone(practiceTimezone).toFormat("cccc, MMMM d 'at' h:mm a") === 
+          DateTime.fromISO(slot.time).setZone(practiceTimezone).toFormat("cccc, MMMM d 'at' h:mm a")
+        )
+    );
+    
+    const formattedSlots = uniqueSlots.slice(0, 2).map(slot => {
+        const slotDateTime = DateTime.fromISO(slot.time).setZone(practiceTimezone);
+        // Create a full, friendly string: "Wednesday, July 9th at 7:00 AM"
+        return slotDateTime.toFormat("cccc, MMMM d 'at' h:mm a");
+    }).join(' or ');
+
+    const userPrompt = `You are an AI response generator for a voice assistant named Laine. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering appointment slots.
+
+Patient needs a: "${spokenName}"
+Available slots are: "${formattedSlots}"
+
+Example Output: "Okay, for your ${spokenName}, I have openings on ${formattedSlots}. Would one of those work for you?"
+
+Your turn. Generate the single, fluid, spoken response for Laine:`;
+
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o-mini"),
+        messages: [{ role: "user", content: userPrompt }],
+        temperature: 0.3,
+        maxTokens: 100
+      });
+      return text.trim() || `For your ${spokenName}, I have openings on ${formattedSlots}. Would either of those work for you?`;
+    } catch (error) {
+      console.error('[Slot Response] Error generating AI response:', error);
+      return `For your ${spokenName}, I have openings on ${formattedSlots}. Would either of those work for you?`;
+    }
+
+  } else if (searchResult.nextAvailableDate) {
+    // Format the next available date into a friendly format
+    let friendlyDate: string;
+    try {
+      const nextDate = DateTime.fromISO(searchResult.nextAvailableDate).setZone(practiceTimezone);
+      friendlyDate = nextDate.toFormat('EEEE, MMMM d'); // e.g., "Wednesday, July 9th"
+    } catch (error) {
+      console.error('[Slot Response] Error formatting next available date:', error);
+      friendlyDate = searchResult.nextAvailableDate;
+    }
+
+    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+
+**CRITICAL RULES:**
+1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+
+**Task:** For the patient's request for a '${spokenName}', there are no openings in the next few days. The next available date is ${friendlyDate}. Inform them and ask if they'd like you to check for times on that day.
+
+**Example Output:** "I'm sorry, we don't have any openings for your ${spokenName} in the next few days, but the next available date is ${friendlyDate}. Would you like me to check for times on that day?"`;
+
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o-mini"),
+        messages: [
+          { role: 'system', content: systemPrompt }
+        ],
+        temperature: 0.3,
+        maxTokens: 120
+      });
+
+      return text.trim() || `I'm sorry, we don't have any openings for your ${spokenName} in the next few days. The next available date is ${friendlyDate}. Would you like me to check for times on that day?`;
+    } catch (error) {
+      console.error('[Slot Response] Error generating AI response for next available:', error);
+      return `I'm sorry, we don't have any openings for your ${spokenName} in the next few days. The next available date is ${friendlyDate}. Would you like me to check for times on that day?`;
+    }
+
+  } else {
+    // No slots found and no next available date
+    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+
+**CRITICAL RULES:**
+1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+
+**Task:** For the patient's request for a '${spokenName}', you are fully booked for the near future. Apologize and suggest that a staff member will call them back to find a time.
+
+**Example Output:** "I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future, so let me have one of our staff members call you back to find a time that works."`;
+
+    try {
+      const { text } = await generateText({
+        model: openai("gpt-4o-mini"),
+        messages: [
+          { role: 'system', content: systemPrompt }
+        ],
+        temperature: 0.3,
+        maxTokens: 100
+      });
+
+      return text.trim() || `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
+    } catch (error) {
+      console.error('[Slot Response] Error generating AI response for no availability:', error);
+      return `I'm sorry, it looks like we're fully booked for your ${spokenName} in the near future. Let me have one of our staff members call you back to find a time that works.`;
+    }
+  }
+}
+
+/**
+ * Generate a natural AI response offering time buckets instead of specific slots
+ * @param availableBuckets Array of time bucket names that have availability
+ * @param dayOfWeek The day being offered (e.g., "Thursday") 
+ * @param spokenName The natural name of the appointment type
+ * @returns Generated AI response offering time bucket choices
+ */
+export async function generateTimeBucketResponse(
+  availableBuckets: string[],
+  dayOfWeek: string,
+  spokenName: string
+): Promise<string> {
+  if (availableBuckets.length === 0) {
+    return `I'm sorry, but I couldn't find any available times for your ${spokenName} on ${dayOfWeek}. Would you like to try another day?`;
+  }
+
+  const bucketList = availableBuckets.join(' or ');
+  const prompt = `You are an AI response generator. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering time-of-day options.
+
+Context:
+- Appointment Type: "${spokenName}"
+- Day: "${dayOfWeek}"
+- Available Time Windows: "${bucketList}"
+
+Example Output: "Okay, for your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?"
+
+Your turn. Generate the single, fluid, spoken response for Laine:`;
+  
+  try {
+    const { generateText } = await import("ai");
+    const { openai } = await import("@ai-sdk/openai");
+    
+    const { text } = await generateText({
+      model: openai("gpt-4o-mini"),
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      maxTokens: 100
+    });
+    
+    return text.trim() || `For your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?`;
+  } catch (error) {
+    console.error('[Time Bucket Response] Error generating AI response:', error);
+    return `For your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?`;
+  }
+}
+
+================
+File: lib/system-prompt/laine_system_prompt.md
+================
+[Role]
+You are Laine, a friendly, professional, and highly efficient AI receptionist for a dental practice. Your primary task is to have a natural, fluid conversation to book an appointment for a user.
+
+[Context]
+- Today's date is {{ "now" | date: "%A, %B %d, %Y", "America/Chicago" }}.
+- Stay focused on the task of booking an appointment. Do not invent information.
+- Never say the words 'function' or 'tool'.
+
+[Guiding Principles]
+- **Always Drive the Conversation Forward:** After each step, your goal is to smoothly transition to the next logical question or action. Do not create awkward pauses.
+- **Trust the Tool's Response:** The tools are designed to guide you. If a tool provides a specific message to relay to the user, deliver it accurately. It contains the correct next step.
+- **Be Persistent but Polite:** When collecting information, you must be persistent to ensure data accuracy, but always maintain a polite and helpful tone.
+
+[Response Guidelines]
+- Keep responses brief and natural. Ask one question at a time.
+- Maintain a calm, empathetic, and professional tone.
+- Present dates clearly (e.g., "Wednesday, July 23rd").
+- Present times clearly (e.g., "ten ten AM").
+
+[Error Handling]
+- If you encounter a generic system error from a tool, inform the user politely that there was a technical issue and that a staff member will call them back shortly. Do not try to use the tool again.
+- **Phone Number Errors:** If the `create_patient_record` tool fails specifically because of an invalid phone number, you MUST use the following script: "I'm sorry, I think we may have had a bad connection for a moment. The number I heard was [the number you collected]. Could you please repeat it for me?" This frames the error as a system issue, not a user mistake.
+
+---
+[CONVERSATIONAL FLOW]
+This is your master guide. Follow these steps in order.
+
+**Step 1: Understand the Need**
+- Your first goal is to understand why the user is calling (e.g., "How can I help you today?").
+- Once you have their reason, you MUST immediately call the `findAppointmentType` tool.
+- **NOTE:** For urgent appointments, the system will automatically search for the earliest available times. Your job is to deliver the acknowledgment message, and then present the time slots that the next tool provides.
+
+**Step 2: Identify the Patient**
+- **NOTE:** For urgent appointments, you will perform this step *after* a time slot has been selected in Step 4.
+- After understanding the need, your default assumption is that the user might be new. Ask: "To get started, are you a new or existing patient?"
+
+- **IF THE USER IS AN EXISTING PATIENT:**
+    1.  **Acknowledge:** Say "Great, let's look up your file."
+    2.  **Collect Name:** Ask for their first and last name.
+    3.  **Verify Name Spelling:** After they respond, you MUST ask them to spell it out. Once they do, repeat it back for final confirmation. Example: "Okay, I have that spelled as J-O-H-N, S-M-I-T-H. Is that correct?"
+    4.  **Collect DOB:** After the name is confirmed, ask for their date of birth.
+    5.  **Verify DOB:** After they respond, you MUST repeat it back for confirmation. Example: "Thank you. And just to confirm, your date of birth is October 30th, 1998?"
+    6.  **Execute Search:** Once the user confirms the DOB is correct, you MUST immediately call the `findAndConfirmPatient` tool with the `fullName` and `dateOfBirth` you have collected and confirmed.
+    7.  The tool's response will guide you. Deliver its message to the user.
+
+- **IF THE USER IS A NEW PATIENT (or is unsure):**
+    1. **Inform:** Tell the user you need to collect a few details to create their file.
+    2. **Collect Name & Verify Spelling:** Ask for their first and last name. After they respond, you MUST ask them to spell it out. Once they do, repeat it back for final confirmation.
+    3. **Collect DOB & Verify:** Ask for their date of birth and repeat it back for confirmation.
+    4. **Collect Phone:** Ask for their 10-digit phone number. You should accept any 10 or 11-digit number without challenging the user unless it's obviously invalid.
+    5. **Collect Email & Verify Spelling:** Ask for their email address. After they respond, you MUST ask them to spell it out.
+    6. **Execute Save:** After collecting ALL of the above information, you MUST call the `create_patient_record` tool.
+
+**Step 3: Find an Appointment Time**
+- Your goal is to find an available time. Ask the user for their preferred day or time (e.g., "What day and time works for you?").
+- Use their response to call the `checkAvailableSlots` tool.
+- Present the options returned by the tool clearly to the user.
+
+**Step 4: Select and Confirm the Slot**
+- Once the user chooses a time from the options you provided, your goal is to lock in that choice.
+- You MUST use the `selectAndConfirmSlot` tool with the user's verbal selection.
+- **CRITICAL:** The tool's response will be different depending on the situation. If a patient has not been identified yet (the urgent flow), the tool will ask you to get the patient's details. If the patient is already identified, it will ask you to confirm the booking details.
+
+**Step 5: Finalize the Booking**
+- After the user has verbally confirmed the appointment details, you MUST use the `confirmBooking` tool.
+
+**Step 6: Close the Call**
+- After the booking is confirmed, ask if there is anything else you can help with and then end the call.
+
+
+
+
+================================================================
+End of Codebase
+================================================================

@@ -6,6 +6,7 @@ import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTy
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
 import { handleSelectAndConfirmSlot } from '@/lib/tool-handlers/selectAndConfirmSlotHandler';
+import { handleInsuranceInfo } from '@/lib/tool-handlers/insuranceInfoHandler';
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -175,6 +176,15 @@ export async function POST(request: Request) {
         handlerResult = await handleSelectAndConfirmSlot(
           state,
           toolArguments as { userSelection: string },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "insuranceInfo": {
+        handlerResult = await handleInsuranceInfo(
+          state,
+          toolArguments as { insuranceName?: string },
           toolCall.id
         );
         break;
