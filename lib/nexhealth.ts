@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { addSeconds } from 'date-fns';
-import type { ApiLog, ApiLogEntry } from '@/types/vapi';
+import type { ApiLog, ApiLogEntry, SlotData } from '@/types/vapi';
 
 interface NexHealthAppointmentType {
   id: number;
@@ -745,55 +745,54 @@ export async function createPatient(
  */
 export async function holdNexhealthSlot(
   subdomain: string,
-  slotId: string,
+  locationId: string,
   patientId: number,
-  duration: number,
-  apiLog: ApiLog = []
-): Promise<{ success: boolean; heldSlotId?: string; error?: string; apiLog: ApiLog }> {
-  console.log(`[HoldSlot] Attempting to hold slot ${slotId} for patient ${patientId} (${duration} minutes)`);
+  slot: SlotData // Pass the entire slot object
+): Promise<{ success: boolean; heldSlotId?: string; error?: string }> {
   
-  try {
-    const body = {
-      appointment_hold: {
-        slot_id: slotId,
-        patient_id: patientId,
-        duration_minutes: duration,
-        hold_duration_minutes: 10 // Hold for 10 minutes
-      }
-    };
+  const body = {
+    hold: {
+      location_id: locationId,
+      patient_id: patientId,
+      provider_id: slot.providerId,
+      operatory_id: slot.operatory_id,
+      start_time: slot.time,
+      // Assuming the API calculates the end_time based on the appointment type duration
+      // or that the hold is a standard duration, e.g., 10 minutes.
+      // If the API requires an end_time, we would need to add it here.
+      hold_duration_minutes: 10 
+    }
+  };
 
-    const { data, apiLog: updatedApiLog } = await fetchNexhealthAPI(
+  console.log('[NexHealth Hold] Attempting to hold slot with request body:', JSON.stringify(body, null, 2));
+
+  try {
+    // NOTE: The endpoint '/appointment_holds' is an assumption.
+    // This may need to be changed to the correct endpoint.
+    const { data } = await fetchNexhealthAPI(
       '/appointment_holds',
       subdomain,
-      undefined,
+      undefined, // No query params
       'POST',
-      body,
-      apiLog
+      body
     );
 
+    console.log('[NexHealth Hold] Full API response received:', JSON.stringify(data, null, 2));
+
     if (data?.data?.id) {
-      console.log(`[HoldSlot] Successfully held slot with hold ID: ${data.data.id}`);
-      return {
-        success: true,
-        heldSlotId: data.data.id.toString(),
-        apiLog: updatedApiLog
-      };
+      console.log(`[NexHealth Hold] SUCCESS: Slot held successfully. Hold ID: ${data.data.id}`);
+      return { success: true, heldSlotId: data.data.id };
     } else {
-      console.error('[HoldSlot] Invalid response structure:', data);
-      return {
-        success: false,
-        error: 'Invalid response from NexHealth hold API',
-        apiLog: updatedApiLog
-      };
+      console.error('[NexHealth Hold] FAILED: API response did not contain a hold ID.', data);
+      return { success: false, error: 'API response missing hold ID.' };
     }
+
   } catch (error) {
-    console.error('[HoldSlot] Error holding slot:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return {
-      success: false,
-      error: errorMessage,
-      apiLog
-    };
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[NexHealth Hold] FAILED: API call threw an error.', errorMessage);
+    // Log the full error object if possible to see status codes, etc.
+    console.error(error); 
+    return { success: false, error: errorMessage };
   }
 }
 

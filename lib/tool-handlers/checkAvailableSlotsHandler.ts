@@ -121,7 +121,10 @@ export async function handleCheckAvailableSlots(
     // Priority 3: DEFAULT PROACTIVE PATH - "First Available" search (NEW DEFAULT BEHAVIOR)
     if (!searchDate) {
       console.log(`[CheckAvailableSlotsHandler] No user preference detected. Initiating default 'first available' search.`);
-      searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
+      const nowInPracticeTimezone = DateTime.now().setZone(practice.timezone || 'America/Chicago');
+      searchDate = nowInPracticeTimezone.toFormat('yyyy-MM-dd');
+      console.log(`[CheckAvailableSlotsHandler] Default 'first available' flow. Search date explicitly set to: ${searchDate} (timezone: ${practice.timezone || 'America/Chicago'})`);
+      console.log(`[CheckAvailableSlotsHandler] DateTime debug - now: ${DateTime.now().toISO()}, in timezone: ${nowInPracticeTimezone.toISO()}, formatted: ${searchDate}`);
     }
 
     // 2. DETERMINE SEARCH WINDOW

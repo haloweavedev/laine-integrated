@@ -62,14 +62,35 @@ export async function handleHoldAppointmentSlot(
 
     console.log(`[HoldSlotHandler] Attempting to hold slot ${toolArguments.slotId} for patient ${currentState.patient.id}`);
 
+    // Find the matching slot from the presented slots
+    const matchedSlot = currentState.booking.presentedSlots.find(
+      slot => slot.time === toolArguments.slotId || 
+               slot.time.includes(toolArguments.slotId) ||
+               toolArguments.slotId.includes(slot.time)
+    );
+
+    if (!matchedSlot) {
+      console.error(`[HoldSlotHandler] Could not find slot with ID: ${toolArguments.slotId}`);
+      return {
+        toolResponse: {
+          toolCallId: toolId,
+          error: "Could not find the requested slot to hold."
+        },
+        newState: currentState
+      };
+    }
+
+    console.log(`[HoldSlotHandler] Found matching slot:`, JSON.stringify(matchedSlot, null, 2));
+
     // Call NexHealth API to hold the slot
     const holdResult = await holdNexhealthSlot(
-      practice.nexhealthSubdomain,
-      toolArguments.slotId,
-      currentState.patient.id,
-      currentState.booking.duration,
-      apiLog
+      practice.nexhealthSubdomain!,
+      practice.nexhealthLocationId!,
+      currentState.patient.id!,
+      matchedSlot
     );
+
+    console.log('[HoldSlotHandler] Result from holdNexhealthSlot:', holdResult);
 
     if (holdResult.success && holdResult.heldSlotId) {
       console.log(`[HoldSlotHandler] Successfully held slot with hold ID: ${holdResult.heldSlotId}`);
@@ -92,8 +113,7 @@ export async function handleHoldAppointmentSlot(
           result: { 
             success: true, 
             heldSlotId: holdResult.heldSlotId,
-            expiresAt: expiresAt,
-            apiLog: holdResult.apiLog
+            expiresAt: expiresAt
           },
           message: {
             type: "request-complete",
@@ -116,8 +136,7 @@ export async function handleHoldAppointmentSlot(
           toolCallId: toolId,
           result: { 
             success: false, 
-            error: holdResult.error,
-            apiLog: holdResult.apiLog
+            error: holdResult.error
           },
           message: {
             type: "request-failed",

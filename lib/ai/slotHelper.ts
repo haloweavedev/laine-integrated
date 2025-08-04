@@ -343,6 +343,7 @@ export async function findAvailableSlots(
     // Build the query string for a single bulk API call
     let queryString = `start_date=${startDate}&days=${searchDays}&slot_length=${duration.toString()}`;
     queryString += `&lids[]=${practice.nexhealthLocationId}`;
+    queryString += `&overlapping_operatory_slots=false`; // Prevent conflicts with partially booked slots
     providerIds.forEach(id => {
       queryString += `&pids[]=${id}`;
     });
