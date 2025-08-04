@@ -1,15 +1,15 @@
 import type { VapiTool } from '@/types/vapi';
 
 /**
- * Get the VAPI tool definition for create_patient_record
- * This tool creates a new patient record in the dental practice's EHR system
+ * Get the VAPI tool definition for identifyPatient
+ * This intelligent tool handles both existing patient lookup and new patient creation
  */
-export function getCreatePatientRecordTool(appBaseUrl: string): VapiTool {
+export function getIdentifyPatientTool(appBaseUrl: string): VapiTool {
   return {
     type: "function" as const,
     function: {
-      name: "create_patient_record",
-      description: "Creates a new patient record in the dental practice's Electronic Health Record (EHR) system. Use this tool only after collecting the patient's full name, date of birth, phone number, and email address.",
+      name: "identifyPatient",
+      description: "Identifies an existing patient or creates a new patient record. Use this after collecting the patient's full name, date of birth, and other contact details.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -27,11 +27,11 @@ export function getCreatePatientRecordTool(appBaseUrl: string): VapiTool {
           },
           phoneNumber: { 
             type: "string" as const, 
-            description: "The patient's 10-digit phone number, without country code or symbols." 
+            description: "The patient's phone number (required for new patients)." 
           },
           email: { 
             type: "string" as const, 
-            description: "The patient's email address." 
+            description: "The patient's email address (required for new patients)." 
           },
         },
         required: ["firstName", "lastName", "dateOfBirth", "phoneNumber", "email"],
@@ -39,7 +39,7 @@ export function getCreatePatientRecordTool(appBaseUrl: string): VapiTool {
     },
     server: { 
       url: `${appBaseUrl}/api/vapi-webhook`,
-      timeoutSeconds: 25
+      timeoutSeconds: 30
     }
   };
-} 
+}

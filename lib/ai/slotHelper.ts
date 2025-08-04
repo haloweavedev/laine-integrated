@@ -538,19 +538,21 @@ export async function generateSlotResponse(
         return slotDateTime.toFormat("cccc, MMMM d 'at' h:mm a");
     }).join(' or ');
 
-    const userPrompt = `You are an AI response generator for a voice assistant named Laine. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering appointment slots.
+    const systemPrompt = `You are an AI response generator for a voice assistant named Laine. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence offering appointment slots.
 
-Patient needs a: "${spokenName}"
-Available slots are: "${formattedSlots}"
+**CRITICAL RULES:**
+1. **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2. **NO FILLER:** Do not add "Just a sec", "Give me a moment", "Hold on", or any process-narrating language.
+3. **DIRECT AND NATURAL:** Sound like a human receptionist, not a robot.
 
-Example Output: "Okay, for your ${spokenName}, I have openings on ${formattedSlots}. Would one of those work for you?"
+**Task:** Patient needs a "${spokenName}". Available slots are: "${formattedSlots}". Offer these options naturally and ask if one works.
 
-Your turn. Generate the single, fluid, spoken response for Laine:`;
+**Example Output:** "For your ${spokenName}, I have openings on ${formattedSlots}. Would one of those work for you?"`;
 
     try {
       const { text } = await generateText({
         model: openai("gpt-4o-mini"),
-        messages: [{ role: "user", content: userPrompt }],
+        messages: [{ role: "system", content: systemPrompt }],
         temperature: 0.3,
         maxTokens: 100
       });
@@ -571,11 +573,12 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
       friendlyDate = searchResult.nextAvailableDate;
     }
 
-    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+    const systemPrompt = `You are an AI response generator for a voice assistant named Laine. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence.
 
 **CRITICAL RULES:**
-1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
-2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+1. **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2. **NO FILLER:** Do not add "Just a sec", "Give me a moment", "Hold on", or any process-narrating language.
+3. **DIRECT AND NATURAL:** Sound like a human receptionist, not a robot.
 
 **Task:** For the patient's request for a '${spokenName}', there are no openings in the next few days. The next available date is ${friendlyDate}. Inform them and ask if they'd like you to check for times on that day.
 
@@ -599,11 +602,12 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
 
   } else {
     // No slots found and no next available date
-    const systemPrompt = `You are an AI response generator. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence for a voice assistant named Laine.
+    const systemPrompt = `You are an AI response generator for a voice assistant named Laine. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence.
 
 **CRITICAL RULES:**
-1.  **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
-2.  **NO FILLER:** Do not add "Just a sec" or "Give me a moment".
+1. **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2. **NO FILLER:** Do not add "Just a sec", "Give me a moment", "Hold on", or any process-narrating language.
+3. **DIRECT AND NATURAL:** Sound like a human receptionist, not a robot.
 
 **Task:** For the patient's request for a '${spokenName}', you are fully booked for the near future. Apologize and suggest that a staff member will call them back to find a time.
 
@@ -644,16 +648,16 @@ export async function generateTimeBucketResponse(
   }
 
   const bucketList = availableBuckets.join(' or ');
-  const prompt = `You are an AI response generator. Your only job is to create a SINGLE, fluid, natural-sounding sentence offering time-of-day options.
+  const systemPrompt = `You are an AI response generator for a voice assistant named Laine. Your ONLY job is to create a SINGLE, fluid, natural-sounding sentence offering time-of-day options.
 
-Context:
-- Appointment Type: "${spokenName}"
-- Day: "${dayOfWeek}"
-- Available Time Windows: "${bucketList}"
+**CRITICAL RULES:**
+1. **ONE UNBROKEN SENTENCE:** Your entire output must be a single sentence.
+2. **NO FILLER:** Do not add "Just a sec", "Give me a moment", "Hold on", or any process-narrating language. 
+3. **DIRECT AND NATURAL:** Sound like a human receptionist, not a robot.
 
-Example Output: "Okay, for your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?"
+**Task:** Patient needs a "${spokenName}" on "${dayOfWeek}". Available time windows are: "${bucketList}". Offer these options naturally and ask which they prefer.
 
-Your turn. Generate the single, fluid, spoken response for Laine:`;
+**Example Output:** "For your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?"`;
   
   try {
     const { generateText } = await import("ai");
@@ -661,7 +665,7 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
     
     const { text } = await generateText({
       model: openai("gpt-4o-mini"),
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "system", content: systemPrompt }],
       temperature: 0.3,
       maxTokens: 100
     });
@@ -672,5 +676,3 @@ Your turn. Generate the single, fluid, spoken response for Laine:`;
     return `For your ${spokenName} on ${dayOfWeek}, I have openings in the ${bucketList}. Which would you prefer?`;
   }
 }
-
- 

@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
 import { generateAcknowledgment } from '@/lib/ai/acknowledgmentGenerator';
-import type { ConversationState, HandlerResult, ApiLog, VapiFunctionCall } from "@/types/vapi";
+import type { HandlerResult, ApiLog, VapiFunctionCall } from "@/types/vapi";
+import type { ConversationState } from "@/types/laine";
 import { mergeState } from '@/lib/utils/state-helpers';
 
 interface FindAppointmentTypeArgs {
@@ -125,13 +126,12 @@ export async function handleFindAppointmentType(
 
     // Create new state with appointment booking details
     const newState = mergeState(currentState, {
-      appointmentBooking: {
-        typeId: matchedAppointmentType.nexhealthAppointmentTypeId,
-        typeName: matchedAppointmentType.name,
+              booking: {
+        appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+        appointmentTypeName: matchedAppointmentType.name,
         spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
         duration: matchedAppointmentType.duration,
-        patientRequest: patientRequest,
-        isImmediateBooking: matchedAppointmentType.check_immediate_next_available
+        isUrgent: matchedAppointmentType.check_immediate_next_available
       }
     });
 

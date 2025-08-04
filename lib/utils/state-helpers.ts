@@ -1,5 +1,5 @@
 import merge from 'lodash.merge';
-import type { ConversationState } from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
 
 /**
  * Deeply merges a partial state update into the current conversation state.

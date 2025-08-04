@@ -1,4 +1,4 @@
-import type { ConversationState } from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
 
 /**
  * Generates a concise, professional appointment note for dental office staff
@@ -8,12 +8,11 @@ import type { ConversationState } from '@/types/vapi';
 export async function generateAppointmentNote(
   state: ConversationState
 ): Promise<string> {
-  const { typeName, duration, patientRequest } = state.appointmentBooking;
+  const { appointmentTypeName, duration } = state.booking;
 
   const note = `
-Appointment Type: ${typeName || 'Not specified'}
+Appointment Type: ${appointmentTypeName || 'Not specified'}
 Duration: ${duration || 'N/A'} minutes
-Patient's Stated Reason: "${patientRequest || 'Not available'}"
   `.trim().replace(/^    /gm, ''); // Cleans up indentation
 
   console.log(`[SummaryHelper] Generated state-driven appointment note: "${note}"`);

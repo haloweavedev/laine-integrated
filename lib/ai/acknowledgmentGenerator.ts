@@ -13,6 +13,10 @@ export async function generateAcknowledgment(patientRequest: string): Promise<st
   try {
     const systemPrompt = `You are an expert AI copywriter specializing in creating short, natural-sounding conversational acknowledgments for a dental receptionist. Your response MUST be a single, short phrase and nothing else. Do not add any extra text or pleasantries.
 
+**CRITICAL RULES:**
+- **NO FILLER WORDS:** Do not use unnecessary filler words like "Okay" or "Alright" unless they are part of a natural phrase.
+- **NO PROCESS NARRATION:** Do not say "Let me check" or "I'll look that up" - just deliver the acknowledgment.
+
 - If the user's request sounds painful or negative (e.g., "broken tooth," "toothache," "crown fell off"), generate an empathetic response.
   - Example for "My crown fell off": "Oh no, that's no fun. Let's get that sorted for you."
 - If the user's request is for a cosmetic or positive procedure (e.g., "veneers," "whitening," "Invisalign"), generate an encouraging and positive response.

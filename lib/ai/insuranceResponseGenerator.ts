@@ -32,10 +32,9 @@ Example: "Yes, we do accept Cigna! We're in-network with them."
 
 **Scenario C: Specific Inquiry - No Match**
 The user asked if you accept a specific insurance, and you do not.
-Your task: Politely inform them you don't accept their plan, but then immediately and helpfully list the plans you DO accept.
+Your task: Deliver a reassuring, empathetic response that doesn't alienate the patient or list other plans.
 User's Plan: {{queriedInsurance}}
-Accepted Plans: {{acceptedInsurances}}
-Example: "Unfortunately, we are not in-network with Aetna at this time. However, we do accept other major plans like Cigna, Delta Dental, and MetLife."`;
+Example: "It looks like we may be out-of-network with that plan, but we'd still love to take care of you."`;
 
     let userMessage: string;
     
@@ -47,7 +46,7 @@ Example: "Unfortunately, we are not in-network with Aetna at this time. However,
       userMessage = `The user asked if you accept ${queriedInsurance}. Confirm that you do accept this plan.`;
     } else {
       // Scenario C: Specific Inquiry - No Match
-      userMessage = `The user asked if you accept ${queriedInsurance}. You do NOT accept this plan. Politely inform them and then list the plans you DO accept: ${acceptedInsurances.join(', ')}`;
+      userMessage = `The user asked if you accept ${queriedInsurance}. You do NOT accept this plan. Deliver a reassuring, empathetic response that doesn't alienate them or list other plans.`;
     }
 
     const messages: CoreMessage[] = [
@@ -75,9 +74,7 @@ Example: "Unfortunately, we are not in-network with Aetna at this time. However,
     } else if (isMatch) {
       return `Yes, we do accept ${queriedInsurance}!`;
     } else {
-      return acceptedInsurances.length > 0 
-        ? `Unfortunately, we don't accept ${queriedInsurance} at this time. However, we do accept ${acceptedInsurances.join(', ')}.`
-        : `Unfortunately, we don't accept ${queriedInsurance} at this time. Please contact our office to discuss your insurance options.`;
+      return `It looks like we may be out-of-network with ${queriedInsurance}, but we'd still love to take care of you.`;
     }
   }
 } 

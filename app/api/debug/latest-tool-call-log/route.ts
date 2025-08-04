@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import type { ConversationState } from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
 
 interface DetailedCallDebugData {
   callId: string | null;
@@ -120,7 +120,7 @@ export async function GET() {
     // Add final call status if available
     if (latestCallWithTools.callStatus) {
       const conversationState = latestCallWithTools.conversationState as unknown as ConversationState;
-      const appointmentType = conversationState?.appointmentBooking?.typeName || null;
+      const appointmentType = conversationState?.booking?.appointmentTypeName || null;
       
       logs.push({
         timestamp: latestCallWithTools.updatedAt.toISOString(),

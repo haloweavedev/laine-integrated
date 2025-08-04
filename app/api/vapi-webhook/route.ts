@@ -1,21 +1,22 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { handleCreatePatientRecord } from '@/lib/tool-handlers/createPatientRecordHandler';
-import { handleFindAndConfirmPatient } from '@/lib/tool-handlers/findAndConfirmPatientHandler';
+
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
 import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
 import { handleSelectAndConfirmSlot } from '@/lib/tool-handlers/selectAndConfirmSlotHandler';
 import { handleInsuranceInfo } from '@/lib/tool-handlers/insuranceInfoHandler';
+import { handleHoldAppointmentSlot } from '@/lib/tool-handlers/holdAppointmentSlotHandler';
+import { handleIdentifyPatient } from '@/lib/tool-handlers/identifyPatientHandler';
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { 
   ServerMessageToolCallsPayload, 
-  ConversationState,
   HandlerResult,
   ServerMessageToolCallItem
 } from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
 import { Prisma } from '@prisma/client';
 
 export async function POST(request: Request) {
@@ -64,17 +65,25 @@ export async function POST(request: Request) {
 
     if (callLog.conversationState && typeof callLog.conversationState === 'object' && callLog.conversationState !== null) {
       state = callLog.conversationState as unknown as ConversationState;
-      console.log(`[State Management] Retrieved state for call: ${callId}`);
+      console.log(`[StatefulWebhook] Retrieved state for call: ${callId}`);
     } else {
+      // Initialize state with new canonical structure
       state = {
         callId: callId,
         practiceId: practiceId,
-        appointmentBooking: {},
-        patientDetails: {
-          collectedInfo: {}
+        patient: {
+          status: 'UNKNOWN',
+          isNameConfirmed: false
+        },
+        insurance: {
+          status: 'NOT_CHECKED'
+        },
+        booking: {
+          isUrgent: false,
+          presentedSlots: []
         }
       };
-      console.log(`[State Management] Initialized new state for call: ${callId}`);
+      console.log(`[StatefulWebhook] Initialized new canonical state for call: ${callId}`);
     }
 
     // Get tool name and arguments
@@ -145,8 +154,8 @@ export async function POST(request: Request) {
         break;
       }
 
-      case "create_patient_record": {
-        handlerResult = await handleCreatePatientRecord(
+      case "identifyPatient": {
+        handlerResult = await handleIdentifyPatient(
           state,
           toolArguments as {
             firstName: string;
@@ -154,18 +163,6 @@ export async function POST(request: Request) {
             dateOfBirth: string;
             phoneNumber: string;
             email: string;
-          },
-          toolCall.id
-        );
-        break;
-      }
-
-      case "findAndConfirmPatient": {
-        handlerResult = await handleFindAndConfirmPatient(
-          state,
-          toolArguments as {
-            fullName: string;
-            dateOfBirth: string;
           },
           toolCall.id
         );
@@ -185,6 +182,15 @@ export async function POST(request: Request) {
         handlerResult = await handleInsuranceInfo(
           state,
           toolArguments as { insuranceName?: string },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "holdAppointmentSlot": {
+        handlerResult = await handleHoldAppointmentSlot(
+          state,
+          toolArguments as { slotId: string },
           toolCall.id
         );
         break;
@@ -223,7 +229,7 @@ export async function POST(request: Request) {
       where: { vapiCallId: callId },
       data: { conversationState: newState as unknown as Prisma.InputJsonValue }
     });
-    console.log(`[State Management] Persisted state for call: ${callId}`);
+    console.log(`[StatefulWebhook] Persisted state for call: ${callId}`);
 
     // Render the system prompt using the guaranteed fresh state.
     try {

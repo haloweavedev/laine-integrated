@@ -1,8 +1,9 @@
 import { matchUserSelectionToSlot } from '../ai/slotMatcher';
-import { ConversationState } from '../../types/vapi';
+import { ConversationState } from '../../types/laine';
 import { prisma } from '@/lib/prisma';
 import { mergeState } from '@/lib/utils/state-helpers';
 import { DateTime } from 'luxon';
+import { handleHoldAppointmentSlot } from './holdAppointmentSlotHandler';
 
 interface SelectAndConfirmSlotArgs {
   userSelection: string;
@@ -33,7 +34,7 @@ export async function handleSelectAndConfirmSlot(
   const practiceTimezone = practice.timezone || 'America/Chicago'; // Use a sensible default
   
   // Check if presentedSlots exists and is not empty
-  if (!currentState.appointmentBooking?.presentedSlots || currentState.appointmentBooking.presentedSlots.length === 0) {
+  if (!currentState.booking?.presentedSlots || currentState.booking.presentedSlots.length === 0) {
     console.log('[SelectAndConfirmSlot] ERROR: No presented slots available');
     return {
       toolResponse: {
@@ -45,7 +46,7 @@ export async function handleSelectAndConfirmSlot(
   }
 
   // Get the presented slots from current state
-  const presentedSlots = currentState.appointmentBooking.presentedSlots;
+  const presentedSlots = currentState.booking.presentedSlots;
 
   console.log('[SelectAndConfirmSlot] Matching selection against', presentedSlots.length, 'slots');
   
@@ -69,37 +70,24 @@ export async function handleSelectAndConfirmSlot(
 
   console.log('[SelectAndConfirmSlot] Successfully matched slot:', matchedSlot);
 
-  // Get the spokenName for the confirmation message
-  const { spokenName } = currentState.appointmentBooking;
-  if (!spokenName) {
-    console.log('[SelectAndConfirmSlot] ERROR: Missing spokenName in state');
-    return {
-      toolResponse: {
-        toolCallId,
-        error: "Cannot prepare confirmation. Appointment type information is missing."
-      },
-      newState: currentState
-    };
-  }
-
   // Generate formatted time for use in messages
   const formattedTime = DateTime.fromISO(matchedSlot.time, { zone: practiceTimezone })
                                 .toFormat("cccc, MMMM d 'at' h:mm a");
 
   // Update the state with the selected slot and clear presented slots
-  const newState = mergeState(currentState, {
-    appointmentBooking: {
+  const newStateWithSelection = mergeState(currentState, {
+    booking: {
       selectedSlot: matchedSlot,
       presentedSlots: [] // Clear the list of options once selection is made
     }
   });
 
-  // Check if patient has been identified yet (urgent flow gate)
-  if (!currentState.patientDetails.nexhealthPatientId) {
-    // Urgent flow: We have a slot but no patient record yet
-    const urgentFlowMessage = `Okay, I'm holding the slot for you on ${formattedTime}. Before I can finalize that, I'll need to get your details. Are you a new or an existing patient?`;
+  // Check if patient has been identified (required for holding slots)
+  if (!currentState.patient.id) {
+    // Patient not identified yet - cannot hold slot without patient ID
+    const urgentFlowMessage = `Okay, I'd like to reserve that ${formattedTime} slot for you. Before I can hold it, I'll need to get your details. Are you a new or an existing patient?`;
     
-    console.log('[SelectAndConfirmSlot] Urgent flow: Patient ID missing, pivoting to patient identification');
+    console.log('[SelectAndConfirmSlot] Urgent flow: Patient ID missing, deferring hold until patient identified');
     
     return {
       toolResponse: {
@@ -111,25 +99,74 @@ export async function handleSelectAndConfirmSlot(
           content: urgentFlowMessage
         }
       },
-      newState
+      newState: newStateWithSelection
     };
-  } else {
-    // Standard flow: Patient already identified, proceed to confirmation
-    const confirmationMessage = `Okay, just to confirm, I have you down for a ${spokenName} on ${formattedTime}. Does that all sound correct?`;
-    
-    console.log('[SelectAndConfirmSlot] Standard flow: Generated confirmation message:', confirmationMessage);
+  }
+
+  // Patient identified - proceed with slot hold using the "Hold & Confirm" model
+  console.log('[SelectAndConfirmSlot] Patient identified, initiating slot hold...');
+  
+  // Create a temporary slot ID from the matched slot data
+  // Note: In a real implementation, this would be the actual slot ID from NexHealth
+  const slotId = `${matchedSlot.providerId}_${matchedSlot.time}_${matchedSlot.operatory_id || 0}`;
+  
+  try {
+    // Programmatically invoke the hold slot handler
+    const holdResult = await handleHoldAppointmentSlot(
+      newStateWithSelection,
+      { slotId },
+      `${toolCallId}_hold`
+    );
+
+    if (typeof holdResult.toolResponse.result === 'object' && holdResult.toolResponse.result?.success) {
+      // Hold succeeded - ask for confirmation
+      const { spokenName } = currentState.booking;
+      const confirmationMessage = `Great! I've reserved that ${spokenName || 'appointment'} slot for ${formattedTime}. Just to confirm - does that work for you?`;
+      
+      console.log('[SelectAndConfirmSlot] Slot successfully held, asking for confirmation');
+      
+      return {
+        toolResponse: {
+          toolCallId,
+          result: { success: true, slotHeld: true },
+          message: {
+            type: 'assistant-message',
+            role: 'assistant',
+            content: confirmationMessage
+          }
+        },
+        newState: holdResult.newState
+      };
+    } else {
+      // Hold failed - slot likely taken
+      console.error('[SelectAndConfirmSlot] Slot hold failed:', holdResult.toolResponse.error);
+      
+      const failureMessage = holdResult.toolResponse.message?.content || 
+                             "I'm sorry, that slot was just taken. Let me check for other available times.";
+      
+      return {
+        toolResponse: {
+          toolCallId,
+          result: { success: false, slotHeld: false },
+          message: {
+            type: 'request-failed',
+            role: 'assistant',  
+            content: failureMessage
+          }
+        },
+        newState: currentState // Revert to original state since hold failed
+      };
+    }
+  } catch (error) {
+    console.error('[SelectAndConfirmSlot] Error during slot hold:', error);
     
     return {
       toolResponse: {
         toolCallId,
-        result: { success: true },
-        message: {
-          type: 'assistant-message',
-          role: 'assistant',
-          content: confirmationMessage
-        }
+        result: { success: false, slotHeld: false },
+        error: "I encountered an issue trying to reserve that slot. Let me check for other available times."
       },
-      newState
+      newState: newStateWithSelection
     };
   }
 } 

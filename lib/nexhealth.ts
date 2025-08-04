@@ -737,4 +737,110 @@ export async function createPatient(
   );
 
   return { data, apiLog: updatedApiLog };
+}
+
+/**
+ * Places a temporary hold on an appointment slot in NexHealth
+ * This is the first part of the "Hold & Confirm" booking model
+ */
+export async function holdNexhealthSlot(
+  subdomain: string,
+  slotId: string,
+  patientId: number,
+  duration: number,
+  apiLog: ApiLog = []
+): Promise<{ success: boolean; heldSlotId?: string; error?: string; apiLog: ApiLog }> {
+  console.log(`[HoldSlot] Attempting to hold slot ${slotId} for patient ${patientId} (${duration} minutes)`);
+  
+  try {
+    const body = {
+      appointment_hold: {
+        slot_id: slotId,
+        patient_id: patientId,
+        duration_minutes: duration,
+        hold_duration_minutes: 10 // Hold for 10 minutes
+      }
+    };
+
+    const { data, apiLog: updatedApiLog } = await fetchNexhealthAPI(
+      '/appointment_holds',
+      subdomain,
+      undefined,
+      'POST',
+      body,
+      apiLog
+    );
+
+    if (data?.data?.id) {
+      console.log(`[HoldSlot] Successfully held slot with hold ID: ${data.data.id}`);
+      return {
+        success: true,
+        heldSlotId: data.data.id.toString(),
+        apiLog: updatedApiLog
+      };
+    } else {
+      console.error('[HoldSlot] Invalid response structure:', data);
+      return {
+        success: false,
+        error: 'Invalid response from NexHealth hold API',
+        apiLog: updatedApiLog
+      };
+    }
+  } catch (error) {
+    console.error('[HoldSlot] Error holding slot:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      success: false,
+      error: errorMessage,
+      apiLog
+    };
+  }
+}
+
+/**
+ * Confirms a previously held appointment slot, converting it to a real booking
+ * This is the second part of the "Hold & Confirm" booking model
+ */
+export async function confirmNexhealthBooking(
+  subdomain: string,
+  heldSlotId: string,
+  patientId: number,
+  apiLog: ApiLog = []
+): Promise<{ success: boolean; bookingId?: string; error?: string; apiLog: ApiLog }> {
+  console.log(`[ConfirmHold] Attempting to confirm held slot ${heldSlotId} for patient ${patientId}`);
+  
+  try {
+    const { data, apiLog: updatedApiLog } = await fetchNexhealthAPI(
+      `/appointment_holds/${heldSlotId}/confirm`,
+      subdomain,
+      undefined,
+      'POST',
+      { patient_id: patientId },
+      apiLog
+    );
+
+    if (data?.data?.appointment_id) {
+      console.log(`[ConfirmHold] Successfully confirmed booking with ID: ${data.data.appointment_id}`);
+      return {
+        success: true,
+        bookingId: data.data.appointment_id.toString(),
+        apiLog: updatedApiLog
+      };
+    } else {
+      console.error('[ConfirmHold] Invalid response structure:', data);
+      return {
+        success: false,
+        error: 'Invalid response from NexHealth confirm API',
+        apiLog: updatedApiLog
+      };
+    }
+  } catch (error) {
+    console.error('[ConfirmHold] Error confirming booking:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      success: false,
+      error: errorMessage,
+      apiLog
+    };
+  }
 } 

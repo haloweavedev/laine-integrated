@@ -9,7 +9,7 @@ export function getSelectAndConfirmSlotTool(appBaseUrl: string): VapiTool {
     type: "function" as const,
     function: {
       name: "selectAndConfirmSlot",
-      description: "Captures the user's verbal choice of a time slot, saves it, and asks them for final confirmation. Use this immediately after presenting time options and the user indicates their choice.",
+      description: "Captures the user's verbal choice of a time slot and initiates the Hold & Confirm booking process. This tool will hold the selected slot to prevent booking conflicts and ask for final confirmation. Use this immediately after presenting time options and the user indicates their choice.",
       parameters: {
         type: "object" as const,
         properties: {

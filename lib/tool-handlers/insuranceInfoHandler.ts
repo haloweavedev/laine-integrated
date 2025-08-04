@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { generateInsuranceResponse } from '@/lib/ai/insuranceResponseGenerator';
-import type { ConversationState, HandlerResult } from '@/types/vapi';
+import type { HandlerResult } from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
 
 interface InsuranceInfoArgs {
   insuranceName?: string;

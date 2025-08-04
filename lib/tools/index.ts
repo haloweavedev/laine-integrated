@@ -1,7 +1,6 @@
 import type { VapiTool } from '@/types/vapi';
 import { getFindAppointmentTypeTool } from './definitions/findAppointmentTypeTool';
-import { getCreatePatientRecordTool } from './definitions/createPatientRecordTool';
-import { getFindAndConfirmPatientTool } from './definitions/findAndConfirmPatientTool';
+import { getIdentifyPatientTool } from './definitions/identifyPatientTool';
 import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
 import { getSelectAndConfirmSlotTool } from './definitions/selectAndConfirmSlotTool';
 import { getConfirmBookingTool } from './definitions/confirmBookingTool';
@@ -13,8 +12,7 @@ import { getInsuranceInfoTool } from './definitions/insuranceInfoTool';
  */
 export const toolDefinitionMap = {
   findAppointmentType: getFindAppointmentTypeTool,
-  create_patient_record: getCreatePatientRecordTool,
-  findAndConfirmPatient: getFindAndConfirmPatientTool,
+  identifyPatient: getIdentifyPatientTool,
   checkAvailableSlots: getCheckAvailableSlotsTool,
   selectAndConfirmSlot: getSelectAndConfirmSlotTool,
   confirmBooking: getConfirmBookingTool,

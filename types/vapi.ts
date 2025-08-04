@@ -1,6 +1,8 @@
 // Core VAPI TypeScript type definitions for type safety
 // These types are based on VAPI API documentation and webhook specifications
 
+import type { ConversationState } from './laine';
+
 
 
 // Interface for tool chaining directive
@@ -29,39 +31,7 @@ export interface HandlerResult {
   nextTool?: NextTool; // Optional field for autonomous tool chaining
 }
 
-export interface ConversationState {
-  practiceId: string;
-  callId: string;
-  
-  appointmentBooking: {
-    typeId?: string;
-    typeName?: string;
-    spokenName?: string;
-    duration?: number;
-    patientRequest?: string;
-    selectedSlot?: SlotData;
-    presentedSlots?: SlotData[];
-    nextAvailableDate?: string | null;
-    lastTimePreference?: 'Morning' | 'Afternoon' | 'Evening' | 'Any';
-    isUrgent?: boolean;
-    isImmediateBooking?: boolean;
-  };
-
-  patientDetails: {
-    nexhealthPatientId?: number;
-    // The "form" we are trying to fill
-    collectedInfo: {
-      firstName?: string;
-      lastName?: string;
-      dob?: string; // Stored as YYYY-MM-DD
-      phone?: string;
-      email?: string;
-    };
-    // Optional fields for potential future use
-    insuranceProvider?: string;
-    insuranceMemberId?: string;
-  };
-}
+// ConversationState has been moved to @/types/laine for the new canonical interface
 
 export interface VapiToolFunctionParameters {
   type: "object";

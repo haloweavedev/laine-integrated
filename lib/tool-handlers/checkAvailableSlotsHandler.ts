@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeDateWithAI, findAvailableSlots, generateTimeBucketResponse, generateSlotResponse, TIME_BUCKETS, type TimeBucket } from "@/lib/ai/slotHelper";
 import { DateTime } from "luxon";
-import type { ConversationState, HandlerResult, ApiLog } from "@/types/vapi";
+import type { HandlerResult, ApiLog } from "@/types/vapi";
+import type { ConversationState } from "@/types/laine";
 import { mergeState } from '@/lib/utils/state-helpers';
 
 interface CheckAvailableSlotsArgs {
@@ -35,7 +36,7 @@ export async function handleCheckAvailableSlots(
         };
       }
 
-      if (!currentState.appointmentBooking.typeId) {
+      if (!currentState.booking.appointmentTypeId) {
         return {
           toolResponse: {
             toolCallId: toolId,
@@ -66,7 +67,7 @@ export async function handleCheckAvailableSlots(
       };
     }
 
-    // 1. UNIFIED DATE DETERMINATION LOGIC (respects user preferences in all flows)
+    // 1. UNIFIED DATE DETERMINATION LOGIC (prioritizes proactive "first available" search)
     let searchDate: string | null = null;
 
     // Priority 0: Handle system-initiated urgent search
@@ -117,14 +118,15 @@ export async function handleCheckAvailableSlots(
       }
     }
 
-    // Priority 3: Default to today if no date or preference provided
+    // Priority 3: DEFAULT PROACTIVE PATH - "First Available" search (NEW DEFAULT BEHAVIOR)
     if (!searchDate) {
-      console.log(`[CheckAvailableSlotsHandler] No specific date preference provided. Using today as default.`);
+      console.log(`[CheckAvailableSlotsHandler] No user preference detected. Initiating default 'first available' search.`);
       searchDate = DateTime.now().setZone(practice.timezone || 'America/Chicago').toFormat('yyyy-MM-dd');
     }
 
     // 2. DETERMINE SEARCH WINDOW
-    const { isUrgent, isImmediateBooking } = currentState.appointmentBooking;
+    const { isUrgent } = currentState.booking;
+    const isImmediateBooking = isUrgent; // Treat isUrgent as isImmediateBooking for now
     let searchDays: number;
     
     if (searchWindowDays) {
@@ -133,13 +135,17 @@ export async function handleCheckAvailableSlots(
       searchDays = 1; // Search only the specific requested date
     } else if (isUrgent || isImmediateBooking) {
       searchDays = 7; // Search 7 days for urgent appointments if no specific date requested
+    } else if (!requestedDate && !preferredDaysOfWeek && !timeBucket) {
+      // This is the new default "first available" path - search more days for better options
+      searchDays = 14; // Expanded search window for proactive first-available flow
+      console.log(`[CheckAvailableSlotsHandler] Using expanded 14-day search window for 'first available' flow.`);
     } else {
-      searchDays = 3; // Search 3 days for standard flow if no specific date requested
+      searchDays = 3; // Search 3 days for other flows
     }
 
     // 3. PERFORM THE SEARCH
     const searchResult = await findAvailableSlots(
-      currentState.appointmentBooking.typeId,
+      currentState.booking.appointmentTypeId,
       {
         id: practice.id,
         nexhealthSubdomain: practice.nexhealthSubdomain!,
@@ -154,7 +160,7 @@ export async function handleCheckAvailableSlots(
     // 4. SLOTS ARE NOW PRE-FILTERED BY findAvailableSlots
     const filteredSlots = searchResult.foundSlots;
 
-    const spokenName = currentState.appointmentBooking.spokenName || currentState.appointmentBooking.typeName || 'appointment';
+    const spokenName = currentState.booking.spokenName || currentState.booking.appointmentTypeName || 'appointment';
 
     // 4. DECIDE HOW TO RESPOND BASED ON FLOW TYPE
     
@@ -172,9 +178,8 @@ export async function handleCheckAvailableSlots(
 
       // Create new state with slots data
       const newState = mergeState(currentState, {
-        appointmentBooking: {
-          presentedSlots: searchResult.foundSlots,
-          nextAvailableDate: searchResult.nextAvailableDate || null
+        booking: {
+          presentedSlots: searchResult.foundSlots
         }
       });
 
@@ -242,9 +247,8 @@ export async function handleCheckAvailableSlots(
 
       // Create new state with slots data
       const newState = mergeState(currentState, {
-        appointmentBooking: {
-          presentedSlots: filteredSlots,
-          nextAvailableDate: searchResult.nextAvailableDate || null
+        booking: {
+          presentedSlots: filteredSlots
         }
       });
 
@@ -273,7 +277,7 @@ export async function handleCheckAvailableSlots(
         return {
           toolResponse: {
             toolCallId: toolId,
-            error: `There's a configuration issue with the '${currentState.appointmentBooking.spokenName}' appointment type. I cannot check for slots. Please inform the user that a staff member will call them back to schedule this specific appointment type.`
+            error: `There's a configuration issue with the '${currentState.booking.spokenName}' appointment type. I cannot check for slots. Please inform the user that a staff member will call them back to schedule this specific appointment type.`
           },
           newState: currentState
         };
