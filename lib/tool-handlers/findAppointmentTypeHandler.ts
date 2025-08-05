@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
-import { generateAcknowledgment } from '@/lib/ai/acknowledgmentGenerator';
-import type { HandlerResult, ApiLog, VapiFunctionCall } from "@/types/vapi";
+
+import type { HandlerResult, ApiLog } from "@/types/vapi";
 import type { ConversationState } from "@/types/laine";
 import { mergeState } from '@/lib/utils/state-helpers';
 
@@ -22,8 +22,7 @@ export async function handleFindAppointmentType(
   
   console.log(`[FindAppointmentTypeHandler] Processing request: "${patientRequest}", patientStatus: "${patientStatus}"`);
   
-  // Generate AI-powered acknowledgment based on patient request
-  const acknowledgment = await generateAcknowledgment(toolArguments.patientRequest);
+  // Note: Acknowledgment generation removed for simplified flow
   
   try {
     if (!currentState.practiceId) {
@@ -135,72 +134,31 @@ export async function handleFindAppointmentType(
       }
     });
 
-    // Generate acknowledgment phrase
-    const acknowledgmentPhrase = acknowledgment ? `${acknowledgment} ` : "Okay, ";
-    const spokenName = matchedAppointmentType.spokenName || matchedAppointmentType.name;
+    // Log the successful state update for debugging
+    console.log('[FindAppointmentTypeHandler] State updated with appointmentTypeId:', newState.booking.appointmentTypeId);
+    console.log('[FindAppointmentTypeHandler] Full updated booking state:', JSON.stringify(newState.booking, null, 2));
 
-    // Handle urgent appointments with proactive slot search
-    if (matchedAppointmentType.check_immediate_next_available) {
-      console.log(`[Flow Control] Urgent appointment "${spokenName}". Initiating proactive slot search.`);
-      
-      // The system will execute this tool call immediately after speaking the message
-      const followUpCall = {
-        type: 'function' as const,
-        function: {
-          name: 'checkAvailableSlots',
-          arguments: JSON.stringify({
-            searchWindowDays: 7
-          })
+    // The tool's job is now ONLY to identify the type and update the state.
+    // The system prompt will guide the next conversational step.
+    // We return a simple success result without a message to ensure the state is saved
+    // and let the LLM decide the next step based on the updated state.
+    return {
+      newState: newState,
+      toolResponse: {
+        toolCallId: toolId,
+        result: {
+          success: true,
+          appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
+          appointmentTypeName: matchedAppointmentType.name,
+          spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
+          duration: matchedAppointmentType.duration,
+          isUrgent: matchedAppointmentType.check_immediate_next_available,
+          apiLog: apiLog
         }
-      } as VapiFunctionCall;
-
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          result: { 
-            appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
-            appointmentTypeName: matchedAppointmentType.name,
-            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
-            duration: matchedAppointmentType.duration,
-            isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
-            apiLog: apiLog
-          },
-          message: {
-            type: "request-complete",
-            role: "assistant",
-            content: `${acknowledgmentPhrase}I have you down for a ${spokenName}. Can I check for the next available appointment for you.`
-          },
-          followUpFunctionCall: followUpCall
-        },
-        newState
-      };
-    } else {
-      // Standard flow - proceed to patient creation
-      console.log(`[Flow Control] Standard flow for "${spokenName}". Proceeding to patient creation.`);
-      
-      const nextStepQuestion = "First, I'll need to get a few details to create a file for you. What is your first and last name?";
-      const finalContent = `${acknowledgmentPhrase}I have you down for a ${spokenName}. ${nextStepQuestion}`;
-
-      return {
-        toolResponse: {
-          toolCallId: toolId,
-          result: { // The new structured data payload
-            appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
-            appointmentTypeName: matchedAppointmentType.name,
-            spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,
-            duration: matchedAppointmentType.duration,
-            isImmediateBooking: matchedAppointmentType.check_immediate_next_available,
-            apiLog: apiLog
-          },
-          message: { // The new high-fidelity message
-            type: "request-complete",
-            role: "assistant",
-            content: finalContent
-          }
-        },
-        newState: newState
-      };
-    }
+        // By not including a "message", we allow the LLM to decide the next conversational step
+        // based on the updated state and the system prompt's guidance.
+      }
+    };
 
   } catch (error) {
     console.error(`[FindAppointmentTypeHandler] Error processing appointment type:`, error);
