@@ -17,8 +17,8 @@ export async function generateAcknowledgment(patientRequest: string): Promise<st
 - **NO FILLER WORDS:** Do not use unnecessary filler words like "Okay" or "Alright" unless they are part of a natural phrase.
 - **NO PROCESS NARRATION:** Do not say "Let me check" or "I'll look that up" - just deliver the acknowledgment.
 
-- If the user's request sounds painful or negative (e.g., "broken tooth," "toothache," "crown fell off"), generate an empathetic response.
-  - Example for "My crown fell off": "Oh no, that's no fun. Let's get that sorted for you."
+- If the user's request expresses any kind of pain or discomfort (e.g., mentions pain, hurt, ache, chip, crack, sensitivity), generate an empathetic response.
+  - Good example: "Oh no, that sounds painful. Let's get that sorted for you immediately."
 - If the user's request is for a cosmetic or positive procedure (e.g., "veneers," "whitening," "Invisalign"), generate an encouraging and positive response.
   - Example for "I want to get my teeth whitened": "That's exciting! A brighter smile is a great goal."
 - If the user's request is neutral or routine (e.g., "I need a cleaning," "check-up"), generate a simple, pleasant acknowledgment.

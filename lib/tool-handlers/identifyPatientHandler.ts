@@ -151,7 +151,7 @@ export async function handleIdentifyPatient(
             message: {
               type: "request-complete",
               role: "assistant",
-              content: `Great, I've found and confirmed your record, ${args.firstName}. Now, let's get you scheduled.`
+              content: `Great, I've found and confirmed your record, ${args.firstName}. Can I go ahead and schedule your appointment?`
             }
           },
           newState
