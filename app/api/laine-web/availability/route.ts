@@ -102,16 +102,23 @@ export async function POST(request: NextRequest) {
       activeProviders.map(ap => ap.savedProvider.provider.nexhealthProviderId)
     )).filter(pid => pid); // Remove any null/undefined values
 
+    // Collect unique operatory IDs (oids) from active operatories
+    const oids = Array.from(new Set(
+      activeProviders.flatMap(ap => 
+        ap.savedProvider.assignedOperatories
+          .filter(ao => ao.savedOperatory.isActive)
+          .map(ao => ao.savedOperatory.nexhealthOperatoryId)
+      )
+    )).filter(oid => oid); // Remove any null/undefined values
 
-
-    if (pids.length === 0) {
+    if (pids.length === 0 || oids.length === 0) {
       return NextResponse.json(
-        { error: 'No active providers are configured for this appointment type' },
+        { error: 'No active providers or operatories are configured for this appointment type' },
         { status: 400 }
       );
     }
 
-    console.log(`[Availability API] Found ${pids.length} providers`);
+    console.log(`[Availability API] Found ${pids.length} providers and ${oids.length} operatories`);
 
     // Step 3: Get practice NexHealth configuration
     const practice = appointmentType.practice;
@@ -134,6 +141,9 @@ export async function POST(request: NextRequest) {
     // Add provider IDs
     pids.forEach(pid => params.append('pids[]', pid));
 
+    // Add operatory IDs
+    oids.forEach(oid => params.append('operatory_ids[]', oid));
+
     // Set date range based on mode
     const today = new Date().toISOString().split('T')[0];
     if (mode === 'first') {
@@ -148,13 +158,26 @@ export async function POST(request: NextRequest) {
     const nexhealthUrl = `${baseUrl}?${params.toString()}`;
     console.log(`[Availability API] Calling NexHealth: ${nexhealthUrl}`);
 
+    const apiToken = process.env.NEXHEALTH_API_KEY;
+    if (!apiToken) {
+      console.error('[Availability API] Critical Error: NEXHEALTH_API_KEY is not set in the environment.');
+      return NextResponse.json(
+        { error: 'Server configuration error: Missing API token.' },
+        { status: 500 }
+      );
+    }
+    console.log('[Availability API] API Token found. Proceeding to call NexHealth.');
+
     // Step 5: Call NexHealth API
     const nexhealthResponse = await fetch(nexhealthUrl, {
       headers: {
-        'Authorization': process.env.NEXHEALTH_API_TOKEN || '',
+        'Authorization': apiToken,
         'accept': 'application/vnd.Nexhealth+json;version=2'
       }
     });
+
+    const responseText = await nexhealthResponse.text();
+    console.log('[Availability API] Raw NexHealth Response:', responseText);
 
     if (!nexhealthResponse.ok) {
       console.error(`[Availability API] NexHealth API error: ${nexhealthResponse.status}`);
@@ -164,7 +187,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const nexhealthData: NexhealthResponse = await nexhealthResponse.json();
+    const nexhealthData: NexhealthResponse = JSON.parse(responseText);
 
     if (!nexhealthData.code || !nexhealthData.data) {
       console.error('[Availability API] Invalid NexHealth response:', nexhealthData);

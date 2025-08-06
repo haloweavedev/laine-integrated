@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
         {
           method: 'GET',
           headers: {
-            'Authorization': process.env.NEXHEALTH_API_TOKEN || '',
+            'Authorization': process.env.NEXHEALTH_API_KEY || '',
             'accept': 'application/vnd.Nexhealth+json;version=2'
           }
         }
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
         {
           method: 'POST',
           headers: {
-            'Authorization': process.env.NEXHEALTH_API_TOKEN || '',
+            'Authorization': process.env.NEXHEALTH_API_KEY || '',
             'accept': 'application/vnd.Nexhealth+json;version=2',
             'content-type': 'application/json'
           },
@@ -266,7 +266,7 @@ export async function POST(request: NextRequest) {
       {
         method: 'POST',
         headers: {
-          'Authorization': process.env.NEXHEALTH_API_TOKEN || '',
+          'Authorization': process.env.NEXHEALTH_API_KEY || '',
           'accept': 'application/vnd.Nexhealth+json;version=2',
           'content-type': 'application/json'
         },
