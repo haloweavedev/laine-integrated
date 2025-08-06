@@ -794,9 +794,9 @@ export async function bookNexhealthAppointment(
       body
     );
 
-    if (data?.data?.id) {
-      console.log(`[NexHealth Book] SUCCESS: Appointment booked successfully. Booking ID: ${data.data.id}`);
-      return { success: true, bookingId: data.data.id };
+    if (data?.appt?.id) {
+      console.log(`[NexHealth Book] SUCCESS: Appointment booked successfully. Booking ID: ${data.appt.id}`);
+      return { success: true, bookingId: data.appt.id };
     } else {
       console.error('[NexHealth Book] FAILED: API response did not contain a booking ID.', data);
       return { success: false, error: 'API response missing booking ID.' };

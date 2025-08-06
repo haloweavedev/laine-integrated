@@ -2,7 +2,7 @@ import type { VapiTool } from '@/types/vapi';
 import { getFindAppointmentTypeTool } from './definitions/findAppointmentTypeTool';
 import { getIdentifyPatientTool } from './definitions/identifyPatientTool';
 import { getCheckAvailableSlotsTool } from './definitions/checkAvailableSlotsTool';
-import { getSelectAndBookSlotTool } from './definitions/selectAndConfirmSlotTool';
+import { getSelectAndBookSlotTool } from './definitions/selectAndBookSlotTool';
 import { getInsuranceInfoTool } from './definitions/insuranceInfoTool';
 
 /**

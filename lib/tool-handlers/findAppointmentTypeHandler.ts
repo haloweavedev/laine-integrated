@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { matchAppointmentTypeIntent } from "@/lib/ai/appointmentMatcher";
+import { generateAcknowledgment } from '@/lib/ai/acknowledgmentGenerator';
 
 import type { HandlerResult, ApiLog } from "@/types/vapi";
 import type { ConversationState } from "@/types/laine";
@@ -22,7 +23,9 @@ export async function handleFindAppointmentType(
   
   console.log(`[FindAppointmentTypeHandler] Processing request: "${patientRequest}", patientStatus: "${patientStatus}"`);
   
-  // Note: Acknowledgment generation removed for simplified flow
+  // Generate AI-powered acknowledgment based on patient request
+  const acknowledgment = await generateAcknowledgment(patientRequest);
+  console.log(`[FindAppointmentTypeHandler] Generated acknowledgment: "${acknowledgment}"`);
   
   try {
     if (!currentState.practiceId) {
@@ -148,6 +151,7 @@ export async function handleFindAppointmentType(
         toolCallId: toolId,
         result: {
           success: true,
+          acknowledgment: acknowledgment,
           appointmentTypeId: matchedAppointmentType.nexhealthAppointmentTypeId,
           appointmentTypeName: matchedAppointmentType.name,
           spokenName: matchedAppointmentType.spokenName || matchedAppointmentType.name,

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
-import { handleSelectAndBookSlot } from '@/lib/tool-handlers/selectAndConfirmSlotHandler';
+import { handleSelectAndBookSlot } from '@/lib/tool-handlers/selectAndBookSlotHandler';
 import { handleInsuranceInfo } from '@/lib/tool-handlers/insuranceInfoHandler';
 import { handleIdentifyPatient } from '@/lib/tool-handlers/identifyPatientHandler';
 import { Liquid } from 'liquidjs';
