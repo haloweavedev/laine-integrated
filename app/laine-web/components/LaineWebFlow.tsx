@@ -35,15 +35,15 @@ interface SelectedSlot {
 interface PatientDetails {
   firstName: string;
   lastName: string;
-  email: string;
-  phone: string;
+  email?: string;
+  phone?: string;
   dob?: string;
   patientType: 'NEW' | 'EXISTING';
-  patientStatus: 'NEW' | 'RETURNING';
   isForSelf: boolean;
   isGuardian?: boolean;
   insurance?: string;
   notes?: string;
+  nexhealthPatientId?: number; // Added after patient lookup/creation
 }
 
 interface BookingDetails {
@@ -220,6 +220,8 @@ export function LaineWebFlow({ practice }: LaineWebFlowProps) {
         
         {step === 3 && selectedSlot && (
           <PatientDetailsStep
+            practiceId={practice.id}
+            selectedSlot={selectedSlot}
             onSubmit={handlePatientDetailsSubmit}
           />
         )}

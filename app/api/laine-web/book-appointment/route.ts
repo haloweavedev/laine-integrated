@@ -14,15 +14,15 @@ interface BookingRequest {
   patientDetails: {
     firstName: string;
     lastName: string;
-    email: string;
-    phone: string;
+    email?: string;
+    phone?: string;
     dob?: string;
     patientType: 'NEW' | 'EXISTING';
-    patientStatus: 'NEW' | 'RETURNING';
     isForSelf: boolean;
     isGuardian?: boolean;
     insurance?: string;
     notes?: string;
+    nexhealthPatientId?: number; // Added after patient lookup/creation
   };
 }
 
@@ -118,10 +118,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 2: Two-step patient resolution process
+    // Step 2: Patient resolution - use provided ID or fallback to legacy lookup/creation
     let nexhealthPatientId: number;
 
-    if (patientDetails.patientType === 'EXISTING') {
+    if (patientDetails.nexhealthPatientId) {
+      // Patient ID already provided from the new patient flow
+      nexhealthPatientId = patientDetails.nexhealthPatientId;
+      console.log(`[Book Appointment API] Using provided patient ID: ${nexhealthPatientId}`);
+    } else if (patientDetails.patientType === 'EXISTING') {
       // Search for existing patient using name and DOB
       console.log(`[Book Appointment API] Searching for existing patient: ${patientDetails.firstName} ${patientDetails.lastName}`);
 
@@ -175,8 +179,15 @@ export async function POST(request: NextRequest) {
       console.log(`[Book Appointment API] Found existing patient with ID: ${nexhealthPatientId}`);
 
     } else if (patientDetails.patientType === 'NEW') {
-      // Create new patient
-      console.log(`[Book Appointment API] Creating new patient: ${patientDetails.firstName} ${patientDetails.lastName}`);
+      // Legacy fallback: Create new patient (should rarely be used with new flow)
+      console.log(`[Book Appointment API] Creating new patient (legacy path): ${patientDetails.firstName} ${patientDetails.lastName}`);
+
+      if (!patientDetails.email || !patientDetails.phone) {
+        return NextResponse.json(
+          { error: 'Email and phone are required for new patients' },
+          { status: 400 }
+        );
+      }
 
       const patientPayload = {
         provider: {
@@ -240,7 +251,6 @@ export async function POST(request: NextRequest) {
       `Service: ${appointmentType.name}`,
       `Duration: ${appointmentType.duration} minutes`,
       `Patient Type: ${patientDetails.patientType}`,
-      `Patient Status: ${patientDetails.patientStatus}`,
       ...(patientDetails.isForSelf ? [`Booking for self`] : [`Booking for someone else`]),
       ...(patientDetails.isGuardian ? [`Booked by parent/guardian`] : []),
       ...(patientDetails.insurance ? [`Insurance: ${patientDetails.insurance}`] : []),
@@ -307,9 +317,9 @@ export async function POST(request: NextRequest) {
           patientFirstName: patientDetails.firstName,
           patientLastName: patientDetails.lastName,
           patientDob: patientDetails.dob || null,
-          patientEmail: patientDetails.email,
-          patientPhone: patientDetails.phone,
-          patientStatus: patientDetails.patientStatus,
+          patientEmail: patientDetails.email || 'not-provided@example.com',
+          patientPhone: patientDetails.phone || '0000000000',
+          patientStatus: patientDetails.patientType, // Use patientType as status
           selectedSlotTime: new Date(selectedSlot.time),
           notes: patientDetails.notes || null,
           nexhealthBookingId: nexhealthAppointment.id.toString(),
