@@ -3,10 +3,8 @@ import { prisma } from '@/lib/prisma';
 
 import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
 import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
-import { handleConfirmBooking } from '@/lib/tool-handlers/confirmBookingHandler';
-import { handleSelectAndConfirmSlot } from '@/lib/tool-handlers/selectAndConfirmSlotHandler';
+import { handleSelectAndBookSlot } from '@/lib/tool-handlers/selectAndConfirmSlotHandler';
 import { handleInsuranceInfo } from '@/lib/tool-handlers/insuranceInfoHandler';
-import { handleHoldAppointmentSlot } from '@/lib/tool-handlers/holdAppointmentSlotHandler';
 import { handleIdentifyPatient } from '@/lib/tool-handlers/identifyPatientHandler';
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'fs';
@@ -146,14 +144,6 @@ export async function POST(request: Request) {
         break;
       }
 
-      case "confirmBooking": {
-        handlerResult = await handleConfirmBooking(
-          state,
-          toolCall.id
-        );
-        break;
-      }
-
       case "identifyPatient": {
         handlerResult = await handleIdentifyPatient(
           state,
@@ -169,10 +159,10 @@ export async function POST(request: Request) {
         break;
       }
 
-      case "selectAndConfirmSlot": {
-        handlerResult = await handleSelectAndConfirmSlot(
+      case "selectAndBookSlot": {
+        handlerResult = await handleSelectAndBookSlot(
           state,
-          toolArguments as { userSelection: string },
+          toolArguments as { userSelection: string; finalConfirmation?: boolean },
           toolCall.id
         );
         break;
@@ -182,15 +172,6 @@ export async function POST(request: Request) {
         handlerResult = await handleInsuranceInfo(
           state,
           toolArguments as { insuranceName?: string },
-          toolCall.id
-        );
-        break;
-      }
-
-      case "holdAppointmentSlot": {
-        handlerResult = await handleHoldAppointmentSlot(
-          state,
-          toolArguments as { slotId: string },
           toolCall.id
         );
         break;

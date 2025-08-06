@@ -160,6 +160,19 @@ export async function handleCheckAvailableSlots(
       timeBucket as TimeBucket
     );
 
+    // 3.5. DETECT DELAYED AVAILABILITY
+    let isDelayedAvailability = false;
+    if (searchResult.foundSlots.length > 0) {
+      const searchDateTime = DateTime.fromISO(searchDate, { zone: practice.timezone || 'America/Chicago' });
+      const firstSlotTime = DateTime.fromISO(searchResult.foundSlots[0].time, { zone: practice.timezone || 'America/Chicago' });
+      const daysUntilFirstSlot = firstSlotTime.diff(searchDateTime, 'days').days;
+
+      if (daysUntilFirstSlot > 2) {
+        isDelayedAvailability = true;
+        console.log(`[CheckAvailableSlotsHandler] Delayed availability detected. First slot is ${daysUntilFirstSlot.toFixed(1)} days from search date.`);
+      }
+    }
+
     // 4. SLOTS ARE NOW PRE-FILTERED BY findAvailableSlots
     const filteredSlots = searchResult.foundSlots;
 
@@ -193,6 +206,7 @@ export async function handleCheckAvailableSlots(
           result: { // Structured data payload
             foundSlots: searchResult.foundSlots,
             nextAvailableDate: searchResult.nextAvailableDate || null,
+            isDelayedAvailability: isDelayedAvailability,
             apiLog: apiLog
           },
           message: { // High-fidelity message
@@ -262,6 +276,7 @@ export async function handleCheckAvailableSlots(
           result: { // Structured data payload
             foundSlots: filteredSlots, // Note: we return all filtered slots here
             nextAvailableDate: searchResult.nextAvailableDate || null,
+            isDelayedAvailability: isDelayedAvailability,
             apiLog: apiLog
           },
           message: { // High-fidelity message

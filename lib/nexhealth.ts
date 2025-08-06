@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { addSeconds } from 'date-fns';
 import type { ApiLog, ApiLogEntry, SlotData } from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
 
 interface NexHealthAppointmentType {
   id: number;
@@ -740,106 +741,73 @@ export async function createPatient(
 }
 
 /**
- * Places a temporary hold on an appointment slot in NexHealth
- * This is the first part of the "Hold & Confirm" booking model
+ * Books an appointment directly in NexHealth, replacing the old hold/confirm model
+ * @param subdomain Practice NexHealth subdomain
+ * @param locationId NexHealth location ID
+ * @param patientId NexHealth patient ID  
+ * @param slot The selected slot data
+ * @param state Full conversation state for generating appointment note
+ * @returns Promise with success status and booking ID or error
  */
-export async function holdNexhealthSlot(
+export async function bookNexhealthAppointment(
   subdomain: string,
   locationId: string,
   patientId: number,
-  slot: SlotData // Pass the entire slot object
-): Promise<{ success: boolean; heldSlotId?: string; error?: string }> {
+  slot: SlotData,
+  state: ConversationState // Pass the full state to generate the note
+): Promise<{ success: boolean; bookingId?: string; error?: string }> {
   
+  const { generateAppointmentNote } = await import('@/lib/ai/summaryHelper');
+  const { DateTime } = await import('luxon');
+  
+  // Get practice timezone
+  const practice = await prisma.practice.findUnique({
+    where: { id: state.practiceId },
+    select: { timezone: true }
+  });
+  
+  const practiceTimezone = practice?.timezone || 'America/Chicago';
+  
+  const appointmentNote = await generateAppointmentNote(state);
+  const startTime = DateTime.fromISO(slot.time, { zone: practiceTimezone });
+  const endTime = startTime.plus({ minutes: state.booking.duration || 60 });
+
   const body = {
-    hold: {
-      location_id: locationId,
+    appt: {
       patient_id: patientId,
       provider_id: slot.providerId,
       operatory_id: slot.operatory_id,
-      start_time: slot.time,
-      // Assuming the API calculates the end_time based on the appointment type duration
-      // or that the hold is a standard duration, e.g., 10 minutes.
-      // If the API requires an end_time, we would need to add it here.
-      hold_duration_minutes: 10 
+      start_time: startTime.toISO(),
+      end_time: endTime.toISO(),
+      note: appointmentNote
     }
   };
 
-  console.log('[NexHealth Hold] Attempting to hold slot with request body:', JSON.stringify(body, null, 2));
+  console.log('[NexHealth Book] Attempting to book appointment with request body:', JSON.stringify(body, null, 2));
 
   try {
-    // NOTE: The endpoint '/appointment_holds' is an assumption.
-    // This may need to be changed to the correct endpoint.
     const { data } = await fetchNexhealthAPI(
-      '/appointment_holds',
+      '/appointments',
       subdomain,
-      undefined, // No query params
+      { location_id: locationId },
       'POST',
       body
     );
 
-    console.log('[NexHealth Hold] Full API response received:', JSON.stringify(data, null, 2));
-
     if (data?.data?.id) {
-      console.log(`[NexHealth Hold] SUCCESS: Slot held successfully. Hold ID: ${data.data.id}`);
-      return { success: true, heldSlotId: data.data.id };
+      console.log(`[NexHealth Book] SUCCESS: Appointment booked successfully. Booking ID: ${data.data.id}`);
+      return { success: true, bookingId: data.data.id };
     } else {
-      console.error('[NexHealth Hold] FAILED: API response did not contain a hold ID.', data);
-      return { success: false, error: 'API response missing hold ID.' };
+      console.error('[NexHealth Book] FAILED: API response did not contain a booking ID.', data);
+      return { success: false, error: 'API response missing booking ID.' };
     }
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[NexHealth Hold] FAILED: API call threw an error.', errorMessage);
-    // Log the full error object if possible to see status codes, etc.
+    console.error('[NexHealth Book] FAILED: API call threw an error.', errorMessage);
     console.error(error); 
     return { success: false, error: errorMessage };
   }
 }
 
-/**
- * Confirms a previously held appointment slot, converting it to a real booking
- * This is the second part of the "Hold & Confirm" booking model
- */
-export async function confirmNexhealthBooking(
-  subdomain: string,
-  heldSlotId: string,
-  patientId: number,
-  apiLog: ApiLog = []
-): Promise<{ success: boolean; bookingId?: string; error?: string; apiLog: ApiLog }> {
-  console.log(`[ConfirmHold] Attempting to confirm held slot ${heldSlotId} for patient ${patientId}`);
-  
-  try {
-    const { data, apiLog: updatedApiLog } = await fetchNexhealthAPI(
-      `/appointment_holds/${heldSlotId}/confirm`,
-      subdomain,
-      undefined,
-      'POST',
-      { patient_id: patientId },
-      apiLog
-    );
-
-    if (data?.data?.appointment_id) {
-      console.log(`[ConfirmHold] Successfully confirmed booking with ID: ${data.data.appointment_id}`);
-      return {
-        success: true,
-        bookingId: data.data.appointment_id.toString(),
-        apiLog: updatedApiLog
-      };
-    } else {
-      console.error('[ConfirmHold] Invalid response structure:', data);
-      return {
-        success: false,
-        error: 'Invalid response from NexHealth confirm API',
-        apiLog: updatedApiLog
-      };
-    }
-  } catch (error) {
-    console.error('[ConfirmHold] Error confirming booking:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return {
-      success: false,
-      error: errorMessage,
-      apiLog
-    };
-  }
-} 
+ 
