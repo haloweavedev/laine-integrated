@@ -1,66 +1,259 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { findAvailableSlots } from '@/lib/ai/slotHelper';
 
-export async function GET(req: NextRequest) {
+interface NexhealthSlot {
+  time: string;
+  end_time: string;
+  operatory_id: number;
+}
+
+interface NexhealthProvider {
+  lid: number;
+  pid: number;
+  slots: NexhealthSlot[];
+}
+
+interface NexhealthResponse {
+  code: boolean;
+  data: NexhealthProvider[];
+  error?: string;
+}
+
+interface ProcessedSlot {
+  time: string;
+  end_time: string;
+  operatory_id: number;
+  pid: number;
+  lid: number;
+}
+
+interface BucketedDay {
+  date: string;
+  morning: ProcessedSlot[];
+  afternoon: ProcessedSlot[];
+  evening: ProcessedSlot[];
+}
+
+export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const practiceId = searchParams.get('practiceId');
-    const nexhealthAppointmentTypeId = searchParams.get('nexhealthAppointmentTypeId');
-    const startDate = searchParams.get('startDate');
-    const searchDays = searchParams.get('searchDays');
+    const body = await request.json();
+    const { practiceId, nexhealthAppointmentTypeId, mode } = body;
 
-    // --- Validation ---
-    if (!practiceId || !nexhealthAppointmentTypeId || !startDate) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
-    }
-    const searchDaysNum = searchDays ? parseInt(searchDays, 10) : 90;
-
-    if (isNaN(searchDaysNum) || searchDaysNum < 1) {
+    if (!practiceId || !nexhealthAppointmentTypeId || !mode) {
       return NextResponse.json(
-        { error: 'Search days must be a positive number' },
+        { error: 'practiceId, nexhealthAppointmentTypeId, and mode are required' },
         { status: 400 }
       );
     }
 
-    // --- Fetch Practice Details ---
-    const practice = await prisma.practice.findUnique({
-      where: { id: practiceId },
-      select: { id: true, nexhealthSubdomain: true, nexhealthLocationId: true, timezone: true }
-    });
-
-    if (!practice || !practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
-      return NextResponse.json({ error: 'Practice not found or not configured' }, { status: 404 });
+    if (!['first', 'fullday'].includes(mode)) {
+      return NextResponse.json(
+        { error: 'mode must be either "first" or "fullday"' },
+        { status: 400 }
+      );
     }
 
-    console.log(`[Laine Web Availability] Delegating to findAvailableSlots: practice=${practiceId}, appointmentType=${nexhealthAppointmentTypeId}, searchDays=${searchDaysNum}`);
+    console.log(`[Availability API] Fetching availability for appointment type ${nexhealthAppointmentTypeId} in ${mode} mode`);
 
-    // --- Delegate to the Single Source of Truth ---
-    // This function will internally call getSlotSearchParams to get the correct
-    // providers, operatories, and duration for this specific appointment type
-    const result = await findAvailableSlots(
-      nexhealthAppointmentTypeId,
-      {
-        id: practice.id,
-        nexhealthSubdomain: practice.nexhealthSubdomain,
-        nexhealthLocationId: practice.nexhealthLocationId,
-        timezone: practice.timezone || 'America/Chicago'
+    // Step 1: Find the appointment type and get provider/operatory configuration
+    // This mirrors the logic from scripts/check-appointment-dependencies.js
+    const appointmentType = await prisma.appointmentType.findFirst({
+      where: { 
+        nexhealthAppointmentTypeId: nexhealthAppointmentTypeId 
       },
-      startDate,
-      searchDaysNum
-    );
+      include: {
+        practice: true,
+        acceptedByProviders: {
+          include: {
+            savedProvider: {
+              include: {
+                provider: true,
+                assignedOperatories: {
+                  include: {
+                    savedOperatory: true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
 
-    console.log(`[Laine Web Availability] Found ${result.foundSlots.length} slots, next available: ${result.nextAvailableDate}`);
+    if (!appointmentType) {
+      return NextResponse.json(
+        { error: 'Appointment type not found' },
+        { status: 404 }
+      );
+    }
+
+    // Step 2: Collect active providers and operatories
+    const activeProviders = appointmentType.acceptedByProviders.filter(ap => ap.savedProvider.isActive);
+    
+    if (activeProviders.length === 0) {
+      return NextResponse.json(
+        { error: 'No active providers available for this appointment type' },
+        { status: 400 }
+      );
+    }
+
+    // Collect unique provider IDs (pids)
+    const pids = Array.from(new Set(
+      activeProviders.map(ap => ap.savedProvider.provider.nexhealthProviderId)
+    )).filter(pid => pid); // Remove any null/undefined values
+
+
+
+    if (pids.length === 0) {
+      return NextResponse.json(
+        { error: 'No active providers are configured for this appointment type' },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[Availability API] Found ${pids.length} providers`);
+
+    // Step 3: Get practice NexHealth configuration
+    const practice = appointmentType.practice;
+    if (!practice.nexhealthSubdomain || !practice.nexhealthLocationId) {
+      return NextResponse.json(
+        { error: 'Practice NexHealth configuration is incomplete' },
+        { status: 400 }
+      );
+    }
+
+    // Step 4: Build NexHealth API request
+    const baseUrl = 'https://nexhealth.info/appointment_slots';
+    const params = new URLSearchParams();
+    
+    params.append('subdomain', practice.nexhealthSubdomain);
+    params.append('lids[]', practice.nexhealthLocationId);
+    params.append('slot_length', appointmentType.duration.toString());
+    params.append('overlapping_operatory_slots', 'false');
+    
+    // Add provider IDs
+    pids.forEach(pid => params.append('pids[]', pid));
+
+    // Set date range based on mode
+    const today = new Date().toISOString().split('T')[0];
+    if (mode === 'first') {
+      params.append('limit', '1');
+      params.append('start_date', today);
+      params.append('days', '7'); // Search next 7 days for first slot
+    } else {
+      params.append('start_date', today);
+      params.append('days', '7');
+    }
+
+    const nexhealthUrl = `${baseUrl}?${params.toString()}`;
+    console.log(`[Availability API] Calling NexHealth: ${nexhealthUrl}`);
+
+    // Step 5: Call NexHealth API
+    const nexhealthResponse = await fetch(nexhealthUrl, {
+      headers: {
+        'Authorization': process.env.NEXHEALTH_API_TOKEN || '',
+        'accept': 'application/vnd.Nexhealth+json;version=2'
+      }
+    });
+
+    if (!nexhealthResponse.ok) {
+      console.error(`[Availability API] NexHealth API error: ${nexhealthResponse.status}`);
+      return NextResponse.json(
+        { error: 'Failed to fetch availability from NexHealth' },
+        { status: 500 }
+      );
+    }
+
+    const nexhealthData: NexhealthResponse = await nexhealthResponse.json();
+
+    if (!nexhealthData.code || !nexhealthData.data) {
+      console.error('[Availability API] Invalid NexHealth response:', nexhealthData);
+      return NextResponse.json(
+        { error: nexhealthData.error || 'Invalid response from NexHealth' },
+        { status: 500 }
+      );
+    }
+
+    // Step 6: Process the response based on mode
+    const allSlots: ProcessedSlot[] = nexhealthData.data
+      .flatMap(provider => 
+        provider.slots.map(slot => ({
+          time: slot.time,
+          end_time: slot.end_time,
+          operatory_id: slot.operatory_id,
+          pid: provider.pid,
+          lid: provider.lid
+        }))
+      )
+      .filter(slot => {
+        // Exclude slots that start during the 13:00 hour (1 PM - 1:59 PM)
+        const slotHour = new Date(slot.time).getHours();
+        return slotHour !== 13;
+      });
+
+    console.log(`[Availability API] Found ${allSlots.length} total slots`);
+
+    if (mode === 'first') {
+      // Return just the first slot
+      const firstSlot = allSlots[0] || null;
+      return NextResponse.json({
+        success: true,
+        mode: 'first',
+        firstSlot,
+        appointmentType: {
+          name: appointmentType.name,
+          duration: appointmentType.duration
+        }
+      });
+    }
+
+    // For fullday mode, bucket slots into morning/afternoon/evening for each day
+    const bucketedDays: Record<string, BucketedDay> = {};
+
+    allSlots.forEach(slot => {
+      const slotDate = new Date(slot.time);
+      const dateKey = slotDate.toISOString().split('T')[0];
+      const hour = slotDate.getHours();
+
+      if (!bucketedDays[dateKey]) {
+        bucketedDays[dateKey] = {
+          date: dateKey,
+          morning: [],
+          afternoon: [],
+          evening: []
+        };
+      }
+
+      if (hour < 12) {
+        bucketedDays[dateKey].morning.push(slot);
+      } else if (hour < 17) {
+        bucketedDays[dateKey].afternoon.push(slot);
+      } else {
+        bucketedDays[dateKey].evening.push(slot);
+      }
+    });
+
+    // Convert to array and sort by date
+    const sortedDays = Object.values(bucketedDays).sort((a, b) => 
+      a.date.localeCompare(b.date)
+    );
 
     return NextResponse.json({
       success: true,
-      foundSlots: result.foundSlots,
-      nextAvailableDate: result.nextAvailableDate
+      mode: 'fullday',
+      days: sortedDays,
+      appointmentType: {
+        name: appointmentType.name,
+        duration: appointmentType.duration
+      },
+      totalSlots: allSlots.length
     });
 
   } catch (error) {
-    console.error('[Laine Web Availability API] Error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch availability';
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    console.error('[Availability API] Error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error while fetching availability' },
+      { status: 500 }
+    );
   }
-} 
+}

@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/prisma';
-import { SchedulingProvider } from '../components/SchedulingContext';
-import { LaineWebStepper } from '../components/LaineWebStepper';
+import { LaineWebFlow } from '../components/LaineWebFlow';
 
 interface PageProps {
   params: Promise<{ practiceSlug: string }>;
@@ -55,9 +54,7 @@ export default async function LaineWebPage({ params }: PageProps) {
             )}
           </div>
           
-          <SchedulingProvider practice={practiceData}>
-            <LaineWebStepper />
-          </SchedulingProvider>
+          <LaineWebFlow practice={practiceData} />
         </div>
       </div>
     </div>

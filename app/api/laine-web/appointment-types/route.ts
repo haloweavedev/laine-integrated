@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
-export async function GET(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const practiceId = searchParams.get('practiceId');
-    const patientStatus = searchParams.get('patientStatus');
+    const body = await request.json();
+    const { practiceId } = body;
 
-    // Validate required parameters
     if (!practiceId) {
       return NextResponse.json(
         { error: 'Practice ID is required' },
@@ -15,20 +13,27 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    if (!patientStatus || !['NEW', 'RETURNING'].includes(patientStatus)) {
-      return NextResponse.json(
-        { error: 'Valid patient status (NEW or RETURNING) is required' },
-        { status: 400 }
-      );
-    }
-
-    // Query appointment types filtered by practice, bookable online, and patient status
+    // Fetch appointment types from the database
+    // Filter by practiceId and where webPatientStatus is not null (meaning they're available for web booking)
     const appointmentTypes = await prisma.appointmentType.findMany({
       where: {
         practiceId: practiceId,
-        bookableOnline: true,
-        webPatientStatus: {
-          in: [patientStatus as 'NEW' | 'RETURNING', 'BOTH'] // Include appointment types for specific status or BOTH
+        // webPatientStatus has a default value, so we don't need to filter for null
+        // Only include appointment types that have active providers accepting them
+        acceptedByProviders: {
+          some: {
+            savedProvider: {
+              isActive: true,
+              // And those providers have active operatories
+              assignedOperatories: {
+                some: {
+                  savedOperatory: {
+                    isActive: true
+                  }
+                }
+              }
+            }
+          }
         }
       },
       select: {
@@ -36,14 +41,13 @@ export async function GET(req: NextRequest) {
         nexhealthAppointmentTypeId: true,
         name: true,
         duration: true,
-        spokenName: true
+        spokenName: true,
+        webPatientStatus: true
       },
       orderBy: {
         name: 'asc'
       }
     });
-
-    console.log(`[Laine Web API] Found ${appointmentTypes.length} appointment types for practice ${practiceId} and patient status ${patientStatus}`);
 
     return NextResponse.json({
       success: true,
@@ -51,10 +55,10 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error('[Laine Web API] Error fetching appointment types:', error);
+    console.error('Error fetching appointment types:', error);
     return NextResponse.json(
       { error: 'Failed to fetch appointment types' },
       { status: 500 }
     );
   }
-} 
+}
