@@ -2,20 +2,23 @@
 
 import Vapi from "@vapi-ai/web"; // Import Vapi
 import { useEffect, useState, useRef } from "react";
-import type { LatestCallLogData } from "./actions";
+import type { LatestCallLogData, PracticeTestData, NexHealthTestResult } from "./actions";
+import { testNexHealthConnection } from "./actions";
 
 interface TestClientProps {
-  vapiAssistantId: string;
+  practiceData: PracticeTestData;
   initialPhoneNumber: string | null;
   initialLatestCallLog: LatestCallLogData | null;
 }
 
-export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestCallLog }: TestClientProps) {
+export function TestClient({ practiceData, initialPhoneNumber, initialLatestCallLog }: TestClientProps) {
   const [isCalling, setIsCalling] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState<Array<{speaker: string, text: string}>>([]);
   const [callStatus, setCallStatus] = useState("Idle");
   const [phoneNumber] = useState(initialPhoneNumber);
   const [latestCallLog] = useState(initialLatestCallLog);
+  const [nexhealthTestResult, setNexhealthTestResult] = useState<NexHealthTestResult | null>(null);
+  const [nexhealthTestLoading, setNexhealthTestLoading] = useState(false);
   
   const vapiRef = useRef<Vapi | null>(null); // Initialize vapiRef
 
@@ -74,9 +77,27 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
   }, []); // Empty dependency array ensures this runs once on mount
 
   const handleStartCall = () => {
-    if (vapiRef.current && vapiAssistantId) {
+    if (vapiRef.current && practiceData.vapiAssistantId) {
       setCallStatus("Starting call...");
-      vapiRef.current.start(vapiAssistantId);
+      vapiRef.current.start(practiceData.vapiAssistantId);
+    }
+  };
+
+  const handleTestNexHealth = async () => {
+    setNexhealthTestLoading(true);
+    setNexhealthTestResult(null);
+    
+    try {
+      const result = await testNexHealthConnection();
+      setNexhealthTestResult(result);
+    } catch (error) {
+      setNexhealthTestResult({
+        success: false,
+        message: "Test failed",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    } finally {
+      setNexhealthTestLoading(false);
     }
   };
 
@@ -137,7 +158,7 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
 
       <div className="bg-white p-6 rounded-lg shadow-md">
         <h2 className="text-xl font-semibold mb-4 text-slate-700">Test Your Laine Assistant</h2>
-        <p className="text-sm text-gray-600 mb-1">Assistant ID: <span className="font-mono text-blue-600">{vapiAssistantId}</span></p>
+        <p className="text-sm text-gray-600 mb-1">Assistant ID: <span className="font-mono text-blue-600">{practiceData.vapiAssistantId}</span></p>
         {phoneNumber && (
           <p className="text-sm text-gray-600 mb-4">
             Or, Call Laine at: <strong className="text-blue-600">{phoneNumber}</strong>
@@ -173,6 +194,51 @@ export function TestClient({ vapiAssistantId, initialPhoneNumber, initialLatestC
           ))}
         </div>
       </div>
+
+      {/* NexHealth API Test */}
+      {practiceData.nexhealthSubdomain && practiceData.nexhealthLocationId && (
+        <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xl font-semibold text-slate-700">NexHealth API Test</h3>
+            <button 
+              onClick={handleTestNexHealth}
+              disabled={nexhealthTestLoading}
+              className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {nexhealthTestLoading ? "Testing..." : "Test Connection"}
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Test your NexHealth API connection using the configured subdomain: 
+            <span className="font-mono text-blue-600 ml-1">{practiceData.nexhealthSubdomain}</span>
+          </p>
+          
+          {nexhealthTestResult && (
+            <div className={`p-4 rounded-md ${nexhealthTestResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+              <div className="flex items-center mb-2">
+                <span className={`text-lg mr-2 ${nexhealthTestResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                  {nexhealthTestResult.success ? '✅' : '❌'}
+                </span>
+                <span className={`font-medium ${nexhealthTestResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                  {nexhealthTestResult.message}
+                </span>
+              </div>
+              
+              {nexhealthTestResult.success && nexhealthTestResult.data && (
+                <div className="text-sm text-green-700 space-y-1">
+                  <p>• Appointment Types: {nexhealthTestResult.data.appointmentTypesCount}</p>
+                  <p>• Providers: {nexhealthTestResult.data.providersCount}</p>
+                  <p>• Operatories: {nexhealthTestResult.data.operatoriesCount}</p>
+                </div>
+              )}
+              
+              {nexhealthTestResult.error && (
+                <p className="text-sm text-red-700 mt-2">Error: {nexhealthTestResult.error}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Latest Call Info */}
       <div className="bg-white p-6 rounded-lg shadow-md">

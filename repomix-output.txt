@@ -1,0 +1,582 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: app/api/vapi, app/api/vapi-webhook
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+
+
+================================================================
+Directory Structure
+================================================================
+app/
+  api/
+    vapi/
+      webhook/
+        route.ts
+    vapi-webhook/
+      route.ts
+
+================================================================
+Files
+================================================================
+
+================
+File: app/api/vapi/webhook/route.ts
+================
+import { NextRequest, NextResponse } from "next/server";
+import { verifyVapiRequest } from "@/lib/vapi";
+import { prisma } from "@/lib/prisma";
+import type { VapiWebhookPayload, VapiStatusUpdateMessage, VapiEndOfCallReportMessage, VapiTranscriptMessage } from "@/types/vapi";
+
+export async function POST(request: NextRequest) {
+  console.log("=== VAPI General Webhook Handler ===");
+  
+  try {
+    // Verify the webhook (when VAPI supports request signing)
+    const verification = await verifyVapiRequest();
+    if (!verification.verified) {
+      console.error("VAPI webhook verification failed:", verification.error);
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Parse the JSON body and type it properly
+    const body: VapiWebhookPayload = await request.json();
+    
+    // Correctly extract the message type from body.message.type
+    const messageType = body.message?.type;
+
+    console.log("=== VAPI General Webhook Handler ===");
+    console.log("[VAPI] Request verification - not yet implemented"); 
+    console.log("VAPI webhook message type:", messageType);
+    console.log("VAPI webhook payload:", JSON.stringify(body, null, 2));
+
+    if (!messageType) {
+      console.error("[VAPI Webhook] Message type is missing or undefined in payload.");
+      return NextResponse.json({ error: "Malformed VAPI webhook payload: message.type missing." }, { status: 400 });
+    }
+
+    // Handle different webhook types based on message.type
+    switch (messageType) {
+      case "status-update":
+        await handleStatusUpdate(body.message as VapiStatusUpdateMessage);
+        break;
+      
+      case "end-of-call-report":
+        await handleEndOfCallReport(body.message as VapiEndOfCallReportMessage);
+        break;
+      
+      case "transcript":
+        await handleTranscript(body.message as VapiTranscriptMessage);
+        break;
+      
+      default:
+        console.log(`[VAPI Webhook] Received unhandled message type: ${messageType}`);
+    }
+
+    return NextResponse.json({ success: true, message: `Webhook type ${messageType} received.` }, { status: 200 });
+  } catch (error) {
+    console.error("[VAPI Webhook] Error processing webhook:", error);
+    return NextResponse.json({ error: "Failed to process webhook" }, { status: 500 });
+  }
+}
+
+async function handleStatusUpdate(message: VapiStatusUpdateMessage) {
+  console.log(`[VAPI Webhook] Received status-update. Status: ${message.call?.status}, Ended Reason: ${message.call?.endedReason}`);
+  
+  try {
+    if (!message.call) {
+      console.error("No call data in status update payload");
+      return;
+    }
+
+    // Find practice by assistant ID
+    const practice = await findPracticeByAssistantId(message.call.assistantId);
+    if (!practice) {
+      console.error("Practice not found for assistant:", message.call.assistantId);
+      return;
+    }
+
+    // Update or create call log
+    await prisma.callLog.upsert({
+      where: { vapiCallId: message.call.id },
+      create: {
+        vapiCallId: message.call.id,
+        practiceId: practice.id,
+        assistantId: message.call.assistantId,
+        callTimestampStart: message.call.startedAt ? new Date(message.call.startedAt) : null,
+        callStatus: message.call.status,
+      },
+      update: {
+        callStatus: message.call.status,
+        assistantId: message.call.assistantId,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log(`[VAPI Webhook] Updated call status for ${message.call.id}: ${message.call.status}`);
+    
+    // TODO: Enhanced status handling - if (message.call.status === 'ended' && message.call.endedReason) {
+    //   await prisma.callLog.updateMany({ 
+    //     where: { vapiCallId: message.call.id }, 
+    //     data: { 
+    //       callStatus: 'ENDED', 
+    //       endedReason: message.call.endedReason, 
+    //       updatedAt: new Date() 
+    //     }
+    //   });
+    // }
+  } catch (error) {
+    console.error("[VAPI Webhook] Error handling status update:", error);
+  }
+}
+
+async function handleEndOfCallReport(message: VapiEndOfCallReportMessage) {
+  console.log(`[VAPI Webhook] Received end-of-call-report. Call ID: ${message.call?.id}`);
+  
+  try {
+    if (!message.call) {
+      console.error("[VAPI Webhook] No call data in end-of-call-report payload");
+      return;
+    }
+
+    // Find practice by assistant ID
+    const practice = await findPracticeByAssistantId(message.call.assistantId);
+    if (!practice) {
+      console.error("[VAPI Webhook] Practice not found for assistant:", message.call.assistantId);
+      return;
+    }
+
+    // Update call log with final details
+    await prisma.callLog.upsert({
+      where: { vapiCallId: message.call.id },
+      create: {
+        vapiCallId: message.call.id,
+        practiceId: practice.id,
+        assistantId: message.call.assistantId,
+        callTimestampStart: message.call.startedAt ? new Date(message.call.startedAt) : null,
+        callStatus: "ENDED",
+        endedReason: message.call.endedReason,
+        callDurationSeconds: message.call.startedAt && message.call.endedAt 
+          ? Math.round((new Date(message.call.endedAt).getTime() - new Date(message.call.startedAt).getTime()) / 1000)
+          : null,
+        cost: message.call.cost ? parseFloat(message.call.cost) : null,
+        summary: message.summary,
+        vapiTranscriptUrl: message.transcript?.url,
+      },
+      update: {
+        callStatus: "ENDED",
+        endedReason: message.call.endedReason,
+        callDurationSeconds: message.call.startedAt && message.call.endedAt 
+          ? Math.round((new Date(message.call.endedAt).getTime() - new Date(message.call.startedAt).getTime()) / 1000)
+          : null,
+        cost: message.call.cost ? parseFloat(message.call.cost) : null,
+        summary: message.summary,
+        vapiTranscriptUrl: message.transcript?.url,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log(`[VAPI Webhook] Updated end of call report for ${message.call.id}`);
+    
+    // TODO: Additional end-of-call processing - if (message.call.id && message.summary) {
+    //   await prisma.callLog.updateMany({ 
+    //     where: { vapiCallId: message.call.id }, 
+    //     data: { 
+    //       summary: message.summary, 
+    //       cost: message.call.cost ? parseFloat(message.call.cost) : null,
+    //       callDurationSeconds: message.call.startedAt && message.call.endedAt 
+    //         ? Math.round((new Date(message.call.endedAt).getTime() - new Date(message.call.startedAt).getTime()) / 1000)
+    //         : null,
+    //       updatedAt: new Date() 
+    //     }
+    //   });
+    // }
+  } catch (error) {
+    console.error("[VAPI Webhook] Error handling end of call report:", error);
+  }
+}
+
+async function handleTranscript(message: VapiTranscriptMessage) {
+  console.log(`[VAPI Webhook] Received transcript update. Call ID: ${message.call?.id}`);
+  
+  try {
+    if (!message.call) {
+      console.error("[VAPI Webhook] No call data in transcript payload");
+      return;
+    }
+
+    // Find practice by assistant ID
+    const practice = await findPracticeByAssistantId(message.call.assistantId);
+    if (!practice) {
+      console.error("[VAPI Webhook] Practice not found for assistant:", message.call.assistantId);
+      return;
+    }
+
+    // Update call log with transcript
+    await prisma.callLog.upsert({
+      where: { vapiCallId: message.call.id },
+      create: {
+        vapiCallId: message.call.id,
+        practiceId: practice.id,
+        assistantId: message.call.assistantId,
+        callTimestampStart: message.call.startedAt ? new Date(message.call.startedAt) : null,
+        callStatus: message.call.status || "IN_PROGRESS",
+        transcriptText: message.transcript?.text,
+      },
+      update: {
+        transcriptText: message.transcript?.text,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log(`[VAPI Webhook] Updated transcript for ${message.call.id}`);
+    
+    // TODO: Enhanced transcript handling - if (message.call.id && message.transcript?.text) {
+    //   await prisma.callLog.updateMany({ 
+    //     where: { vapiCallId: message.call.id }, 
+    //     data: { 
+    //       transcriptText: message.transcript.text, 
+    //       updatedAt: new Date() 
+    //     }
+    //   });
+    // }
+  } catch (error) {
+    console.error("[VAPI Webhook] Error handling transcript:", error);
+  }
+}
+
+async function findPracticeByAssistantId(assistantId: string) {
+  if (!assistantId) {
+    console.error("No assistant ID provided");
+    return null;
+  }
+
+  try {
+    const assistantConfig = await prisma.practiceAssistantConfig.findUnique({
+      where: { vapiAssistantId: assistantId },
+      include: { practice: true }
+    });
+
+    if (!assistantConfig) {
+      console.error(`No practice found for assistant ID: ${assistantId}`);
+      return null;
+    }
+
+    return assistantConfig.practice;
+  } catch (error) {
+    console.error("Error finding practice by assistant ID:", error);
+    return null;
+  }
+}
+
+================
+File: app/api/vapi-webhook/route.ts
+================
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+import { handleFindAppointmentType } from '@/lib/tool-handlers/findAppointmentTypeHandler';
+import { handleCheckAvailableSlots } from '@/lib/tool-handlers/checkAvailableSlotsHandler';
+import { handleSelectAndBookSlot } from '@/lib/tool-handlers/selectAndBookSlotHandler';
+import { handleInsuranceInfo } from '@/lib/tool-handlers/insuranceInfoHandler';
+import { handleIdentifyPatient } from '@/lib/tool-handlers/identifyPatientHandler';
+import { Liquid } from 'liquidjs';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import type { 
+  ServerMessageToolCallsPayload, 
+  HandlerResult,
+  ServerMessageToolCallItem
+} from '@/types/vapi';
+import type { ConversationState } from '@/types/laine';
+import { Prisma } from '@prisma/client';
+
+export async function POST(request: Request) {
+  const startTime = Date.now();
+  let handlerResult: HandlerResult | undefined;
+  let toolCall: ServerMessageToolCallItem | undefined;
+
+  try {
+    const body: ServerMessageToolCallsPayload = await request.json();
+    const message = body.message;
+
+    if (message?.type !== 'tool-calls') {
+      return NextResponse.json({ message: "Ignoring non-tool-call message" });
+    }
+
+    // Extract the first tool call and call ID
+    toolCall = message.toolCallList?.[0] || message.toolCalls?.[0];
+    const callId = message.call.id;
+
+    if (!toolCall || !callId) {
+      console.error("[VAPI Webhook] Malformed payload, missing toolCall or callId:", message);
+      return NextResponse.json({ 
+        results: [{ toolCallId: "unknown", error: "Malformed tool call payload from VAPI." }] 
+      }, { status: 200 });
+    }
+
+    // Get practice ID for database operations
+    const firstPractice = await prisma.practice.findFirst();
+    const practiceId = firstPractice?.id ?? "unknown";
+
+    // Ensure callLog exists
+    await prisma.callLog.upsert({
+      where: { vapiCallId: callId },
+      update: { updatedAt: new Date() },
+      create: {
+        vapiCallId: callId,
+        practiceId: practiceId,
+        callStatus: "TOOL_INTERACTION_STARTED",
+        callTimestampStart: new Date(),
+      },
+    });
+
+    // State management: retrieve or initialize conversation state
+    let state: ConversationState;
+    const callLog = await prisma.callLog.findUniqueOrThrow({ where: { vapiCallId: callId } });
+
+    if (callLog.conversationState && typeof callLog.conversationState === 'object' && callLog.conversationState !== null) {
+      state = callLog.conversationState as unknown as ConversationState;
+      console.log(`[StatefulWebhook] Retrieved state for call: ${callId}`);
+    } else {
+      // Initialize state with new canonical structure
+      state = {
+        callId: callId,
+        practiceId: practiceId,
+        patient: {
+          status: 'UNKNOWN',
+          isNameConfirmed: false
+        },
+        insurance: {
+          status: 'NOT_CHECKED'
+        },
+        booking: {
+          isUrgent: false,
+          presentedSlots: []
+        }
+      };
+      console.log(`[StatefulWebhook] Initialized new canonical state for call: ${callId}`);
+    }
+
+    // Get tool name and arguments
+    const toolName = toolCall.function.name;
+    let toolArguments = toolCall.function.arguments;
+
+    if (typeof toolArguments === 'string') {
+      try {
+        toolArguments = JSON.parse(toolArguments);
+      } catch (e) {
+        console.error(`[VAPI Webhook] Failed to parse tool arguments string:`, e);
+        return NextResponse.json({ 
+          results: [{ toolCallId: toolCall.id, error: `Failed to parse arguments for tool ${toolName}.` }] 
+        }, { status: 200 });
+      }
+    }
+
+    console.log(`[VAPI Webhook] Processing tool: ${toolName} (ID: ${toolCall.id}) for Call: ${callId}`);
+    console.log(`[VAPI Webhook] Arguments:`, toolArguments);
+
+    // Create initial tool log entry
+    try {
+      await prisma.toolLog.create({
+        data: {
+          practiceId: practiceId,
+          vapiCallId: callId,
+          toolName: toolName,
+          toolCallId: toolCall.id,
+          arguments: JSON.stringify(toolArguments),
+          stateBefore: JSON.stringify(state),
+          success: false, // Default to false, will be updated on success
+          createdAt: new Date(startTime),
+          updatedAt: new Date(startTime),
+        }
+      });
+      console.log(`[DB Log] Created initial ToolLog for ID: ${toolCall.id}`);
+    } catch (logError) {
+      console.error('[DB Log] Failed to create initial tool log:', logError);
+    }
+
+    console.log('[VAPI Webhook] State before processing:', JSON.stringify(state, null, 2));
+
+    // Tool routing switch statement  
+    switch (toolName) {
+      case "findAppointmentType": {
+        handlerResult = await handleFindAppointmentType(
+          state,
+          toolArguments as { patientRequest: string; patientStatus?: string },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "checkAvailableSlots": {
+        handlerResult = await handleCheckAvailableSlots(
+          state,
+          toolArguments as { preferredDaysOfWeek?: string; timeBucket?: string; requestedDate?: string },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "identifyPatient": {
+        handlerResult = await handleIdentifyPatient(
+          state,
+          toolArguments as {
+            firstName: string;
+            lastName: string;
+            dateOfBirth: string;
+            phoneNumber: string;
+            email: string;
+          },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "selectAndBookSlot": {
+        handlerResult = await handleSelectAndBookSlot(
+          state,
+          toolArguments as { userSelection: string; finalConfirmation?: boolean },
+          toolCall.id
+        );
+        break;
+      }
+
+      case "insuranceInfo": {
+        handlerResult = await handleInsuranceInfo(
+          state,
+          toolArguments as { insuranceName?: string },
+          toolCall.id
+        );
+        break;
+      }
+
+      default: {
+        console.error(`[VAPI Webhook] Unknown tool: ${toolName}`);
+        handlerResult = {
+          toolResponse: {
+            toolCallId: toolCall.id,
+            error: `I'm sorry, I don't know how to handle the "${toolName}" tool. Please try again.`
+          },
+          newState: state
+        };
+        break;
+      }
+    }
+
+    if (!handlerResult) {
+      // This case should ideally not be reached if all tools are handled.
+      console.error(`[VAPI Webhook] No handler result for tool: ${toolName}`);
+      return NextResponse.json({ 
+        results: [{ toolCallId: toolCall.id, error: "Internal error: tool handler did not produce a result." }] 
+      }, { status: 200 });
+    }
+
+    // Tool chaining is no longer needed with the new consolidated selectAndConfirmSlot tool
+
+    console.log('[VAPI Webhook] Final handler result after processing:', JSON.stringify(handlerResult, null, 2));
+    
+    // Use the exact newState object from the handler's result for all subsequent operations.
+    const newState = handlerResult.newState;
+
+    // Atomically save the new, complete state to the database.
+    await prisma.callLog.update({
+      where: { vapiCallId: callId },
+      data: { conversationState: newState as unknown as Prisma.InputJsonValue }
+    });
+    console.log(`[StatefulWebhook] Persisted state for call: ${callId}`);
+
+    // Render the system prompt using the guaranteed fresh state.
+    try {
+      const liquid = new Liquid();
+      const promptPath = join(process.cwd(), 'lib/system-prompt/laine_system_prompt.md');
+      const promptTemplate = readFileSync(promptPath, 'utf-8');
+      
+      const renderedSystemPrompt = await liquid.parseAndRender(promptTemplate, newState);
+      
+      console.log(`[State Injection] Successfully rendered system prompt with fresh state`);
+
+      // Construct and return the final response for VAPI
+      return NextResponse.json({ 
+        results: [handlerResult.toolResponse],
+        systemPrompt: renderedSystemPrompt
+      });
+    } catch (promptError) {
+      console.error('[State Injection] Error rendering system prompt:', promptError);
+      
+      // Fallback to original response without state injection
+      return NextResponse.json({ results: [handlerResult.toolResponse] });
+    }
+
+  } catch (error) {
+    console.error('Error in VAPI webhook:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  } finally {
+    if (toolCall?.id && startTime && handlerResult) {
+      const executionTimeMs = Date.now() - startTime;
+      const isSuccess = !!handlerResult.toolResponse?.message && handlerResult.toolResponse.message.type !== 'request-failed';
+
+      try {
+        await prisma.toolLog.updateMany({
+          where: { toolCallId: toolCall.id },
+          data: {
+            result: handlerResult?.toolResponse?.result ? JSON.stringify(handlerResult.toolResponse.result, null, 2) : undefined,
+            error: !isSuccess ? JSON.stringify(handlerResult?.toolResponse, null, 2) : undefined,
+            success: isSuccess,
+            executionTimeMs: executionTimeMs,
+            apiResponses: handlerResult?.toolResponse?.result && typeof handlerResult.toolResponse.result === 'object' && 'apiLog' in handlerResult.toolResponse.result ? JSON.stringify(handlerResult.toolResponse.result.apiLog, null, 2) : undefined,
+            updatedAt: new Date(),
+          }
+        });
+        console.log(`[DB Log] Finalized ToolLog for ID: ${toolCall.id} with success: ${isSuccess}`);
+      } catch (logError) {
+        console.error('[DB Log] Failed to finalize tool log:', logError);
+      }
+    }
+  }
+}
+
+
+
+
+================================================================
+End of Codebase
+================================================================

@@ -14,6 +14,26 @@ export interface LatestCallLogData {
   createdAt: Date;
 }
 
+export interface PracticeTestData {
+  practiceId: string;
+  practiceName: string;
+  vapiAssistantId: string;
+  nexhealthSubdomain: string | null;
+  nexhealthLocationId: string | null;
+  timezone: string;
+}
+
+export interface NexHealthTestResult {
+  success: boolean;
+  message: string;
+  data?: {
+    appointmentTypesCount?: number;
+    providersCount?: number;
+    operatoriesCount?: number;
+  };
+  error?: string;
+}
+
 export async function getAssistantPhoneNumber(assistantId: string): Promise<string | null> {
   if (!process.env.VAPI_API_KEY) {
     console.error("VAPI_API_KEY (private key) not set for fetching phone number.");
@@ -163,7 +183,21 @@ export async function getPracticeAndAssistantId() {
 
   const practiceWithConfig = await prisma.practice.findUnique({
     where: { clerkUserId: userId },
-    include: { assistantConfig: true }
+    include: { 
+      assistantConfig: true
+    },
+    select: {
+      id: true,
+      name: true,
+      nexhealthSubdomain: true,
+      nexhealthLocationId: true,
+      timezone: true,
+      assistantConfig: {
+        select: {
+          vapiAssistantId: true
+        }
+      }
+    }
   });
 
   if (!practiceWithConfig) {
@@ -178,6 +212,59 @@ export async function getPracticeAndAssistantId() {
   
   return {
     practiceId: practiceWithConfig.id,
+    practiceName: practiceWithConfig.name || 'Unnamed Practice',
     vapiAssistantId: practiceWithConfig.assistantConfig.vapiAssistantId,
+    nexhealthSubdomain: practiceWithConfig.nexhealthSubdomain,
+    nexhealthLocationId: practiceWithConfig.nexhealthLocationId,
+    timezone: practiceWithConfig.timezone || 'America/Chicago',
   };
+}
+
+export async function testNexHealthConnection(): Promise<NexHealthTestResult> {
+  const { userId } = await auth();
+  if (!userId) {
+    return { success: false, message: "Unauthorized", error: "User not authenticated" };
+  }
+
+  try {
+    const practiceData = await getPracticeAndAssistantId();
+    
+    if (!practiceData.nexhealthSubdomain || !practiceData.nexhealthLocationId) {
+      return { 
+        success: false, 
+        message: "NexHealth configuration missing", 
+        error: "Practice does not have NexHealth subdomain or location ID configured" 
+      };
+    }
+
+    // Import NexHealth functions dynamically to test the connection
+    const { getAppointmentTypes, getProviders, getOperatories } = await import("@/lib/nexhealth");
+
+    console.log(`[testNexHealthConnection] Testing with subdomain: ${practiceData.nexhealthSubdomain}, locationId: ${practiceData.nexhealthLocationId}`);
+
+    // Test all three main NexHealth APIs
+    const [appointmentTypes, providers, operatories] = await Promise.all([
+      getAppointmentTypes(practiceData.nexhealthSubdomain, practiceData.nexhealthLocationId),
+      getProviders(practiceData.nexhealthSubdomain, practiceData.nexhealthLocationId),
+      getOperatories(practiceData.nexhealthSubdomain, practiceData.nexhealthLocationId)
+    ]);
+
+    return {
+      success: true,
+      message: "NexHealth connection successful",
+      data: {
+        appointmentTypesCount: appointmentTypes.length,
+        providersCount: providers.length,
+        operatoriesCount: operatories.length
+      }
+    };
+
+  } catch (error) {
+    console.error("[testNexHealthConnection] Error:", error);
+    return {
+      success: false,
+      message: "NexHealth connection failed",
+      error: error instanceof Error ? error.message : "Unknown error"
+    };
+  }
 } 

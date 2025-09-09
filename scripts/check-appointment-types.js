@@ -2,50 +2,80 @@
 
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
 
 const prisma = new PrismaClient();
 
 async function checkAppointmentTypes() {
-  console.log('📋 Checking appointment types for Royal Oak Family Dental...');
+  console.log('📋 Generating appointment types markdown file...');
   
   try {
+    // Find the practice (more flexible search)
     const practice = await prisma.practice.findFirst({
-      where: { name: { contains: 'Royal Oak' } },
-      include: { appointmentTypes: true }
+      where: { 
+        OR: [
+          { name: { contains: 'Royal Oak', mode: 'insensitive' } },
+          { nexhealthSubdomain: { not: null } }
+        ]
+      },
+      include: { 
+        appointmentTypes: {
+          orderBy: { nexhealthAppointmentTypeId: 'asc' }
+        }
+      }
     });
     
-    if (practice) {
-      console.log('\n✅ Found practice:', practice.name);
-      console.log('Appointment types:');
-      practice.appointmentTypes.forEach((type, index) => {
-        console.log(`  ${index + 1}. ID: ${type.nexhealthAppointmentTypeId} | Name: ${type.name} | Duration: ${type.durationMinutes}min`);
-      });
-      
-      console.log('\n🔍 Analysis:');
-      console.log('- The tool call used appointment type ID: 997003');
-      console.log('- The curl test used appointment type ID: 1001465');
-      
-      const usedType = practice.appointmentTypes.find(t => t.nexhealthAppointmentTypeId === '997003');
-      const testType = practice.appointmentTypes.find(t => t.nexhealthAppointmentTypeId === '1001465');
-      
-      if (usedType) {
-        console.log(`✅ 997003 found: ${usedType.name} (${usedType.durationMinutes}min)`);
-      } else {
-        console.log('❌ 997003 not found in configured appointment types!');
-      }
-      
-      if (testType) {
-        console.log(`✅ 1001465 found: ${testType.name} (${testType.durationMinutes}min)`);
-      } else {
-        console.log('❌ 1001465 not found in configured appointment types!');
-      }
-      
-    } else {
+    if (!practice) {
       console.log('❌ No practice found');
+      return;
     }
+
+    if (practice.appointmentTypes.length === 0) {
+      console.log('⚠️  No appointment types found. Run NexHealth sync first.');
+      return;
+    }
+
+    // Build markdown content
+    let markdownContent = `# Appointment Types\n\n`;
+    markdownContent += `**Practice:** ${practice.name || 'Unnamed'}\n`;
+    markdownContent += `**Total Types:** ${practice.appointmentTypes.length}\n`;
+    markdownContent += `**Generated:** ${new Date().toLocaleDateString()}\n\n`;
+    
+    // Create markdown table
+    markdownContent += `| Name | Spoken Name | Duration | Keywords |\n`;
+    markdownContent += `|------|-------------|----------|----------|\n`;
+    
+    practice.appointmentTypes.forEach(type => {
+      const name = type.name || '';
+      const spokenName = type.spokenName || '';
+      const duration = type.duration ? `${type.duration} min` : '';
+      const keywords = type.keywords || '';
+      
+      // Escape markdown special characters and handle line breaks
+      const escapeMarkdown = (text) => {
+        return text.toString()
+          .replace(/\|/g, '\\|')
+          .replace(/\n/g, ' ')
+          .replace(/\r/g, ' ')
+          .trim();
+      };
+      
+      markdownContent += `| ${escapeMarkdown(name)} | ${escapeMarkdown(spokenName)} | ${escapeMarkdown(duration)} | ${escapeMarkdown(keywords)} |\n`;
+    });
+
+    // Write to file
+    const outputPath = path.join(__dirname, '../appointment-types.md');
+    fs.writeFileSync(outputPath, markdownContent, 'utf8');
+    
+    console.log(`✅ Markdown file generated: ${outputPath}`);
+    console.log(`📊 Exported ${practice.appointmentTypes.length} appointment types`);
     
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error('❌ Error:', error.message);
+    if (error.message.includes('connect')) {
+      console.log('💡 Tip: Make sure your database is running and .env is configured correctly');
+    }
   } finally {
     await prisma.$disconnect();
   }
