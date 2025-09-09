@@ -41,9 +41,52 @@ export async function POST(request: Request) {
       }, { status: 200 });
     }
 
-    // Get practice ID for database operations
-    const firstPractice = await prisma.practice.findFirst();
-    const practiceId = firstPractice?.id ?? "unknown";
+    // Get practice ID by looking up which practice this assistant belongs to
+    // For tool-calls, assistantId might not be in the payload, so we try multiple approaches
+    let practice = null;
+    let practiceId = "unknown";
+    
+    // Method 1: Try to get assistant ID from the message (might be available despite type definition)
+    const assistantId = (message.call as { id: string; orgId?: string; assistantId?: string }).assistantId;
+    if (assistantId) {
+      console.log(`[VAPI Webhook] Found assistant ID in call payload: ${assistantId}`);
+      practice = await findPracticeByAssistantId(assistantId);
+      if (practice) {
+        practiceId = practice.id;
+        console.log(`[VAPI Webhook] Using practice: ${practice.name} (ID: ${practiceId}) for assistant: ${assistantId}`);
+      }
+    }
+    
+    // Method 2: If no assistant ID, try to find practice from existing call log
+    if (!practice) {
+      console.log(`[VAPI Webhook] No assistant ID found, checking existing call logs for call: ${callId}`);
+      const existingCallLog = await prisma.callLog.findUnique({ 
+        where: { vapiCallId: callId },
+        include: { practice: true }
+      });
+      
+      if (existingCallLog?.practice) {
+        practice = existingCallLog.practice;
+        practiceId = practice.id;
+        console.log(`[VAPI Webhook] Found practice from existing call log: ${practice.name} (ID: ${practiceId})`);
+      } else {
+        // Method 3: Fallback to first practice (for backwards compatibility, but log warning)
+        console.warn(`[VAPI Webhook] Could not determine practice for call ${callId}, falling back to first practice`);
+        const firstPractice = await prisma.practice.findFirst();
+        if (firstPractice) {
+          practice = firstPractice;
+          practiceId = firstPractice.id;
+          console.warn(`[VAPI Webhook] Using fallback practice: ${firstPractice.name} (ID: ${practiceId})`);
+        }
+      }
+    }
+    
+    if (!practice) {
+      console.error(`[VAPI Webhook] Could not determine practice for call: ${callId}`);
+      return NextResponse.json({ 
+        results: [{ toolCallId: toolCall.id, error: "Could not determine practice configuration for this call." }] 
+      }, { status: 200 });
+    }
 
     // Ensure callLog exists
     await prisma.callLog.upsert({
@@ -259,5 +302,32 @@ export async function POST(request: Request) {
         console.error('[DB Log] Failed to finalize tool log:', logError);
       }
     }
+  }
+}
+
+/**
+ * Helper function to find practice by VAPI assistant ID
+ */
+async function findPracticeByAssistantId(assistantId: string) {
+  if (!assistantId) {
+    console.error("No assistant ID provided");
+    return null;
+  }
+
+  try {
+    const assistantConfig = await prisma.practiceAssistantConfig.findUnique({
+      where: { vapiAssistantId: assistantId },
+      include: { practice: true }
+    });
+
+    if (!assistantConfig) {
+      console.error(`No practice found for assistant ID: ${assistantId}`);
+      return null;
+    }
+
+    return assistantConfig.practice;
+  } catch (error) {
+    console.error("Error finding practice by assistant ID:", error);
+    return null;
   }
 } 
