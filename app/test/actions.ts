@@ -185,18 +185,6 @@ export async function getPracticeAndAssistantId() {
     where: { clerkUserId: userId },
     include: { 
       assistantConfig: true
-    },
-    select: {
-      id: true,
-      name: true,
-      nexhealthSubdomain: true,
-      nexhealthLocationId: true,
-      timezone: true,
-      assistantConfig: {
-        select: {
-          vapiAssistantId: true
-        }
-      }
     }
   });
 
