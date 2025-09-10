@@ -139,12 +139,14 @@ export function DemoClient({ vapiAssistantId }: DemoClientProps) {
           </div>
 
           {/* Main Content Area */}
-          <div className="h-[500px] flex flex-col">
+          <div className="min-h-[500px] max-h-[70vh] flex flex-col">
             {/* Conversation View */}
-            <ConversationView messages={messages} />
+            <div className="flex-1 overflow-hidden">
+              <ConversationView messages={messages} />
+            </div>
 
             {/* Footer Controls */}
-            <div className="border-t bg-white p-4">
+            <div className="border-t bg-white p-4 flex-shrink-0">
               <div className="flex items-center justify-center space-x-4">
                 <Button
                   onClick={start}
